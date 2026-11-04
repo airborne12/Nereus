@@ -3,3 +3,4 @@ __pycache__/
 /gen/
 .env
 node_modules/
+web/dist/

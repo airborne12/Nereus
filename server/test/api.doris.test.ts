@@ -81,3 +81,23 @@ test('bad queries answer 400 with a message', { skip: !enabled }, async () => {
   }
   assert.equal((await get('/api/trace/not-a-trace', { from, to })).status, 400);
 });
+
+test('fields list columns, aliases and attribute paths with types', { skip: !enabled }, async () => {
+  const { status, body } = await get('/api/fields', { source: 'logs' });
+  assert.equal(status, 200);
+  const byName = new Map(body.fields.map((f: any) => [f.name, f.type]));
+  assert.equal(byName.get('body'), 'text');
+  assert.ok(byName.has('level'), 'alias listed');
+  assert.equal(byName.get('k8s.pod.name'), 'text', 'resource attribute path without its column prefix');
+  assert.equal(byName.get('thread.id'), 'bigint');
+  assert.ok(!byName.has('resource_attributes'), 'VARIANT roots are not searchable fields');
+});
+
+test('top values of a field honour the query', { skip: !enabled }, async () => {
+  const { status, body } = await get('/api/values', { source: 'logs', field: 'k8s.pod.name', q: 'service:payment', from, to });
+  assert.equal(status, 200);
+  assert.ok(body.values.length > 0 && body.values.length <= 10);
+  for (const v of body.values) assert.match(v.v, /^payment-\d$/);
+  const counts = body.values.map((v: any) => Number(v.n));
+  assert.deepEqual(counts, [...counts].sort((a, b) => b - a));
+});

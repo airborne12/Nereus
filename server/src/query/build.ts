@@ -1,7 +1,7 @@
 // Full SELECT statements for the search page: result rows, the time histogram, one trace.
 // Every statement bounds the time column so Doris prunes daily partitions.
 
-import { CompileError, compileWhere, sqlString } from './compile.ts';
+import { CompileError, compileWhere, fieldExpr, sqlString } from './compile.ts';
 import type { Source } from './source.ts';
 
 export interface TimeRange {
@@ -105,4 +105,51 @@ export function traceSql(source: Source, traceId: string, range: TimeRange): str
   if (!TRACE_ID_RE.test(traceId)) throw new CompileError('trace id must be 32 lowercase hex characters');
   const { where } = timeBounds(source, range);
   return `SELECT * FROM ${source.table} WHERE ${where} AND trace_id = ${sqlString(traceId)} ORDER BY timestamp`;
+}
+
+export interface ValuesRequest extends TimeRange {
+  field: string;
+  query: string;
+  limit?: number;
+}
+
+/** Most frequent values of one field among the rows that match the query. */
+export function valuesSql(source: Source, req: ValuesRequest): string {
+  const limit = req.limit ?? 10;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new CompileError('limit must be between 1 and 100');
+  const { where } = timeBounds(source, req);
+  const expr = fieldExpr(source, req.field);
+  return `SELECT ${expr} AS v, count(*) AS n FROM ${source.table} WHERE ${where} AND ` +
+    `${compileWhere(source, req.query)} AND ${expr} IS NOT NULL GROUP BY v ORDER BY n DESC LIMIT ${limit}`;
+}
+
+export interface Field {
+  /** What to type in the search bar. */
+  name: string;
+  /** Doris type as DESC prints it, e.g. varchar(256), text, bigint. */
+  type: string;
+}
+
+/**
+ * Search bar fields from `DESC <table>` run with describe_extend_variant_column = true:
+ * plain columns, aliases, and VARIANT sub-paths. Sub-paths of attribute columns are listed
+ * without the column prefix, since the compiler looks unknown fields up in those columns.
+ */
+export function fieldsFromDescribe(source: Source, rows: { Field: string; Type: string }[]): Field[] {
+  const out = new Map<string, Field>();
+  for (const r of rows) {
+    const variant = source.columns.find((c) => c.type === 'variant' && r.Field.startsWith(`${c.name}.`));
+    if (variant) {
+      const path = r.Field.slice(variant.name.length + 1);
+      const name = source.attributeColumns.includes(variant.name) ? path : r.Field;
+      if (!out.has(name)) out.set(name, { name, type: r.Type });
+    } else if (source.columns.some((c) => c.name === r.Field && c.type !== 'variant')) {
+      out.set(r.Field, { name: r.Field, type: r.Type });
+    }
+  }
+  for (const [alias, target] of Object.entries(source.aliases)) {
+    const t = out.get(target);
+    if (t && !out.has(alias)) out.set(alias, { name: alias, type: t.type });
+  }
+  return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -44,7 +44,8 @@ export class Doris {
     const timeout = Math.trunc(cfg.queryTimeout);
     this.pool.on('connection', (conn) => {
       // search() turns the BKD index-skip heuristic into an error, so disable it.
-      conn.query(`SET inverted_index_skip_threshold = 0, query_timeout = ${timeout}`);
+      // describe_extend_variant_column: DESC lists VARIANT sub-paths (field discovery).
+      conn.query(`SET inverted_index_skip_threshold = 0, query_timeout = ${timeout}, describe_extend_variant_column = true`);
     });
   }
 

@@ -4,12 +4,16 @@
 //   GET /api/search?source=logs|traces&q=&from=&to=&limit=&columns=a,b
 //   GET /api/histogram?source=&q=&from=&to=&buckets=&groupBy=
 //   GET /api/trace/<trace id>?from=&to=
+//   GET /api/fields?source=                  search bar fields (cached for a minute)
+//   GET /api/values?source=&field=&q=&from=&to=&limit=   top values of a field
 //
 // Times are UTC (ISO 8601 or "YYYY-MM-DD HH:MM:SS"). Query errors answer 400 with a message.
 
+import { readFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 import { QuerySyntaxError } from './query/ast.ts';
-import { histogramSql, rowsSql, traceSql } from './query/build.ts';
+import { fieldsFromDescribe, histogramSql, rowsSql, traceSql, valuesSql, type Field } from './query/build.ts';
 import { CompileError } from './query/compile.ts';
 import { logsSource, tracesSource, type Source } from './query/source.ts';
 import { Doris, configFromEnv } from './db.ts';
@@ -19,6 +23,28 @@ class BadRequest extends Error {}
 export interface AppOptions {
   doris: Doris;
   db: string;
+  /** Directory of the built web UI (web/dist); other paths than /api are served from it. */
+  webDir?: string;
+}
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json',
+};
+
+/** Serve a file of the built UI; unknown paths get index.html so client routes reload. */
+async function serveStatic(root: string, pathname: string, res: ServerResponse): Promise<void> {
+  const base = resolve(root);
+  let file = resolve(join(base, normalize(decodeURIComponent(pathname))));
+  if (file !== base && !file.startsWith(base + sep)) return send(res, 403, { error: 'forbidden' });
+  const isFile = await stat(file).then((s) => s.isFile(), () => false);
+  if (!isFile) file = join(base, 'index.html');
+  const body = await readFile(file);
+  res.writeHead(200, {
+    'content-type': MIME[extname(file)] ?? 'application/octet-stream',
+    'cache-control': file.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+  });
+  res.end(body);
 }
 
 function param(url: URL, name: string, required = true): string | undefined {
@@ -40,7 +66,7 @@ function send(res: ServerResponse, status: number, body: unknown): void {
   res.end(json);
 }
 
-export function createApp({ doris, db }: AppOptions): Server {
+export function createApp({ doris, db, webDir }: AppOptions): Server {
   const sources: Record<string, Source> = { logs: logsSource(db), traces: tracesSource(db) };
   const sourceParam = (url: URL): Source => {
     const name = param(url, 'source')!;
@@ -48,6 +74,16 @@ export function createApp({ doris, db }: AppOptions): Server {
     if (!s) throw new BadRequest(`unknown source '${name}'`);
     return s;
   };
+
+  const fieldCache = new Map<string, { at: number; fields: Field[] }>();
+  async function fields(source: Source): Promise<Field[]> {
+    const hit = fieldCache.get(source.name);
+    if (hit && Date.now() - hit.at < 60_000) return hit.fields;
+    const rows = (await doris.query(`DESC ${source.table}`)) as { Field: string; Type: string }[];
+    const f = fieldsFromDescribe(source, rows);
+    fieldCache.set(source.name, { at: Date.now(), fields: f });
+    return f;
+  }
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -77,6 +113,16 @@ export function createApp({ doris, db }: AppOptions): Server {
       const rows = await doris.query(sql);
       return send(res, 200, { stepSeconds, buckets: rows });
     }
+    if (url.pathname === '/api/fields') {
+      return send(res, 200, { fields: await fields(sourceParam(url)) });
+    }
+    if (url.pathname === '/api/values') {
+      const sql = valuesSql(sourceParam(url), {
+        field: param(url, 'field')!, query: param(url, 'q', false) ?? '',
+        from: param(url, 'from')!, to: param(url, 'to')!, limit: intParam(url, 'limit'),
+      });
+      return send(res, 200, { values: await doris.query(sql) });
+    }
     const trace = /^\/api\/trace\/([^/]+)$/.exec(url.pathname);
     if (trace) {
       const sql = traceSql(sources.traces!, decodeURIComponent(trace[1]!), {
@@ -84,6 +130,7 @@ export function createApp({ doris, db }: AppOptions): Server {
       });
       return send(res, 200, { spans: await doris.query(sql) });
     }
+    if (webDir && !url.pathname.startsWith('/api/')) return serveStatic(webDir, url.pathname, res);
     return send(res, 404, { error: 'not found' });
   }
 
@@ -101,7 +148,8 @@ export function createApp({ doris, db }: AppOptions): Server {
 if (import.meta.main) {
   const doris = new Doris(configFromEnv());
   const port = Number(process.env.PORT ?? 8090);
-  createApp({ doris, db: process.env.DORIS_DB ?? 'otel' }).listen(port, () => {
+  const webDir = process.env.WEB_DIST ?? new URL('../../web/dist', import.meta.url).pathname;
+  createApp({ doris, db: process.env.DORIS_DB ?? 'otel', webDir }).listen(port, () => {
     console.log(`dorisstack server listening on :${port}`);
   });
 }

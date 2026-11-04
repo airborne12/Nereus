@@ -44,3 +44,21 @@ test('trace lookup validates the id', () => {
   assert.match(traceSql(t, '0123456789abcdef0123456789abcdef', range), /trace_id = '0123456789abcdef0123456789abcdef'/);
   assert.throws(() => traceSql(t, "x' OR '1'='1", range), CompileError);
 });
+
+test('values: field expression, filter, frequency order', async () => {
+  const { valuesSql, fieldsFromDescribe } = await import('../src/query/build.ts');
+  assert.equal(
+    valuesSql(logs, { ...range, field: 'level', query: 'service:cart' }),
+    "SELECT severity_text AS v, count(*) AS n FROM otel.otel_logs WHERE timestamp >= '2026-11-04 04:00:00.000' " +
+      "AND timestamp < '2026-11-04 05:00:00.000' AND search('service_name:cart') AND severity_text IS NOT NULL " +
+      'GROUP BY v ORDER BY n DESC LIMIT 10',
+  );
+  assert.match(valuesSql(logs, { ...range, field: 'k8s.pod.name', query: '' }),
+    /^SELECT coalesce\(CAST\(log_attributes\['k8s.pod.name'\] AS STRING\), CAST\(resource_attributes\['k8s.pod.name'\] AS STRING\)\) AS v/);
+  const fields = fieldsFromDescribe(logs, [
+    { Field: 'body', Type: 'text' }, { Field: 'severity_text', Type: 'varchar(32)' },
+    { Field: 'resource_attributes', Type: 'variant<...>' },
+    { Field: 'resource_attributes.k8s.pod.name', Type: 'text' }, { Field: 'log_attributes.thread.id', Type: 'bigint' },
+  ]);
+  assert.deepEqual(fields.map((f) => f.name), ['body', 'k8s.pod.name', 'level', 'message', 'msg', 'severity', 'severity_text', 'thread.id']);
+});

@@ -211,6 +211,15 @@ function leaf(source: Source, n: Exclude<Node, { kind: 'and' | 'or' | 'not' }>):
   return ok.reduce((a, b) => combine('OR', a, b));
 }
 
+/**
+ * A SQL expression reading a search bar field as a string, for grouping and top values.
+ * A field found in several attribute columns reads the first one that has it.
+ */
+export function fieldExpr(source: Source, field: string): string {
+  const exprs = resolve(source, field).map((t) => sqlExpr(t, 'STRING'));
+  return exprs.length === 1 ? exprs[0]! : `coalesce(${exprs.join(', ')})`;
+}
+
 // ---------------------------------------------------------------- combination
 
 function toSql(f: Frag): string {

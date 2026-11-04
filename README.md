@@ -7,8 +7,8 @@ API service and web UI. "DorisStack" is a working code name.
 Design: <https://claude.ai/artifact/RUahRwDXWZPii2gSTZCU67>
 
 Status: **M0 done, M1 in progress**. Tables, collector configuration, a single-host compose
-file and ingestion checks (M0); the search compiler and the first API endpoints (M1). The UI
-comes next.
+file and ingestion checks (M0); the search compiler, the API and the search page (M1). Users and
+login (metadata in PostgreSQL) come next.
 
 ## Layout
 
@@ -22,6 +22,7 @@ comes next.
 | `bench/verify_search.sh` | `search()` vs plain SQL row-count checks for the query compiler |
 | `bench/otlp_send.py` | The same synthetic data sent as real OTLP/HTTP to a collector |
 | `server/` | API service (TypeScript, Node 24): search compiler, SQL builder, HTTP API |
+| `web/` | Search page (React + Vite): query bar with completion, histogram, results, details, trace waterfall |
 
 ## API service
 
@@ -38,6 +39,27 @@ curl -G localhost:8090/api/search --data-urlencode source=logs \
 | `GET /api/search?source=logs\|traces&q=&from=&to=&limit=&columns=` | matching rows, newest first |
 | `GET /api/histogram?source=&q=&from=&to=&buckets=&groupBy=` | counts per time bucket, optionally per column value |
 | `GET /api/trace/<id>?from=&to=` | all spans of a trace |
+| `GET /api/fields?source=` | search bar fields: columns, aliases, VARIANT paths with types |
+| `GET /api/values?source=&field=&q=&from=&to=&limit=` | most frequent values of a field among matching rows |
+
+## Search page
+
+```bash
+cd web && npm install && npm run build      # web/dist, served by the API service at /
+cd ../server && DORIS_HOST=<fe> DORIS_PORT=9030 node src/server.ts    # http://localhost:8090
+# or, while developing: (cd web && npm run dev) with the API on :8090
+```
+
+- Query bar: completes field names (with types) and, after `field:`, the field's top values among
+  the rows the rest of the query matches. Tab or Enter accepts, Enter searches.
+- Histogram stacked by level (logs) or status (traces); drag across it to zoom the time range.
+- Click a row for every field, attributes flattened to dotted paths; `+` / `−` add
+  `field:"value"` or `-field:"value"` to the query. Logs and spans with a trace id open the trace
+  waterfall.
+- Source, query, time range and open trace live in the URL, so Back/Forward and shared links work.
+
+Browser tests (Playwright + Chromium) drive the built page against a live Doris:
+`npm run build && DORIS_PORT=9030 DORIS_DB=otel_bench npm run e2e`.
 
 The search bar language is a Lucene query_string subset: `field:value`, `"phrases"`,
 `wild*cards`, `/regex/`, `[a TO b]`, `>=x`, `AND`/`OR`/`NOT`/`-`, parentheses, `field:(a OR b)`,
