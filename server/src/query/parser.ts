@@ -60,21 +60,25 @@ function lex(input: string): Token[] {
       continue;
     }
     if (c === '/' && atValueStart()) {
+      // /regex/ only when the closing slash ends the token; otherwise a value such as
+      // /checkout or /api/v1/users is a path and lexes as a word below.
       let pattern = '';
-      i++;
-      while (i < input.length && input[i] !== '/') {
-        if (input[i] === '\\' && input[i + 1] === '/') {
+      let j = i + 1;
+      while (j < input.length && input[j] !== '/') {
+        if (input[j] === '\\' && input[j + 1] === '/') {
           pattern += '/';
-          i += 2;
+          j += 2;
           continue;
         }
-        pattern += input[i]!;
-        i++;
+        pattern += input[j]!;
+        j++;
       }
-      if (i >= input.length) throw new QuerySyntaxError('unterminated regular expression', pos);
-      i++;
-      out.push({ t: 'regex', pattern, pos });
-      continue;
+      const after = input[j + 1];
+      if (j < input.length && (after === undefined || /[\s)]/.test(after))) {
+        out.push({ t: 'regex', pattern, pos });
+        i = j + 1;
+        continue;
+      }
     }
     if ((c === '[' || c === '{') && out.at(-1)?.t === 'colon') {
       const close = input.slice(i + 1).search(/[\]}]/);

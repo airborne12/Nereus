@@ -4,3 +4,5 @@ __pycache__/
 .env
 node_modules/
 web/dist/
+web/dist-demo/
+web/demo/demo-data.json

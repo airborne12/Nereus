@@ -17,12 +17,19 @@
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #111418; --bg-2: #181c21; --bg-hover: #1f242b; --bg-selected: #1d2d47;
     --border: #2b3139; --text: #e6e9ed; --text-2: #9aa3ae; --accent: #6b9cf0;
     --lvl-debug: #6b7480; --lvl-info: #5b8fea; --lvl-warn: #e0a43a; --lvl-error: #e5605a;
     color-scheme: dark;
   }
+}
+/* An explicit choice on the root element wins over the system setting. */
+:root[data-theme="dark"] {
+  --bg: #111418; --bg-2: #181c21; --bg-hover: #1f242b; --bg-selected: #1d2d47;
+  --border: #2b3139; --text: #e6e9ed; --text-2: #9aa3ae; --accent: #6b9cf0;
+  --lvl-debug: #6b7480; --lvl-info: #5b8fea; --lvl-warn: #e0a43a; --lvl-error: #e5605a;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -192,3 +199,8 @@ body {
 .span-detail { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
 .span-detail h3 { margin: 0 0 6px; font-size: 13px; }
 .span-detail dl { margin: 0; }
+
+/* Offline demo only. */
+body.demo { display: flex; flex-direction: column; }
+body.demo #root { flex: 1; min-height: 0; }
+.demo-banner { padding: 6px 12px; font-size: 12px; background: var(--bg-selected); color: var(--text); border-bottom: 1px solid var(--border); }

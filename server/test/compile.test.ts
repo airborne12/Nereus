@@ -93,6 +93,7 @@ test('field names are validated', () => {
 
 test('syntax errors carry a position', () => {
   assert.throws(() => parseQuery('"unterminated'), QuerySyntaxError);
+  assert.doesNotThrow(() => parseQuery('a:/no-closing-slash'));
   assert.throws(() => parseQuery('(a OR b'), QuerySyntaxError);
   assert.throws(() => parseQuery('a:[1 2]'), QuerySyntaxError);
   assert.throws(() => parseQuery('a:(b:c)'), QuerySyntaxError);
@@ -138,4 +139,12 @@ test('unknown fields are reported with a likely correction', async () => {
   assert.deepEqual(unknownFields(logs, 'k8s.pod.nme:x', known), [{ field: 'k8s.pod.nme', suggestion: 'k8s.pod.name' }]);
   assert.deepEqual(unknownFields(logs, 'customer.tier:gold', known), [{ field: 'customer.tier', suggestion: null }]);
   assert.deepEqual(unknownFields(logs, 'level:ERROR resource_attributes.k8s.pod.name:a scope_name:x -k8s.pod.name:b', known), []);
+});
+
+test('values that start with a slash are paths, not regexes', () => {
+  assert.equal(wt('http.route:/checkout'),
+    "search('(span_attributes.http.route:\\\\/checkout OR resource_attributes.http.route:\\\\/checkout)')");
+  assert.equal(wt('name:/api/v1/users'), "search('span_name:\\\\/api\\\\/v1\\\\/users')");
+  assert.equal(w('body:/time.*/'), "search('body:/time.*/')");
+  assert.equal(w('(body:/time.*/)'), "search('body:/time.*/')");
 });

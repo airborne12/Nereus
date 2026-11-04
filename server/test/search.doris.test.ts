@@ -56,6 +56,7 @@ const traceCases: [string, string][] = [
   ['duration:[1ms TO 2.5ms]', 'duration BETWEEN 1000 AND 2500'],
   ['service:frontend duration:>50000', "service_name = 'frontend' AND duration > 50000"],
   ['is_root:1 -status:STATUS_CODE_UNSET', "is_root = 1 AND status_code <> 'STATUS_CODE_UNSET'"],
+  ['http.route:/checkout', "CAST(span_attributes['http.route'] AS STRING) = '/checkout'"],
 ];
 
 test('traces: a pasted trace id finds every span of the trace', { skip: !enabled }, () => {
