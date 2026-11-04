@@ -189,3 +189,6 @@ body {
   .settings { padding: 8px; }
   .list { display: block; overflow-x: auto; }
 }
+.span-detail { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+.span-detail h3 { margin: 0 0 6px; font-size: 13px; }
+.span-detail dl { margin: 0; }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import * as api from '../api.ts';
-import { isError, waterfall, type Span } from '../lib/rows.ts';
+import { isError, rowFields, waterfall, type Span } from '../lib/rows.ts';
 import { dorisTimeToMs } from '../lib/state.ts';
 import { formatDuration } from './ResultsTable.tsx';
 
@@ -37,7 +37,7 @@ export function TraceView({ traceId, range, onClose }: Props) {
           <strong>Trace</strong>
           <code className="muted">{traceId}</code>
           <span className="grow" />
-          {spans && <span className="muted">{spans.length} spans · {formatDuration(totalMs * 1000)}</span>}
+          {spans && <span className="muted">{spans.length} {spans.length === 1 ? 'span' : 'spans'} · {formatDuration(totalMs * 1000)}</span>}
           <button type="button" className="btn" aria-label="Close trace" onClick={onClose}>✕</button>
         </div>
         {error && <div className="error">{error}</div>}
@@ -64,7 +64,18 @@ export function TraceView({ traceId, range, onClose }: Props) {
           ))}
         </div>
         {picked && (
-          <pre className="detail-body">{JSON.stringify(picked, null, 2)}</pre>
+          <section className="span-detail" aria-label="Span details">
+            <h3>{picked.service_name} · {picked.span_name}</h3>
+            <dl>
+              {rowFields(picked as unknown as Record<string, unknown>).map((f) => (
+                <div className="kv" key={`${f.group}.${f.field}`}>
+                  <dt title={f.field}>{f.field}</dt>
+                  <dd className="mono">{f.value}</dd>
+                  <span />
+                </div>
+              ))}
+            </dl>
+          </section>
         )}
       </div>
     </div>

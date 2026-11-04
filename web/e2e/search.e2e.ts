@@ -107,6 +107,9 @@ test('View trace shows the waterfall with the log line span', async () => {
   const n = await dialog.locator('.wf-row').count();
   assert.ok(n >= 2, `spans: ${n}`);
   assert.match(await dialog.innerText(), new RegExp(`${n} spans`));
+  await dialog.locator('.wf-row').nth(1).click();
+  const detail = dialog.getByLabel('Span details');
+  assert.match(await detail.innerText(), /span_id\s+[0-9a-f]{16}/);
   assert.ok(await dialog.locator('.wf-bar.err').count() >= 1, 'an ERROR log comes from a failed trace');
   assert.match(page.url(), /trace=[0-9a-f]{32}/);
   await shot('4-trace');
