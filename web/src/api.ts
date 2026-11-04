@@ -1,5 +1,5 @@
 import type { Row, Span } from './lib/rows.ts';
-import type { SourceName } from './lib/state.ts';
+import type { Filter, Language, SourceName } from './lib/state.ts';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -70,20 +70,42 @@ export const auth = {
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
+export interface Range {
+  from: number;
+  to: number;
+}
+
+/** What every data call filters on: source, WHERE in its language, filters and the time range. */
+export interface Spec {
+  source: SourceName;
+  where: string;
+  language: Language;
+  filters: Filter[];
+  range: Range;
+}
+
+function specParams(s: Spec): Record<string, string> {
+  const p: Record<string, string> = { source: s.source, where: s.where, language: s.language, from: iso(s.range.from), to: iso(s.range.to) };
+  if (s.filters.length) p.filters = JSON.stringify(s.filters);
+  return p;
+}
+
+export interface Column {
+  label: string;
+  key: string;
+}
+
 export interface Warning {
   kind: 'unknown_field';
   field: string;
   suggestion: string | null;
 }
 
-export interface Range {
-  from: number;
-  to: number;
-}
-
-export function search(source: SourceName, q: string, r: Range, limit: number, signal?: AbortSignal) {
-  return get<{ rows: Row[]; elapsedMs: number; warnings: Warning[] }>('/api/search',
-    { source, q, from: iso(r.from), to: iso(r.to), limit }, signal);
+export function search(s: Spec, opts: { select?: string; orderBy?: string; limit: number; offset?: number }, signal?: AbortSignal) {
+  return get<{ rows: Row[]; columns: Column[]; sql: string; elapsedMs: number; warnings: Warning[] }>('/api/search', {
+    ...specParams(s), select: opts.select || undefined, orderBy: opts.orderBy || undefined, limit: opts.limit,
+    offset: opts.offset || undefined,
+  }, signal);
 }
 
 export interface Bucket {
@@ -92,9 +114,17 @@ export interface Bucket {
   n: string | number;
 }
 
-export function histogram(source: SourceName, q: string, r: Range, groupBy: string, signal?: AbortSignal) {
-  return get<{ stepSeconds: number; buckets: Bucket[] }>('/api/histogram',
-    { source, q, from: iso(r.from), to: iso(r.to), groupBy, buckets: 90 }, signal);
+export function histogram(s: Spec, groupBy: string, signal?: AbortSignal) {
+  return get<{ stepSeconds: number; buckets: Bucket[]; sql: string }>('/api/histogram', { ...specParams(s), groupBy, buckets: 90 }, signal);
+}
+
+export interface Facet {
+  field: string;
+  values: { v: string; n: number }[];
+}
+
+export function facets(s: Spec, signal?: AbortSignal) {
+  return get<{ sampled: number; facets: Facet[] }>('/api/facets', specParams(s), signal);
 }
 
 export function trace(id: string, r: Range, signal?: AbortSignal) {

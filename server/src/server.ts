@@ -6,8 +6,10 @@
 //   GET  /api/auth/status | POST /api/auth/setup | /api/auth/login | /api/auth/logout
 //   GET|POST /api/keys, DELETE /api/keys/<id>
 //   GET|POST /api/users, POST /api/users/<id>/disabled        (admins)
-//   GET /api/search?source=logs|traces&q=&from=&to=&limit=&columns=a,b
-//   GET /api/histogram?source=&q=&from=&to=&buckets=&groupBy=
+//   GET /api/search?source=logs|traces&where=&language=lucene|sql&filters=<json>&select=&orderBy=
+//                  &from=&to=&limit=&offset=      (q= is the same as where= with lucene)
+//   GET /api/histogram?source=&where=&language=&filters=&from=&to=&buckets=&groupBy=
+//   GET /api/facets?source=&where=&language=&filters=&from=&to=&fields=a,b   filter panel values
 //   GET /api/trace/<trace id>?from=&to=
 //   GET /api/fields?source=                  search bar fields (cached for a minute)
 //   GET /api/values?source=&field=&q=&from=&to=&limit=   top values of a field
@@ -18,7 +20,10 @@ import { readFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { QuerySyntaxError } from './query/ast.ts';
-import { fieldsFromDescribe, histogramSql, rowsSql, traceSql, valuesSql, type Field } from './query/build.ts';
+import {
+  defaultFacetFields, facetsSql, fieldsFromDescribe, type Filter, searchHistogramSql, searchRowsSql, type SearchSpec,
+  traceSql, valuesSql, type Field,
+} from './query/build.ts';
 import { CompileError, unknownFields } from './query/compile.ts';
 import { logsSource, tracesSource, type Source } from './query/source.ts';
 import { Doris, configFromEnv } from './db.ts';
@@ -104,6 +109,27 @@ export function createApp({ doris, db, auth, webDir }: AppOptions): Server {
     return f;
   }
 
+  function searchSpec(url: URL): SearchSpec {
+    const language = param(url, 'language', false) ?? 'lucene';
+    if (language !== 'lucene' && language !== 'sql') throw new BadRequest("language must be 'lucene' or 'sql'");
+    let filters: Filter[] = [];
+    const raw = param(url, 'filters', false);
+    if (raw) {
+      try {
+        filters = JSON.parse(raw);
+      } catch {
+        throw new BadRequest('filters must be JSON');
+      }
+      if (!Array.isArray(filters) || !filters.every((f) => typeof f?.field === 'string' && Array.isArray(f.values))) {
+        throw new BadRequest('filters must be a list of {field, values, exclude}');
+      }
+    }
+    return {
+      where: param(url, 'where', false) ?? param(url, 'q', false) ?? '', language, filters,
+      from: param(url, 'from')!, to: param(url, 'to')!,
+    };
+  }
+
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
@@ -127,26 +153,37 @@ export function createApp({ doris, db, auth, webDir }: AppOptions): Server {
 
     if (url.pathname === '/api/search') {
       const source = sourceParam(url);
-      const columns = param(url, 'columns', false)?.split(',').filter(Boolean);
-      const sql = rowsSql(source, {
-        query: param(url, 'q', false) ?? '', from: param(url, 'from')!, to: param(url, 'to')!,
-        limit: intParam(url, 'limit'), columns,
+      const spec = searchSpec(url);
+      const { sql, columns } = searchRowsSql(source, {
+        ...spec, select: param(url, 'select', false), orderBy: param(url, 'orderBy', false),
+        limit: intParam(url, 'limit'), offset: intParam(url, 'offset'),
       });
       const started = performance.now();
       const [rows, known] = await Promise.all([doris.query(sql), fields(source)]);
       // Fields the data has never had: the query is valid but they match nothing.
-      const warnings = unknownFields(source, param(url, 'q', false) ?? '', known.map((f) => f.name))
+      const warnings = spec.language === 'sql' ? [] : unknownFields(source, spec.where, known.map((f) => f.name))
         .map((u) => ({ kind: 'unknown_field', ...u }));
-      return send(res, 200, { rows, warnings, elapsedMs: Math.round(performance.now() - started) });
+      return send(res, 200, { rows, columns, sql, warnings, elapsedMs: Math.round(performance.now() - started) });
     }
     if (url.pathname === '/api/histogram') {
       const source = sourceParam(url);
-      const { sql, stepSeconds } = histogramSql(source, {
-        query: param(url, 'q', false) ?? '', from: param(url, 'from')!, to: param(url, 'to')!,
-        maxBuckets: intParam(url, 'buckets'), groupBy: param(url, 'groupBy', false),
+      const { sql, stepSeconds } = searchHistogramSql(source, {
+        ...searchSpec(url), maxBuckets: intParam(url, 'buckets'), groupBy: param(url, 'groupBy', false),
       });
       const rows = await doris.query(sql);
-      return send(res, 200, { stepSeconds, buckets: rows });
+      return send(res, 200, { stepSeconds, buckets: rows, sql });
+    }
+    if (url.pathname === '/api/facets') {
+      const source = sourceParam(url);
+      const asked = param(url, 'fields', false)?.split(',').filter(Boolean);
+      const names = asked ?? defaultFacetFields(source, await fields(source)).slice(0, 40);
+      const sql = facetsSql(source, searchSpec(url), names);
+      const [row] = await doris.query(sql);
+      const facets = names.map((field, i) => {
+        const top = row?.[`f${i}`] ? (JSON.parse(String(row[`f${i}`])) as Record<string, number>) : {};
+        return { field, values: Object.entries(top).map(([v, n]) => ({ v, n: Number(n) })) };
+      });
+      return send(res, 200, { sampled: Number(row?.__sampled ?? 0), facets, sql });
     }
     if (url.pathname === '/api/fields') {
       return send(res, 200, { fields: await fields(sourceParam(url)) });

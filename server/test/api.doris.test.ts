@@ -118,3 +118,39 @@ test('search warns about fields the data does not have', { skip: !enabled }, asy
   assert.deepEqual(fine.body.warnings, []);
   assert.ok(fine.body.rows.length > 0, 'lower-case level matches');
 });
+
+test('SQL WHERE, filters, SELECT, ORDER BY and paging', { skip: !enabled }, async () => {
+  const count = async (params: Record<string, string>) => (await get('/api/histogram', { source: 'logs', from, to, buckets: '1', ...params }))
+    .body.buckets.reduce((s: number, b: any) => s + Number(b.n), 0);
+  const lucene = await count({ where: 'level:error service:payment' });
+  assert.ok(lucene > 0);
+  assert.equal(await count({ where: "severity_text = 'ERROR' AND service_name = 'payment'", language: 'sql' }), lucene);
+  assert.equal(await count({ where: 'level:error', filters: JSON.stringify([{ field: 'service', values: ['payment'] }]) }), lucene);
+  const all = await count({ where: 'level:error' });
+  assert.equal(await count({ where: 'level:error', filters: JSON.stringify([{ field: 'service', values: ['payment'], exclude: true }]) }),
+    all - lucene);
+  assert.equal((await get('/api/search', { source: 'logs', where: '1=1; DROP TABLE x', language: 'sql', from, to })).status, 400);
+
+  const page1 = await get('/api/search', { source: 'traces', where: 'is_root:1', select: 'timestamp, service, duration / 1000', orderBy: 'duration DESC', limit: '5', from, to });
+  assert.equal(page1.status, 200);
+  assert.deepEqual(page1.body.columns.map((c: any) => c.label), ['timestamp', 'service', 'duration / 1000']);
+  const d = page1.body.rows.map((r: any) => Number(r.duration));
+  assert.deepEqual(d, [...d].sort((a, b) => b - a));
+  assert.equal(Number(page1.body.rows[0].__e2), d[0]! / 1000);
+  assert.ok(page1.body.rows[0].span_id, 'rows carry every column for the side panel');
+  assert.match(page1.body.sql, /ORDER BY duration DESC LIMIT 5$/);
+  const page2 = await get('/api/search', { source: 'traces', where: 'is_root:1', orderBy: 'duration DESC', limit: '5', offset: '5', from, to });
+  assert.ok(Number(page2.body.rows[0].duration) <= d.at(-1)!);
+});
+
+test('facets list top values with counts from a sample, honouring the query', { skip: !enabled }, async () => {
+  const { status, body } = await get('/api/facets', { source: 'logs', where: 'level:error', from, to });
+  assert.equal(status, 200);
+  const svc = body.facets.find((f: any) => f.field === 'service_name');
+  assert.ok(svc && svc.values.length > 0);
+  assert.ok(body.facets.some((f: any) => f.field === 'k8s.pod.name'), 'attribute paths are facets');
+  assert.ok(!body.facets.some((f: any) => ['body', 'trace_id', 'timestamp'].includes(f.field)));
+  const lvl = body.facets.find((f: any) => f.field === 'severity_text');
+  assert.deepEqual(lvl.values.map((v: any) => v.v), ['ERROR']);
+  assert.ok(svc.values.reduce((s: number, v: any) => s + v.n, 0) <= body.sampled);
+});

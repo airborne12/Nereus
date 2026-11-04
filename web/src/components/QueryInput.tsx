@@ -7,6 +7,9 @@ interface Props {
   source: SourceName;
   value: string;
   range: api.Range;
+  /** SQL mode: no field/value completion, SQL placeholder. */
+  language?: 'lucene' | 'sql';
+  onChange?: (q: string) => void;
   onSubmit: (q: string) => void;
 }
 
@@ -17,7 +20,7 @@ interface Suggestion {
 }
 
 /** Search bar with field-name and value completion (Tab / Enter to accept, Esc to close). */
-export function QueryInput({ source, value, range, onSubmit }: Props) {
+export function QueryInput({ source, value, range, language = 'lucene', onChange, onSubmit }: Props) {
   const [text, setText] = useState(value);
   const [cursor, setCursor] = useState(value.length);
   const [fields, setFields] = useState<{ name: string; type: string }[]>([]);
@@ -27,6 +30,10 @@ export function QueryInput({ source, value, range, onSubmit }: Props) {
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => setText(value), [value]);
+  const update = (t: string) => {
+    setText(t);
+    onChange?.(t);
+  };
   useEffect(() => {
     const ac = new AbortController();
     api.fields(source, ac.signal).then((r) => setFields(r.fields), () => setFields([]));
@@ -74,24 +81,25 @@ export function QueryInput({ source, value, range, onSubmit }: Props) {
   function accept(s: Suggestion) {
     const next = text.slice(0, tok.start) + s.insert + text.slice(tok.end);
     const pos = tok.start + s.insert.length;
-    setText(next);
+    update(next);
     setCursor(pos);
     requestAnimationFrame(() => input.current?.setSelectionRange(pos, pos));
     if (!s.insert.endsWith(':')) setOpen(false);
   }
 
-  const showList = open && suggestions.length > 0;
+  const showList = open && language === 'lucene' && suggestions.length > 0;
   return (
     <div className="query">
       <input
         ref={input}
         className="query-input"
         aria-label="Search query"
-        placeholder={source === 'logs' ? 'level:error "timeout after" k8s.pod.name:checkout-*' : 'checkout status:error duration:>50ms'}
+        placeholder={language === 'sql' ? "SQL WHERE clause (ex. severity_text = 'ERROR')"
+          : source === 'logs' ? 'Search your events w/ Lucene ex. level:error "timeout after"' : 'Search your events w/ Lucene ex. checkout status:error duration:>50ms'}
         value={text}
         spellCheck={false}
         onChange={(e) => {
-          setText(e.target.value);
+          update(e.target.value);
           setCursor(e.target.selectionStart ?? e.target.value.length);
           setOpen(true);
         }}

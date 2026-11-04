@@ -1,13 +1,8 @@
+import type * as api from '../api.ts';
 import type { Row } from '../lib/rows.ts';
 import { isError } from '../lib/rows.ts';
-import { dorisTimeToMs, type SourceName } from '../lib/state.ts';
-
-interface Props {
-  source: SourceName;
-  rows: Row[];
-  selected: number | null;
-  onSelect: (i: number) => void;
-}
+import { dorisTimeToMs } from '../lib/state.ts';
+import { Icon } from './Icon.tsx';
 
 export function formatTime(t: unknown): string {
   const ms = dorisTimeToMs(String(t));
@@ -17,21 +12,6 @@ export function formatTime(t: unknown): string {
     `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 }
 
-/** The time cell: the date part can be hidden on narrow screens. */
-function TimeCell({ t }: { t: unknown }) {
-  const text = formatTime(t);
-  const cut = text.lastIndexOf(' ');
-  return <td className="c-time mono"><span className="date">{text.slice(0, cut + 1)}</span>{text.slice(cut + 1)}</td>;
-}
-
-function levelClass(level: unknown): string {
-  const l = String(level ?? '').toUpperCase();
-  if (l.startsWith('ERR') || l === 'FATAL') return 'lvl lvl-error';
-  if (l.startsWith('WARN')) return 'lvl lvl-warn';
-  if (l.startsWith('DEBUG') || l.startsWith('TRACE')) return 'lvl lvl-debug';
-  return 'lvl lvl-info';
-}
-
 export function formatDuration(us: unknown): string {
   const n = Number(us);
   if (n < 1000) return `${n} µs`;
@@ -39,38 +19,85 @@ export function formatDuration(us: unknown): string {
   return `${(n / 1_000_000).toFixed(2)} s`;
 }
 
-/** Newest-first result rows. Click a row to open its details. */
-export function ResultsTable({ source, rows, selected, onSelect }: Props) {
-  if (rows.length === 0) return <div className="empty">No matches in this time range.</div>;
+export function levelClass(level: unknown): string {
+  const l = String(level ?? '').toUpperCase();
+  if (l.startsWith('ERR') || l === 'FATAL') return 'lvl lvl-error';
+  if (l.startsWith('WARN')) return 'lvl lvl-warn';
+  if (l.startsWith('DEBUG') || l.startsWith('TRACE')) return 'lvl lvl-debug';
+  return 'lvl lvl-info';
+}
+
+/** Fixed widths for the usual columns; the rest share what is left. */
+const COL_CLASS: Record<string, string> = {
+  timestamp: 'c-time', severity_text: 'c-lvl', status_code: 'c-lvl', service_name: 'c-svc', duration: 'c-dur',
+};
+
+function Cell({ col, row }: { col: api.Column; row: Row }) {
+  const v = row[col.key];
+  if (col.key === 'timestamp') {
+    const text = formatTime(v);
+    const cut = text.lastIndexOf(' ');
+    return <td className="c-time mono"><span className="date">{text.slice(0, cut + 1)}</span>{text.slice(cut + 1)}</td>;
+  }
+  if (col.key === 'severity_text') return <td className="c-lvl"><span className={levelClass(v)}>{String(v ?? '')}</span></td>;
+  if (col.key === 'status_code') {
+    return (
+      <td className="c-lvl">
+        {isError(v) ? <span className="lvl lvl-error">Error</span>
+          : <span className="muted">{String(v ?? '').replace('STATUS_CODE_', '').toLowerCase()}</span>}
+      </td>
+    );
+  }
+  const text = v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  // Same class as the header cell, so narrow-screen rules hide or size both alike.
+  return <td className={`${COL_CLASS[col.key] ?? ''} ${col.key === 'body' || col.key === 'span_name' ? 'c-body ' : ''}mono`}>{text}</td>;
+}
+
+interface Props {
+  columns: api.Column[];
+  rows: Row[];
+  selected: number | null;
+  wrap: boolean;
+  loadingMore: boolean;
+  done: boolean;
+  onSelect: (i: number) => void;
+  onRemoveColumn: (label: string) => void;
+  onNearEnd: () => void;
+  onScrollTop: (top: number) => void;
+}
+
+/** Result rows; the columns follow SELECT. Scrolling near the end loads the next page. */
+export function ResultsTable(p: Props) {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone.split('/').at(-1);
   return (
-    <table className="results">
-      <thead>
-        {source === 'logs' ? (
-          <tr><th className="c-time">Time</th><th className="c-svc">Service</th><th className="c-lvl">Level</th><th>Body</th></tr>
-        ) : (
-          <tr><th className="c-time">Time</th><th className="c-svc">Service</th><th>Span</th><th className="c-dur">Duration</th><th className="c-lvl">Status</th></tr>
-        )}
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={i} className={i === selected ? 'selected' : ''} onClick={() => onSelect(i)} data-row={i}>
-            <TimeCell t={r.timestamp} />
-            <td className="c-svc">{String(r.service_name ?? '')}</td>
-            {source === 'logs' ? (
-              <>
-                <td className="c-lvl"><span className={levelClass(r.severity_text)}>{String(r.severity_text ?? '')}</span></td>
-                <td className="c-body mono">{String(r.body ?? '')}</td>
-              </>
-            ) : (
-              <>
-                <td className="c-body">{String(r.span_name ?? '')}</td>
-                <td className="c-dur mono">{formatDuration(r.duration)}</td>
-                <td className="c-lvl">{isError(r.status_code) ? <span className="lvl lvl-error">error</span> : <span className="muted">ok</span>}</td>
-              </>
-            )}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className={`table-wrap${p.wrap ? ' wrap' : ''}`} onScroll={(e) => {
+      const el = e.currentTarget;
+      p.onScrollTop(el.scrollTop);
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 500 && !p.done && !p.loadingMore) p.onNearEnd();
+    }}>
+      {p.rows.length === 0 ? <div className="empty">No results found in this time range.</div> : (
+        <table className="results">
+          <thead>
+            <tr>
+              {p.columns.map((c) => (
+                <th key={c.key} className={COL_CLASS[c.key] ?? ''}>
+                  <span className="th">{c.key === 'timestamp' ? `timestamp (${tz})` : c.label}</span>
+                  <button type="button" className="th-remove" title="Remove column" aria-label={`Remove column ${c.label}`}
+                    onClick={() => p.onRemoveColumn(c.label)}><Icon name="close" size={10} /></button>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {p.rows.map((r, i) => (
+              <tr key={i} className={i === p.selected ? 'selected' : ''} onClick={() => p.onSelect(i)} data-row={i}>
+                {p.columns.map((c) => <Cell key={c.key} col={c} row={r} />)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {p.rows.length > 0 && <div className="table-foot muted">{p.loadingMore ? 'Loading results' : p.done ? 'End of Results' : ''}</div>}
+    </div>
   );
 }

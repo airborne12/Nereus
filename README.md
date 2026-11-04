@@ -49,8 +49,9 @@ Every `/api/*` call except `/api/auth/*` needs a login: the browser's session co
 
 | Endpoint | Returns |
 | --- | --- |
-| `GET /api/search?source=logs\|traces&q=&from=&to=&limit=&columns=` | matching rows, newest first |
-| `GET /api/histogram?source=&q=&from=&to=&buckets=&groupBy=` | counts per time bucket, optionally per column value |
+| `GET /api/search?source=logs\|traces&where=&language=lucene\|sql&filters=<json>&select=&orderBy=&from=&to=&limit=&offset=` | rows (every column, plus SELECT expressions as `__e<n>`), the table's columns, the SQL that ran |
+| `GET /api/histogram?source=&where=&language=&filters=&from=&to=&buckets=&groupBy=` | counts per time bucket, optionally per field value |
+| `GET /api/facets?source=&where=&language=&filters=&from=&to=&fields=` | top values of string fields in a sample, for the filter panel |
 | `GET /api/trace/<id>?from=&to=` | all spans of a trace |
 | `GET /api/fields?source=` | search bar fields: columns, aliases, VARIANT paths with types |
 | `GET /api/values?source=&field=&q=&from=&to=&limit=` | most frequent values of a field among matching rows |
@@ -61,75 +62,50 @@ Every `/api/*` call except `/api/auth/*` needs a login: the browser's session co
 Users, sessions and keys: passwords are scrypt hashes, session and API key tokens are 256-bit
 random values stored as SHA-256 hashes, sessions last 7 days, 10 failed logins per address and
 email in 5 minutes are throttled, and disabling a user ends their sessions and stops their keys.
+`language=sql`, `select` and `orderBy` are the user's own SQL, run as given (one statement; `;` is
+refused), as in ClickStack. **Give the API service a Doris account that can only read the telemetry
+database**: then such SQL can do no more than read telemetry, which every signed-in user may do anyway.
+
 State-changing requests must be JSON or DELETE, which a browser only sends cross-site after a CORS
 preflight this server never answers; the cookie is HttpOnly and SameSite=Lax.
 
 ## Search page
 
+The layout and interactions follow ClickStack's search (HyperDX v2); names, logo and colours are our own.
+
+- **Navigation** on the left: Search, Saved searches, Chart explorer, Alerts, Client sessions, Service
+  map, Dashboards, Team settings, user menu. Only Search and Team settings are built; the others say
+  which milestone they belong to.
+- **Header**, three rows: source, `SELECT` and `ORDER BY`; the `WHERE` input with a Lucene / SQL switch
+  (completion in Lucene), the time picker (Live Tail and ClickStack's presets, a start/end form and
+  "around a time"), the Live Tail refresh interval and Run; then the active filters as pills (click
+  flips include/exclude, x removes, Clear all).
+- **Filter panel**: Analysis Mode (Results Table, Event Patterns), Root Spans Only for traces, and a
+  group per string field and attribute path with its top values, the share of a 20,000-row sample, a
+  value search, and Only / Exclude on hover. Filters are kept apart from the WHERE text.
+- **Results**: count, Live / Resume Live Tail, elapsed time, wrap lines, Show Generated SQL; the
+  histogram (stacked by level or status, drag to zoom); the table with the SELECT columns (remove a
+  column from its header), scrolling loads the next 200 rows.
+- **Side panel** from the right (80% wide, drag its edge, expand, Esc closes): Overview (attributes
+  grouped, each value can be added to the filters, excluded, searched alone, added as a column or
+  copied), Column Values (search by key or value), Trace (waterfall with each span's log lines under
+  it, span details), Surrounding Context (±100 ms to ±15 min, scoped to anything, service, host or pod,
+  centred on This Event).
+- **Event Patterns**: log lines grouped by template from a 2,000-row sample, with trend, scaled count,
+  level and samples.
+- Keyboard: `/` focuses the search, `d` opens the time picker, `j`/`k` step through events, Esc closes.
+- State lives in the URL (`where`, `lang`, `filters`, `select`, `orderBy`, `t` or `from`/`to`).
+
 ```bash
 cd web && npm install && npm run build      # web/dist, served by the API service at /
-cd ../server && DORIS_HOST=<fe> DORIS_PORT=9030 node src/server.ts    # http://localhost:8090
-# or, while developing: (cd web && npm run dev) with the API on :8090
+cd ../server && DORIS_HOST=<fe> DORIS_PORT=9030 META_DATABASE_URL=... node src/server.ts   # :8090
 ```
 
-- Query bar: completes field names (with types) and, after `field:`, the field's top values among
-  the rows the rest of the query matches. Tab or Enter accepts, Enter searches.
-- Histogram stacked by level (logs) or status (traces); drag across it to zoom the time range.
-- Click a row for every field, attributes flattened to dotted paths; `+` / `−` add
-  `field:"value"` or `-field:"value"` to the query. Logs and spans with a trace id open the trace
-  waterfall.
-- Source, query, time range and open trace live in the URL, so Back/Forward and shared links work.
+`npm run build:demo` builds the same UI as an offline demo whose /api is answered in the browser from
+`web/demo/demo-data.json` (a snapshot exported from `/api/search` and `/api/fields`; not committed).
 
-Browser tests (Playwright + Chromium) drive the built page against a live Doris:
+Browser tests (Playwright + Chromium) drive the built page against a live Doris and PostgreSQL:
 `npm run build && DORIS_PORT=9030 DORIS_DB=otel_bench npm run e2e`.
-
-The search bar language is a Lucene query_string subset: `field:value`, `"phrases"`,
-`wild*cards`, `/regex/`, `[a TO b]`, `>=x`, `AND`/`OR`/`NOT`/`-`, parentheses, `field:(a OR b)`,
-`field:*`; adjacent terms are ANDed and bare terms search `body` (logs) or `span_name` and
-`service_name` (traces). A bare 32- or 16-hex-digit term also matches `trace_id` / `span_id`, so a
-pasted id works. Levels, span kinds and statuses match in any case and take short values
-(`level:error`, `status:error`, `kind:server`). `duration` is stored in microseconds and takes unit
-suffixes (`duration:>50ms`, `[1.5s TO 2m]`). A field no data has (`levl:`) still compiles but
-`/api/search` returns a warning with the likely correction.
-Unknown dotted fields such as `k8s.pod.name` are looked up in the attribute VARIANT columns.
-`server/src/query/compile.ts` sends indexed terms to one `search()` call and everything else
-(ranges, numbers, unindexed columns) to plain SQL.
-
-Tests: `npm test` (unit), and against a live Doris loaded by `bench/otelgen.py` plus a PostgreSQL
-that may create databases (`META_ADMIN_URL`, each test file uses a throwaway database):
-`DORIS_TEST=1 DORIS_PORT=9030 DORIS_DB=otel_bench META_ADMIN_URL=postgres://postgres@<pg>/postgres npm test`
-compares every compiled query with a hand-written reference SQL, checks that hostile input stays a
-literal, and exercises setup, login, throttling, API keys and user management. `PG_TEST=1` runs
-only the PostgreSQL tests.
-
-## Quick start (docker)
-
-```bash
-cd deploy
-DORIS_VERSION=4.0.1 docker compose up -d     # any Doris release that has search()
-mysql -h127.0.0.1 -P9030 -uroot -e 'select count(*) from otel.otel_traces'
-```
-
-Open <http://localhost:8090>; the first visit creates the admin account. Send OTLP to
-`localhost:4317` (gRPC) or `localhost:4318` (HTTP).
-The compose file and the Dockerfile have not been run yet: the development machine has no
-docker. Check the `apache/doris` image tags for your version.
-
-## Against an existing Doris
-
-```bash
-schema/apply.sh -h <fe> -P 9030 -d otel -r 30          # 30 days retention
-DORIS_HTTP=http://<fe>:8030 otelcol-contrib --config collector/config.yaml
-```
-
-Or load synthetic data without a collector:
-
-```bash
-bench/otelgen.py --http <fe>:8030 --traces 10000        # direct Stream Load
-bench/otelgen.py --traces 50000 --out-dir /tmp/gen      # files, then:
-bench/load.sh -d /tmp/gen -H <fe>:8030 -j 8
-bench/verify_search.sh -h <fe> -P 9030 -D otel
-```
 
 ## Schema notes
 
