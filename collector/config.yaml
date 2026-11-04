@@ -1,0 +1,75 @@
+# OpenTelemetry Collector for DorisStack.
+# Runs the upstream contrib distribution (it ships the `doris` exporter).
+# Tables are created by schema/apply.sh, so the exporter runs with create_schema: false.
+#
+# Environment:
+#   DORIS_HTTP      FE http address, e.g. http://doris-fe:8030
+#   DORIS_USER      default root
+#   DORIS_PASSWORD  default empty
+#   DORIS_DB        default otel
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+  batch:
+    send_batch_size: 20000
+    send_batch_max_size: 50000
+    timeout: 2s
+
+exporters:
+  doris:
+    endpoint: ${env:DORIS_HTTP}
+    username: ${env:DORIS_USER:-root}
+    password: ${env:DORIS_PASSWORD:-}
+    database: ${env:DORIS_DB:-otel}
+    table:
+      logs: otel_logs
+      traces: otel_traces
+      # The exporter appends _gauge, _sum, _histogram, _exponential_histogram, _summary.
+      metrics: otel_metrics
+    create_schema: false
+    # Timestamps are written as zone-less DATETIME(6); keep everything in UTC.
+    timezone: UTC
+    headers:
+      # Many small batches from many collectors: let Doris merge them server side.
+      group_commit: async_mode
+    timeout: 60s
+    sending_queue:
+      enabled: true
+      num_consumers: 8
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [doris]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [doris]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [doris]

@@ -1,0 +1,99 @@
+# DorisStack single-host stack: Doris FE + BE, schema init, OTel Collector,
+# and telemetrygen as a demo traffic source.
+#
+#   cd deploy && docker compose up -d
+#   OTLP: grpc localhost:4317, http localhost:4318; Doris MySQL: localhost:9030
+#
+# DORIS_VERSION must be a release with search() (4.x); see README.
+name: dorisstack
+
+networks:
+  dorisstack:
+    ipam:
+      config:
+        - subnet: 172.30.80.0/24
+
+services:
+  doris-fe:
+    image: apache/doris:fe-${DORIS_VERSION:-4.0.1}
+    hostname: doris-fe
+    environment:
+      FE_SERVERS: fe1:172.30.80.2:9010
+      FE_ID: "1"
+    ports:
+      - "8030:8030"
+      - "9030:9030"
+    volumes:
+      - fe-meta:/opt/apache-doris/fe/doris-meta
+    networks:
+      dorisstack:
+        ipv4_address: 172.30.80.2
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8030/api/bootstrap | grep -q '\"code\":0'"]
+      interval: 10s
+      retries: 30
+
+  doris-be:
+    image: apache/doris:be-${DORIS_VERSION:-4.0.1}
+    hostname: doris-be
+    environment:
+      FE_SERVERS: fe1:172.30.80.2:9010
+      BE_ADDR: 172.30.80.3:9050
+    volumes:
+      - be-storage:/opt/apache-doris/be/storage
+    depends_on:
+      doris-fe:
+        condition: service_healthy
+    networks:
+      dorisstack:
+        ipv4_address: 172.30.80.3
+
+  schema-init:
+    image: mysql:8.0
+    depends_on:
+      doris-fe:
+        condition: service_healthy
+    volumes:
+      - ../schema:/schema:ro
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        for i in $$(seq 1 60); do
+          mysql -h172.30.80.2 -P9030 -uroot -N -e 'show backends' | grep -q true && break
+          sleep 5
+        done
+        /schema/apply.sh -h 172.30.80.2 -P 9030 -r $${RETENTION_DAYS:-30}
+    environment:
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+    networks:
+      dorisstack:
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:${OTELCOL_VERSION:-0.120.0}
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      DORIS_HTTP: http://172.30.80.2:8030
+    volumes:
+      - ../collector/config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      schema-init:
+        condition: service_completed_successfully
+    networks:
+      dorisstack:
+
+  # Demo traffic. Remove when real applications send OTLP.
+  telemetrygen:
+    image: ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen:v${OTELCOL_VERSION:-0.120.0}
+    command: ["traces", "--otlp-endpoint=otel-collector:4317", "--otlp-insecure", "--rate=50", "--duration=1h",
+              "--service=demo"]
+    depends_on:
+      - otel-collector
+    networks:
+      dorisstack:
+
+volumes:
+  fe-meta:
+  be-storage:
