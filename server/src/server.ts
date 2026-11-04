@@ -44,7 +44,13 @@ const MIME: Record<string, string> = {
 /** Serve a file of the built UI; unknown paths get index.html so client routes reload. */
 async function serveStatic(root: string, pathname: string, res: ServerResponse): Promise<void> {
   const base = resolve(root);
-  let file = resolve(join(base, normalize(decodeURIComponent(pathname))));
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return send(res, 400, { error: 'malformed path' });
+  }
+  let file = resolve(join(base, normalize(decoded)));
   if (file !== base && !file.startsWith(base + sep)) return send(res, 403, { error: 'forbidden' });
   const isFile = await stat(file).then((s) => s.isFile(), () => false);
   if (!isFile) file = join(base, 'index.html');

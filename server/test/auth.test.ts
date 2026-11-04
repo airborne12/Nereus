@@ -37,7 +37,8 @@ before(async () => {
   store = new AuthStore(meta.pool);
   // Doris is never reached by these tests; the pool connects lazily.
   const doris = new Doris({ ...configFromEnv(), port: 1 });
-  const server = createApp({ doris, db: 'otel', auth: { store, secureCookie: false } });
+  const webDir = new URL('../../web/dist', import.meta.url).pathname;
+  const server = createApp({ doris, db: 'otel', auth: { store, secureCookie: false }, webDir });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   stop = async () => {
@@ -86,6 +87,16 @@ test('concurrent setups create exactly one admin', { skip }, async () => {
   assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
   assert.equal(await s.userCount(), 1);
   await meta.drop();
+});
+
+test('malformed or escaping static paths are refused', { skip }, async () => {
+  assert.equal((await fetch(`${base}/%E0%A4%A`)).status, 400);
+  // Encoded ../ collapses inside the UI directory: the answer is the app, never a file outside it.
+  const escape = await fetch(`${base}/..%2f..%2f..%2f..%2fetc%2fpasswd`);
+  const text = await escape.text();
+  assert.equal(escape.status, 200);
+  assert.match(text, /<div id="root">/);
+  assert.doesNotMatch(text, /root:x:/);
 });
 
 test('data endpoints need a login', { skip }, async () => {
