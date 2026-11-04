@@ -2,8 +2,9 @@
 """Synthetic OpenTelemetry data for DorisStack, written the way `dorisexporter` writes it.
 
 Each record is the JSON line the exporter would send (same field names, time format
-"YYYY-MM-DD HH:MM:SS.ffffff", trace duration in microseconds, is_root flag), loaded with
-the same Stream Load headers (format=json, read_json_by_line=true, a label unless
+"YYYY-MM-DD HH:MM:SS.ffffff", trace duration in microseconds, is_root flag; span_kind and
+status_code as the OTLP enum names SPAN_KIND_SERVER / STATUS_CODE_ERROR, checked against a
+real collector run), loaded with the same Stream Load headers (format=json, read_json_by_line=true, a label unless
 group commit is on). Logs carry the trace_id/span_id of the span that emitted them, so
 log <-> trace correlation can be tested.
 
@@ -100,7 +101,7 @@ class Gen:
             t_end = max([cursor] + children) + timedelta(microseconds=self_us)
             failed = error and depth == 0 or (error and rng.random() < 0.3)
             res = resource(rng, svc)
-            kind = "Server" if depth == 0 or rng.random() < 0.5 else "Internal"
+            kind = "SPAN_KIND_SERVER" if depth == 0 or rng.random() < 0.5 else "SPAN_KIND_INTERNAL"
             attrs = {"rpc.system": "grpc"} if svc != "frontend" else {
                 "http.method": name.split(" ")[0] if " " in name else "GET",
                 "http.route": name.split(" ")[-1],
@@ -123,7 +124,7 @@ class Gen:
                             "attributes": {"exception.type": "TimeoutError"}}] if failed else [],
                 "links": [],
                 "status_message": "deadline exceeded" if failed else "",
-                "status_code": "Error" if failed else "Unset",
+                "status_code": "STATUS_CODE_ERROR" if failed else "STATUS_CODE_UNSET",
                 "resource_attributes": res,
                 "scope_name": "io.opentelemetry.grpc",
                 "scope_version": "1.36.0",

@@ -69,7 +69,7 @@ services:
       dorisstack:
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:${OTELCOL_VERSION:-0.120.0}
+    image: otel/opentelemetry-collector-contrib:${OTELCOL_VERSION:-0.164.0}
     command: ["--config=/etc/otelcol/config.yaml"]
     environment:
       DORIS_HTTP: http://172.30.80.2:8030
@@ -86,7 +86,7 @@ services:
 
   # Demo traffic. Remove when real applications send OTLP.
   telemetrygen:
-    image: ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen:v${OTELCOL_VERSION:-0.120.0}
+    image: ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen:v${OTELCOL_VERSION:-0.164.0}
     command: ["traces", "--otlp-endpoint=otel-collector:4317", "--otlp-insecure", "--rate=50", "--duration=1h",
               "--service=demo"]
     depends_on:
