@@ -1,7 +1,8 @@
-# DorisStack single-host stack: Doris FE + BE, schema init, OTel Collector,
-# and telemetrygen as a demo traffic source.
+# DorisStack single-host stack: Doris FE + BE, schema init, OTel Collector, PostgreSQL for
+# metadata, the DorisStack API + UI, and telemetrygen as a demo traffic source.
 #
 #   cd deploy && docker compose up -d
+#   UI: http://localhost:8090 (first visit creates the admin account)
 #   OTLP: grpc localhost:4317, http localhost:4318; Doris MySQL: localhost:9030
 #
 # DORIS_VERSION must be a release with search() (4.x); see README.
@@ -84,6 +85,42 @@ services:
     networks:
       dorisstack:
 
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: dorisstack
+      POSTGRES_PASSWORD: ${META_PASSWORD:-dorisstack}
+      POSTGRES_DB: dorisstack
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dorisstack"]
+      interval: 5s
+      retries: 30
+    networks:
+      dorisstack:
+
+  dorisstack:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      DORIS_HOST: 172.30.80.2
+      DORIS_PORT: "9030"
+      DORIS_DB: otel
+      META_DATABASE_URL: postgres://dorisstack:${META_PASSWORD:-dorisstack}@postgres:5432/dorisstack
+      # Set to 1 behind HTTPS.
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+    ports:
+      - "8090:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      schema-init:
+        condition: service_completed_successfully
+    networks:
+      dorisstack:
+
   # Demo traffic. Remove when real applications send OTLP.
   telemetrygen:
     image: ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen:v${OTELCOL_VERSION:-0.164.0}
@@ -97,3 +134,4 @@ services:
 volumes:
   fe-meta:
   be-storage:
+  pg-data:

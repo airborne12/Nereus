@@ -7,8 +7,8 @@ API service and web UI. "DorisStack" is a working code name.
 Design: <https://claude.ai/artifact/RUahRwDXWZPii2gSTZCU67>
 
 Status: **M0 done, M1 in progress**. Tables, collector configuration, a single-host compose
-file and ingestion checks (M0); the search compiler, the API and the search page (M1). Users and
-login (metadata in PostgreSQL) come next.
+file and ingestion checks (M0); the search compiler, the API, the search page, and users, login
+and API keys with metadata in PostgreSQL (M1). Configurable data sources come next.
 
 ## Layout
 
@@ -21,18 +21,31 @@ login (metadata in PostgreSQL) come next.
 | `bench/load.sh` | Parallel Stream Load of generated files; rows/s and loss check |
 | `bench/verify_search.sh` | `search()` vs plain SQL row-count checks for the query compiler |
 | `bench/otlp_send.py` | The same synthetic data sent as real OTLP/HTTP to a collector |
-| `server/` | API service (TypeScript, Node 24): search compiler, SQL builder, HTTP API |
+| `server/` | API service (TypeScript, Node 24): search compiler, SQL builder, HTTP API, auth |
+| `server/migrations/` | PostgreSQL schema for metadata, applied at start-up |
+| `Dockerfile` | API service and built web UI in one image |
 | `web/` | Search page (React + Vite): query bar with completion, histogram, results, details, trace waterfall |
 
 ## API service
 
 ```bash
 cd server && npm install
-DORIS_HOST=<fe> DORIS_PORT=9030 DORIS_DB=otel PORT=8090 node src/server.ts
+DORIS_HOST=<fe> DORIS_PORT=9030 DORIS_DB=otel PORT=8090 \
+  META_DATABASE_URL=postgres://user:pass@<pg>:5432/dorisstack node src/server.ts
 curl -G localhost:8090/api/search --data-urlencode source=logs \
   --data-urlencode 'q=level:ERROR "timeout after" k8s.pod.name:checkout-*' \
   --data-urlencode from=2026-11-04T00:00:00Z --data-urlencode to=2026-11-05T00:00:00Z
 ```
+
+| Variable | Meaning |
+| --- | --- |
+| `DORIS_HOST`, `DORIS_PORT`, `DORIS_USER`, `DORIS_PASSWORD`, `DORIS_DB` | Doris FE (MySQL protocol) and the telemetry database |
+| `META_DATABASE_URL` | PostgreSQL for users, sessions and API keys; migrations run at start-up |
+| `COOKIE_SECURE=1` | mark the session cookie Secure (behind HTTPS) |
+| `PORT`, `WEB_DIST` | listen port (8090), built UI directory (`web/dist`) |
+
+Every `/api/*` call except `/api/auth/*` needs a login: the browser's session cookie, or
+`Authorization: Bearer <API key>` from scripts (keys are created under Settings).
 
 | Endpoint | Returns |
 | --- | --- |
@@ -41,6 +54,15 @@ curl -G localhost:8090/api/search --data-urlencode source=logs \
 | `GET /api/trace/<id>?from=&to=` | all spans of a trace |
 | `GET /api/fields?source=` | search bar fields: columns, aliases, VARIANT paths with types |
 | `GET /api/values?source=&field=&q=&from=&to=&limit=` | most frequent values of a field among matching rows |
+| `GET /api/auth/status`, `POST /api/auth/setup`, `/login`, `/logout` | session state, first admin, sign in and out |
+| `GET`/`POST /api/keys`, `DELETE /api/keys/<id>` | your API keys (the key itself is returned once) |
+| `GET`/`POST /api/users`, `POST /api/users/<id>/disabled` | user management (admins) |
+
+Users, sessions and keys: passwords are scrypt hashes, session and API key tokens are 256-bit
+random values stored as SHA-256 hashes, sessions last 7 days, 10 failed logins per address and
+email in 5 minutes are throttled, and disabling a user ends their sessions and stops their keys.
+State-changing requests must be JSON or DELETE, which a browser only sends cross-site after a CORS
+preflight this server never answers; the cookie is HttpOnly and SameSite=Lax.
 
 ## Search page
 
@@ -68,9 +90,12 @@ Unknown dotted fields such as `k8s.pod.name` are looked up in the attribute VARI
 `server/src/query/compile.ts` sends indexed terms to one `search()` call and everything else
 (ranges, numbers, unindexed columns) to plain SQL.
 
-Tests: `npm test` (unit), and against a live Doris loaded by `bench/otelgen.py`:
-`DORIS_TEST=1 DORIS_PORT=9030 DORIS_DB=otel_bench npm test` compares every compiled query with a
-hand-written reference SQL and checks that hostile input stays a literal.
+Tests: `npm test` (unit), and against a live Doris loaded by `bench/otelgen.py` plus a PostgreSQL
+that may create databases (`META_ADMIN_URL`, each test file uses a throwaway database):
+`DORIS_TEST=1 DORIS_PORT=9030 DORIS_DB=otel_bench META_ADMIN_URL=postgres://postgres@<pg>/postgres npm test`
+compares every compiled query with a hand-written reference SQL, checks that hostile input stays a
+literal, and exercises setup, login, throttling, API keys and user management. `PG_TEST=1` runs
+only the PostgreSQL tests.
 
 ## Quick start (docker)
 
@@ -80,9 +105,10 @@ DORIS_VERSION=4.0.1 docker compose up -d     # any Doris release that has search
 mysql -h127.0.0.1 -P9030 -uroot -e 'select count(*) from otel.otel_traces'
 ```
 
-Send OTLP to `localhost:4317` (gRPC) or `localhost:4318` (HTTP).
-The compose file has not been run yet: the development machine has no docker. Check the
-`apache/doris` image tags for your version.
+Open <http://localhost:8090>; the first visit creates the admin account. Send OTLP to
+`localhost:4317` (gRPC) or `localhost:4318` (HTTP).
+The compose file and the Dockerfile have not been run yet: the development machine has no
+docker. Check the `apache/doris` image tags for your version.
 
 ## Against an existing Doris
 

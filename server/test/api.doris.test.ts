@@ -5,11 +5,14 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { Doris, configFromEnv } from '../src/db.ts';
+import { AuthStore } from '../src/auth/store.ts';
 import { createApp } from '../src/server.ts';
+import { freshMetaDb } from './meta-helper.ts';
 
 const enabled = process.env.DORIS_TEST === '1';
 const db = process.env.DORIS_DB ?? 'otel_bench';
 let base = '';
+let apiKey = '';
 let doris: Doris;
 let close: () => Promise<void> = async () => {};
 
@@ -20,18 +23,23 @@ const from = new Date(Date.now() - 7 * 86400_000).toISOString();
 before(async () => {
   if (!enabled) return;
   doris = new Doris(configFromEnv());
-  const server = createApp({ doris, db });
+  const meta = await freshMetaDb();
+  const store = new AuthStore(meta.pool);
+  const admin = await store.setup('admin@example.com', 'Admin', 'adminpass1');
+  apiKey = (await store.createApiKey(admin.id, 'tests')).key;
+  const server = createApp({ doris, db, auth: { store, secureCookie: false } });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   close = async () => {
     await new Promise<void>((r) => server.close(() => r()));
     await doris.close();
+    await meta.drop();
   };
 });
 after(() => close());
 
 async function get(path: string, params: Record<string, string> = {}): Promise<{ status: number; body: any }> {
-  const res = await fetch(`${base}${path}?${new URLSearchParams(params)}`);
+  const res = await fetch(`${base}${path}?${new URLSearchParams(params)}`, { headers: { authorization: `Bearer ${apiKey}` } });
   return { status: res.status, body: await res.json() };
 }
 

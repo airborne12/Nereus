@@ -1,6 +1,11 @@
-// DorisStack API service (M1 skeleton): search rows, histogram, trace lookup.
+// DorisStack API service: search, histogram, traces, fields; users, sessions and API keys.
+//
+// Every /api/* path except /api/auth/* needs a session cookie or `Authorization: Bearer <key>`.
 //
 //   GET /healthz
+//   GET  /api/auth/status | POST /api/auth/setup | /api/auth/login | /api/auth/logout
+//   GET|POST /api/keys, DELETE /api/keys/<id>
+//   GET|POST /api/users, POST /api/users/<id>/disabled        (admins)
 //   GET /api/search?source=logs|traces&q=&from=&to=&limit=&columns=a,b
 //   GET /api/histogram?source=&q=&from=&to=&buckets=&groupBy=
 //   GET /api/trace/<trace id>?from=&to=
@@ -17,12 +22,16 @@ import { fieldsFromDescribe, histogramSql, rowsSql, traceSql, valuesSql, type Fi
 import { CompileError } from './query/compile.ts';
 import { logsSource, tracesSource, type Source } from './query/source.ts';
 import { Doris, configFromEnv } from './db.ts';
+import { type AuthContext, authRoutes, authenticate } from './auth/http.ts';
+import { AuthError, AuthStore } from './auth/store.ts';
+import { metaPoolFromEnv, migrate } from './meta.ts';
 
 class BadRequest extends Error {}
 
 export interface AppOptions {
   doris: Doris;
   db: string;
+  auth: AuthContext;
   /** Directory of the built web UI (web/dist); other paths than /api are served from it. */
   webDir?: string;
 }
@@ -60,13 +69,17 @@ function intParam(url: URL, name: string): number | undefined {
   return Number(v);
 }
 
-function send(res: ServerResponse, status: number, body: unknown): void {
+function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string | string[]> = {}): void {
   const json = JSON.stringify(body);
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(json) });
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(json),
+    'cache-control': 'no-store', ...headers,
+  });
   res.end(json);
 }
 
-export function createApp({ doris, db, webDir }: AppOptions): Server {
+export function createApp({ doris, db, auth, webDir }: AppOptions): Server {
+  const account = authRoutes(auth, send);
   const sources: Record<string, Source> = { logs: logsSource(db), traces: tracesSource(db) };
   const sourceParam = (url: URL): Source => {
     const name = param(url, 'source')!;
@@ -87,12 +100,25 @@ export function createApp({ doris, db, webDir }: AppOptions): Server {
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
+    const path = url.pathname;
 
-    if (url.pathname === '/healthz') {
+    if (path === '/healthz') {
       await doris.query('SELECT 1');
       return send(res, 200, { ok: true });
     }
+    if (!path.startsWith('/api/')) {
+      if (req.method !== 'GET' || !webDir) return send(res, 404, { error: 'not found' });
+      return serveStatic(webDir, path, res);
+    }
+    if (path.startsWith('/api/auth/')) {
+      if (await account.handlePublic(req, res, path)) return;
+      return send(res, 404, { error: 'not found' });
+    }
+    const user = await authenticate(auth, req);
+    if (!user) return send(res, 401, { error: 'login required' });
+    if (await account.handleAccount(req, res, path, user)) return;
+    if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
+
     if (url.pathname === '/api/search') {
       const source = sourceParam(url);
       const columns = param(url, 'columns', false)?.split(',').filter(Boolean);
@@ -130,12 +156,13 @@ export function createApp({ doris, db, webDir }: AppOptions): Server {
       });
       return send(res, 200, { spans: await doris.query(sql) });
     }
-    if (webDir && !url.pathname.startsWith('/api/')) return serveStatic(webDir, url.pathname, res);
     return send(res, 404, { error: 'not found' });
   }
 
   return createServer((req, res) => {
     route(req, res).catch((e: unknown) => {
+      if (res.headersSent) return res.destroy();
+      if (e instanceof AuthError) return send(res, e.status, { error: e.message });
       if (e instanceof BadRequest || e instanceof QuerySyntaxError || e instanceof CompileError) {
         return send(res, 400, { error: e.message });
       }
@@ -147,9 +174,13 @@ export function createApp({ doris, db, webDir }: AppOptions): Server {
 
 if (import.meta.main) {
   const doris = new Doris(configFromEnv());
+  const meta = metaPoolFromEnv();
+  const applied = await migrate(meta);
+  if (applied.length) console.log(`applied migrations: ${applied.join(', ')}`);
   const port = Number(process.env.PORT ?? 8090);
   const webDir = process.env.WEB_DIST ?? new URL('../../web/dist', import.meta.url).pathname;
-  createApp({ doris, db: process.env.DORIS_DB ?? 'otel', webDir }).listen(port, () => {
+  const auth = { store: new AuthStore(meta), secureCookie: process.env.COOKIE_SECURE === '1' };
+  createApp({ doris, db: process.env.DORIS_DB ?? 'otel', auth, webDir }).listen(port, () => {
     console.log(`dorisstack server listening on :${port}`);
   });
 }

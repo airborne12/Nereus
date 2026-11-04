@@ -1,16 +1,72 @@
 import type { Row, Span } from './lib/rows.ts';
 import type { SourceName } from './lib/state.ts';
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** Called when any request answers 401, so the app can show the login page. */
+let onUnauthorized: () => void = () => {};
+export function setUnauthorizedHandler(f: () => void): void {
+  onUnauthorized = f;
+}
+
+async function parse<T>(res: Response): Promise<T> {
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 401) onUnauthorized();
+  if (!res.ok) throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
+  return body as T;
+}
 
 async function get<T>(path: string, params: Record<string, string | number | undefined>, signal?: AbortSignal): Promise<T> {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined) qs.set(k, String(v));
-  const res = await fetch(`${path}?${qs}`, { signal });
-  const body = await res.json();
-  if (!res.ok) throw new ApiError(body.error ?? `HTTP ${res.status}`);
-  return body as T;
+  return parse<T>(await fetch(`${path}?${qs}`, { signal }));
 }
+
+async function send<T>(method: 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
+  return parse<T>(await fetch(path, {
+    method,
+    headers: body === undefined ? {} : { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }));
+}
+
+export interface User {
+  id: number;
+  email: string;
+  name: string;
+  role: 'admin' | 'member';
+  disabled?: boolean;
+}
+
+export interface ApiKey {
+  id: number;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revoked: boolean;
+}
+
+export const auth = {
+  // status must not trigger the 401 handler: it is how the app learns it is logged out.
+  status: async () => (await fetch('/api/auth/status')).json() as Promise<{ setupRequired: boolean; user: User | null }>,
+  setup: (email: string, name: string, password: string) => send<{ user: User }>('POST', '/api/auth/setup', { email, name, password }),
+  login: (email: string, password: string) => send<{ user: User }>('POST', '/api/auth/login', { email, password }),
+  logout: () => send<{ ok: true }>('POST', '/api/auth/logout', {}),
+  keys: () => get<{ keys: ApiKey[] }>('/api/keys', {}),
+  createKey: (name: string) => send<{ key: string; apiKey: ApiKey }>('POST', '/api/keys', { name }),
+  revokeKey: (id: number) => send<{ ok: true }>('DELETE', `/api/keys/${id}`),
+  users: () => get<{ users: User[] }>('/api/users', {}),
+  createUser: (u: { email: string; name: string; password: string; role: 'admin' | 'member' }) =>
+    send<{ user: User }>('POST', '/api/users', u),
+  setDisabled: (id: number, disabled: boolean) => send<{ user: User }>('POST', `/api/users/${id}/disabled`, { disabled }),
+};
 
 const iso = (ms: number) => new Date(ms).toISOString();
 

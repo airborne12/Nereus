@@ -128,3 +128,37 @@ body {
 .wf-bar { position: absolute; top: 7px; height: 12px; border-radius: 3px; opacity: 0.85; }
 .wf-bar.err { background: var(--lvl-error); }
 .wf-dur { position: absolute; right: -68px; top: 5px; color: var(--text-2); }
+
+.user-menu { display: flex; align-items: center; gap: 8px; margin-left: 4px; white-space: nowrap; }
+.user-menu .muted { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.btn.active { background: var(--bg-selected); }
+.btn:disabled { opacity: 0.6; cursor: default; }
+
+.login { min-height: 100%; display: flex; align-items: center; justify-content: center; background: var(--bg-2); padding: 16px; }
+.login-card {
+  width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px; padding: 24px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+}
+.login-card h1 { margin: 0; font-size: 20px; }
+.login-card p { margin: 0 0 4px; }
+.login-card label, .settings label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
+.login-card input, .settings input, .settings select {
+  padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-weight: 400;
+}
+.login-card .error { margin: 0; }
+
+.settings { overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; max-width: 1000px; }
+.card { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px 16px; }
+.card h2 { font-size: 15px; margin: 0 0 4px; }
+.card .error { margin: 8px 0; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.row input { flex: 1; min-width: 160px; }
+.fresh-key {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px; margin-bottom: 12px;
+  border: 1px solid var(--lvl-warn); border-radius: 6px;
+}
+.fresh-key code { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+.list { width: 100%; border-collapse: collapse; }
+.list th, .list td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bg-hover); }
+.list th { color: var(--text-2); font-weight: 600; }
+.list tr.revoked td { color: var(--text-2); }

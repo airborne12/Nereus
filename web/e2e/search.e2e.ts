@@ -1,5 +1,6 @@
-// Browser test of the search page against a live Doris loaded by bench/otelgen.py.
-// Starts the API service in-process (serving web/dist), drives headless Chromium.
+// Browser test of the web UI against a live Doris loaded by bench/otelgen.py and a fresh
+// PostgreSQL metadata database. Starts the API service in-process (serving web/dist), drives
+// headless Chromium from first-run setup through search, settings and sign-out.
 //
 //   npm run build && DORIS_PORT=9730 DORIS_DB=otel_bench SHOTS=/tmp/shots npm run e2e
 
@@ -9,7 +10,9 @@ import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { type Browser, type Page, chromium } from 'playwright';
 import { Doris, configFromEnv } from '../../server/src/db.ts';
+import { AuthStore } from '../../server/src/auth/store.ts';
 import { createApp } from '../../server/src/server.ts';
+import { freshMetaDb } from '../../server/test/meta-helper.ts';
 
 const shots = process.env.SHOTS;
 let base = '';
@@ -19,8 +22,10 @@ let stop: () => Promise<void> = async () => {};
 
 before(async () => {
   const doris = new Doris(configFromEnv());
+  const meta = await freshMetaDb();
   const webDir = new URL('../dist', import.meta.url).pathname;
-  const server = createApp({ doris, db: process.env.DORIS_DB ?? 'otel_bench', webDir });
+  const auth = { store: new AuthStore(meta.pool), secureCookie: false };
+  const server = createApp({ doris, db: process.env.DORIS_DB ?? 'otel_bench', auth, webDir });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   browser = await chromium.launch();
@@ -31,6 +36,7 @@ before(async () => {
     await browser.close();
     await new Promise<void>((r) => server.close(() => r()));
     await doris.close();
+    await meta.drop();
   };
 });
 after(() => stop());
@@ -39,6 +45,18 @@ const shot = (name: string) => (shots ? page.screenshot({ path: `${shots}/${name
 const rows = () => page.locator('table.results tbody tr');
 const query = () => page.getByLabel('Search query');
 const settled = () => page.locator('.status', { hasText: /^Showing/ }).waitFor();
+
+test('first run asks for an admin account, then opens search', async () => {
+  await page.goto(`${base}/?source=logs&t=24h`);
+  await page.getByRole('button', { name: 'Create admin account' }).waitFor();
+  await shot('0-setup');
+  await page.getByLabel('Email').fill('admin@example.com');
+  await page.getByLabel('Name').fill('Ada Admin');
+  await page.getByLabel('Password').fill('adminpass1');
+  await page.getByRole('button', { name: 'Create admin account' }).click();
+  await page.getByLabel('Search query').waitFor();
+  assert.match(await page.locator('.user-menu').innerText(), /Ada Admin/);
+});
 
 test('the page loads newest rows and a histogram', async () => {
   await page.goto(`${base}/?source=logs&t=24h`);
@@ -136,4 +154,53 @@ test('Back restores the previous search', async () => {
   await settled();
   assert.equal(await query().inputValue(), 'service:frontend duration:>50000');
   assert.equal(await page.getByRole('alert').count(), 0);
+});
+
+test('settings: an API key is shown once and works as a bearer token', async () => {
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('heading', { name: 'API keys' }).waitFor();
+  await page.getByLabel('New key name').fill('ci');
+  await page.getByRole('button', { name: 'Create key' }).click();
+  const key = await page.getByTestId('new-key').innerText();
+  assert.match(key, /^dsk_[\w-]{43}$/);
+  assert.match(await page.locator('table.list').first().innerText(), /ci\s+dsk_/);
+  await shot('7-settings');
+  const anon = await fetch(`${base}/api/fields?source=logs`);
+  assert.equal(anon.status, 401);
+  const withKey = await fetch(`${base}/api/fields?source=logs`, { headers: { authorization: `Bearer ${key}` } });
+  assert.equal(withKey.status, 200);
+  await page.getByRole('button', { name: 'Revoke ci' }).click();
+  await page.locator('table.list tr.revoked').first().waitFor();
+  assert.equal((await fetch(`${base}/api/fields?source=logs`, { headers: { authorization: `Bearer ${key}` } })).status, 401);
+});
+
+test('an admin adds a member, who can search but not manage users', async () => {
+  await page.getByLabel('New user email').fill('mia@example.com');
+  await page.getByLabel('New user name').fill('Mia');
+  await page.getByLabel('New user password').fill('memberpass');
+  await page.getByRole('button', { name: 'Add user' }).click();
+  await page.getByRole('cell', { name: 'mia@example.com', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('button', { name: 'Sign in' }).waitFor();
+
+  await page.getByLabel('Email').fill('mia@example.com');
+  await page.getByLabel('Password').fill('wrong-password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  assert.match(await page.getByRole('alert').innerText(), /wrong email or password/);
+  await page.getByLabel('Password').fill('memberpass');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('heading', { name: 'API keys' }).waitFor();
+  assert.equal(await page.getByRole('heading', { name: 'Users' }).count(), 0);
+  await page.getByRole('button', { name: 'Search' }).click();
+  await page.getByLabel('Search query').waitFor();
+  await settled();
+  assert.ok(await rows().count() > 0);
+});
+
+test('signing out returns to the login page and closes the API', async () => {
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('button', { name: 'Sign in' }).waitFor();
+  const status = await page.evaluate(() => fetch('/api/fields?source=logs').then((r) => r.status));
+  assert.equal(status, 401);
+  await shot('8-login');
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import * as api from './api.ts';
 import { DetailPanel } from './components/DetailPanel.tsx';
 import { Histogram } from './components/Histogram.tsx';
@@ -35,7 +35,7 @@ function useUrlState(): [SearchState, (s: SearchState) => void] {
   return [state, update];
 }
 
-export function App() {
+export function App({ userMenu }: { userMenu?: ReactNode }) {
   const [state, setState] = useUrlState();
   // "now" for relative windows; moves on every new search and on Refresh.
   const [now, setNow] = useState(() => Date.now());
@@ -44,7 +44,10 @@ export function App() {
   const [hist, setHist] = useState<{ stepSeconds: number; buckets: api.Bucket[] }>({ stepSeconds: 60, buckets: [] });
   const [elapsed, setElapsed] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  // The search the rows on screen answer; it differs from the current one while loading.
+  const searchKey = JSON.stringify([state.source, state.q, range.from, range.to]);
+  const [shownKey, setShownKey] = useState<string | null>(null);
+  const loading = shownKey !== searchKey;
   const [selected, setSelected] = useState<number | null>(null);
 
   const go = (patch: Partial<SearchState>) => {
@@ -55,7 +58,6 @@ export function App() {
 
   useEffect(() => {
     const ac = new AbortController();
-    setLoading(true);
     setError(null);
     const groupBy = state.source === 'logs' ? 'severity_text' : 'status_code';
     Promise.all([
@@ -65,16 +67,16 @@ export function App() {
       setRows(s.rows);
       setElapsed(s.elapsedMs);
       setHist(h);
-      setLoading(false);
+      setShownKey(searchKey);
     }, (e) => {
       if (ac.signal.aborted) return;
       setError(String(e.message ?? e));
       setRows([]);
       setHist({ stepSeconds: 60, buckets: [] });
-      setLoading(false);
+      setShownKey(searchKey);
     });
     return () => ac.abort();
-  }, [state.source, state.q, range]);
+  }, [state.source, state.q, range, searchKey]);
 
   const selectedRow = selected === null ? null : rows[selected] ?? null;
 
@@ -96,6 +98,7 @@ export function App() {
           {!('preset' in state.window) && <option value="custom">Custom</option>}
         </select>
         <button type="button" className="btn" onClick={() => go({})}>Refresh</button>
+        {userMenu}
       </header>
       {!('preset' in state.window) && (
         <div className="range-note">
