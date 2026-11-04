@@ -11,8 +11,8 @@ test('rows: time bounds, compiled filter, newest first', () => {
   assert.equal(
     rowsSql(logs, { ...range, query: 'level:ERROR', limit: 50, columns: ['timestamp', 'body'] }),
     "SELECT timestamp, body FROM otel.otel_logs WHERE timestamp >= '2026-11-04 04:00:00.000' " +
-      "AND timestamp < '2026-11-04 05:00:00.000' AND search('severity_text:ERROR') " +
-      'ORDER BY timestamp DESC LIMIT 50',
+      "AND timestamp < '2026-11-04 05:00:00.000' " +
+      "AND search('(severity_text:ERROR OR severity_text:error OR severity_text:Error)') ORDER BY timestamp DESC LIMIT 50",
   );
 });
 

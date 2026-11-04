@@ -162,3 +162,30 @@ body {
 .list th, .list td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bg-hover); }
 .list th { color: var(--text-2); font-weight: 600; }
 .list tr.revoked td { color: var(--text-2); }
+
+.warning { margin: 8px 12px 0; padding: 8px 10px; border: 1px solid var(--lvl-warn); border-radius: 6px; }
+.warning code { font-family: var(--mono); }
+.link { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+
+/* Phones and narrow windows: the query gets its own row, secondary columns go, details cover the page. */
+@media (max-width: 720px) {
+  .topbar { flex-wrap: wrap; row-gap: 6px; padding: 8px; }
+  .topbar .query { order: 10; flex-basis: 100%; }
+  .user-menu .muted { display: none; }
+  .suggestions { min-width: 0; width: 100%; }
+  .histogram { padding: 8px 8px 0; }
+  .histogram-head { flex-wrap: wrap; gap: 4px 12px; }
+  .legend { gap: 8px; flex-wrap: wrap; }
+  .results .c-svc { display: none; }
+  .results .date { display: none; }
+  .c-time { width: 104px; } .c-lvl { width: 58px; } .c-dur { width: 76px; }
+  .results td, .results th { padding: 3px 6px; }
+  .detail { position: fixed; inset: 0; width: auto; z-index: 25; padding: 0 12px 16px; }
+  .kv { grid-template-columns: 110px 1fr auto; }
+  .trace { width: 100vw; padding: 0 8px 8px; }
+  .wf-row { grid-template-columns: 45% 1fr; }
+  .wf-track { margin-right: 60px; }
+  .wf-dur { right: -56px; }
+  .settings { padding: 8px; }
+  .list { display: block; overflow-x: auto; }
+}

@@ -73,6 +73,43 @@ function numberLiteral(v: string, field: string): string {
   return v;
 }
 
+const UNIT_RE = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+))(us|µs|ms|s|m|h)$/;
+const MICROS: Record<string, number> = { us: 1, µs: 1, ms: 1000, s: 1e6, m: 6e7, h: 3.6e9 };
+
+/** A number for column `c`; a column with a unit also takes 50ms, 1.5s, 250us, 2m. */
+function columnNumber(c: Column, v: string): string {
+  const m = c.unit === 'us' ? UNIT_RE.exec(v) : null;
+  if (m) return String(Math.round(Number(m[1]) * MICROS[m[2]!]!));
+  if (c.unit === 'us' && !NUMBER_RE.test(v)) {
+    throw new CompileError(`'${v}' is not a duration (field ${c.name}: a number of microseconds, or 50ms, 1.5s, 2m)`);
+  }
+  return numberLiteral(v, c.name);
+}
+
+function capitalise(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+/**
+ * The stored values a typed value stands for: an alias (error -> STATUS_CODE_ERROR) and, on a
+ * case-insensitive column, the upper, lower and capitalised forms. Wildcards are kept.
+ */
+function valueVariants(c: Column, segments: Segment[]): Segment[][] {
+  const text = literalText(segments);
+  const alias = !isWildcard(segments) ? c.valueAliases?.[text.toLowerCase()] : undefined;
+  const base: Segment[] = alias !== undefined ? [{ lit: alias }] : segments;
+  if (!c.caseInsensitive) return [base];
+  // Fixed order (upper, lower, capitalised, then the typed form if it is none of them).
+  const forms = [(x: string) => x.toUpperCase(), (x: string) => x.toLowerCase(), capitalise, (x: string) => x];
+  const out = new Map<string, Segment[]>();
+  for (const f of forms) {
+    // Capitalise only the first literal piece; later pieces of a wildcard term are lower-cased.
+    const v = base.map((seg, i) => ('lit' in seg ? { lit: f === capitalise && i > 0 ? seg.lit.toLowerCase() : f(seg.lit) } : seg));
+    out.set(literalText(v), v);
+  }
+  return [...out.values()];
+}
+
 function datetimeLiteral(v: string, field: string): string {
   if (!DATETIME_RE.test(v)) throw new CompileError(`'${v}' is not a date or time (field ${field})`);
   return sqlString(v.replace('T', ' '));
@@ -129,13 +166,16 @@ function compileTerm(t: Target, segments: Segment[]): Frag {
   const c = t.column;
   if (t.path === null && c.type === 'number') {
     if (isWildcard(segments)) throw new CompileError(`wildcards are not allowed on number field ${c.name}`);
-    return { sql: `${c.name} = ${numberLiteral(literalText(segments), c.name)}` };
+    return { sql: `${c.name} = ${columnNumber(c, literalText(segments))}` };
   }
   if (t.path === null && c.type === 'datetime') {
     if (isWildcard(segments)) throw new CompileError(`wildcards are not allowed on time field ${c.name}`);
     return { sql: `${c.name} = ${datetimeLiteral(literalText(segments), c.name)}` };
   }
-  if (c.index !== 'none') return { dsl: `${dslField(t)}:${dslTerm(segments)}` };
+  if (c.index !== 'none') {
+    const terms = valueVariants(c, segments).map((v) => `${dslField(t)}:${dslTerm(v)}`);
+    return { dsl: terms.length === 1 ? terms[0]! : `(${terms.join(' OR ')})` };
+  }
   const expr = sqlExpr(t, 'STRING');
   return isWildcard(segments)
     ? { sql: `${expr} LIKE ${sqlString(likePattern(segments))}` }
@@ -149,7 +189,7 @@ function compilePhrase(t: Target, text: string): Frag {
   }
   if (c.index === 'fulltext') return { dsl: `${dslField(t)}:${dslPhrase(text)}` };
   // An untokenized index holds whole values, so a quoted value is one exact term.
-  if (c.index === 'keyword') return { dsl: `${dslField(t)}:${dslTerm([{ lit: text }])}` };
+  if (c.index === 'keyword') return compileTerm(t, [{ lit: text }]);
   return { sql: `${sqlExpr(t, 'STRING')} LIKE ${sqlString(`%${likePattern([{ lit: text }])}%`)}` };
 }
 
@@ -169,7 +209,7 @@ function compileRange(t: Target, n: Extract<Node, { kind: 'range' }>): Frag {
   let lit: (v: string) => string;
   if (t.path === null && t.column.type === 'number') {
     expr = t.column.name;
-    lit = (v) => numberLiteral(v, t.column.name);
+    lit = (v) => columnNumber(t.column, v);
   } else if (t.path === null && t.column.type === 'datetime') {
     expr = t.column.name;
     lit = (v) => datetimeLiteral(v, t.column.name);
@@ -192,6 +232,20 @@ function compileExists(t: Target): Frag {
 
 function leaf(source: Source, n: Exclude<Node, { kind: 'and' | 'or' | 'not' }>): Frag {
   const targets = resolve(source, n.field);
+  // A pasted trace or span id is searched in its id column too.
+  if (n.field === null && n.kind === 'term' && !isWildcard(n.segments)) {
+    const text = literalText(n.segments);
+    for (const id of source.idColumns ?? []) {
+      const column = columnByName(source, id.column);
+      if (column && id.pattern.test(text)) {
+        return combine('OR', compileTargets(n, targets), compileTerm({ column, path: null }, [{ lit: text.toLowerCase() }]));
+      }
+    }
+  }
+  return compileTargets(n, targets);
+}
+
+function compileTargets(n: Exclude<Node, { kind: 'and' | 'or' | 'not' }>, targets: Target[]): Frag {
   const frags = targets.map((t) => {
     try {
       switch (n.kind) {
@@ -249,4 +303,64 @@ function compileNode(source: Source, n: Node): Frag {
 export function compileWhere(source: Source, query: string): string {
   const ast = parseQuery(query);
   return ast === null ? 'TRUE' : toSql(compileNode(source, ast));
+}
+
+// ---------------------------------------------------------------- unknown fields
+
+function fieldsOf(n: Node, out: Set<string>): Set<string> {
+  if (n.kind === 'and' || n.kind === 'or') {
+    fieldsOf(n.left, out);
+    fieldsOf(n.right, out);
+  } else if (n.kind === 'not') {
+    fieldsOf(n.child, out);
+  } else if (n.field !== null) {
+    out.add(n.field);
+  }
+  return out;
+}
+
+function editDistance(a: string, b: string): number {
+  const d = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = d[0]!;
+    d[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cur = d[j]!;
+      d[j] = Math.min(d[j]! + 1, d[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+  }
+  return d[b.length]!;
+}
+
+export interface UnknownField {
+  field: string;
+  /** The closest known field, when one is close enough to be a likely typo. */
+  suggestion: string | null;
+}
+
+/**
+ * Fields of the query that are neither columns, aliases nor attribute paths seen in the data
+ * (`known`, as /api/fields lists them). They compile, but match nothing; the UI warns.
+ */
+export function unknownFields(source: Source, query: string, known: string[]): UnknownField[] {
+  const ast = parseQuery(query);
+  if (ast === null) return [];
+  const knownSet = new Set(known);
+  const out: UnknownField[] = [];
+  for (const field of fieldsOf(ast, new Set())) {
+    const name = source.aliases[field] ?? field;
+    if (knownSet.has(field) || columnByName(source, name)) continue;
+    const variant = source.columns.find((c) => c.type === 'variant' && name.startsWith(`${c.name}.`));
+    const path = variant ? name.slice(variant.name.length + 1) : null;
+    if (path !== null && (knownSet.has(path) || knownSet.has(name))) continue;
+    let best: string | null = null;
+    let bestD = Infinity;
+    for (const k of [...knownSet, ...Object.keys(source.aliases)]) {
+      const dist = editDistance(field.toLowerCase(), k.toLowerCase());
+      if (dist < bestD) [best, bestD] = [k, dist];
+    }
+    out.push({ field, suggestion: bestD <= Math.max(1, Math.floor(field.length / 4)) ? best : null });
+  }
+  return out;
 }

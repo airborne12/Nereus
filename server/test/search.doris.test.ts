@@ -38,6 +38,8 @@ const logCases: [string, string][] = [
   ['severity_number:>=13 service:checkout', "severity_number >= 13 AND service_name = 'checkout'"],
   ['upstream timeout', "body MATCH_ALL 'upstream timeout'"],
   ['declined OR refused', "body MATCH_ANY 'declined refused'"],
+  ['level:error', "severity_text = 'ERROR'"],
+  ['level:warning service:cart', "severity_text = 'WARN' AND service_name = 'cart'"],
 ];
 
 const traceCases: [string, string][] = [
@@ -46,10 +48,23 @@ const traceCases: [string, string][] = [
   ['service:frontend kind:SPAN_KIND_SERVER status:STATUS_CODE_ERROR',
     "service_name = 'frontend' AND span_kind = 'SPAN_KIND_SERVER' AND status_code = 'STATUS_CODE_ERROR'"],
   ['name:"GET /checkout"', "span_name = 'GET /checkout'"],
-  ['name:GET*', "span_name LIKE 'GET%'"],
+  // span_name is tokenized: GET* matches words starting with "get" (GET /, GetCart, GetQuote).
+  ['name:GET*', "lower(span_name) REGEXP '(^|[^a-z0-9])get[a-z0-9]*'"],
+  ['checkout', "service_name = 'checkout' OR lower(span_name) REGEXP '(^|[^a-z0-9])checkout([^a-z0-9]|$)'"],
+  ['status:error kind:server', "status_code = 'STATUS_CODE_ERROR' AND span_kind = 'SPAN_KIND_SERVER'"],
+  ['duration:>50ms', 'duration > 50000'],
+  ['duration:[1ms TO 2.5ms]', 'duration BETWEEN 1000 AND 2500'],
   ['service:frontend duration:>50000', "service_name = 'frontend' AND duration > 50000"],
   ['is_root:1 -status:STATUS_CODE_UNSET', "is_root = 1 AND status_code <> 'STATUS_CODE_UNSET'"],
 ];
+
+test('traces: a pasted trace id finds every span of the trace', { skip: !enabled }, () => {
+  const tid = scalar(`SELECT trace_id FROM ${traces.table} WHERE is_root = 1 ORDER BY trace_id LIMIT 1`);
+  const got = scalar(`SELECT count(*) FROM ${traces.table} WHERE ${compileWhere(traces, tid.toUpperCase())}`);
+  const want = scalar(`SELECT count(*) FROM ${traces.table} WHERE trace_id = '${tid}'`);
+  assert.equal(got, want);
+  assert.ok(Number(want) >= 1);
+});
 
 for (const [source, cases] of [[logs, logCases], [traces, traceCases]] as const) {
   for (const [query, reference] of cases) {

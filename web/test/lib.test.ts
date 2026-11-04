@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addFilter, quoteValue, tokenAt } from '../src/lib/filters.ts';
+import { addFilter, quoteValue, replaceField, tokenAt } from '../src/lib/filters.ts';
 import { rowFields, waterfall, type Span } from '../src/lib/rows.ts';
 import { DEFAULT_STATE, dorisTimeToMs, parseState, resolveWindow, serializeState } from '../src/lib/state.ts';
 
@@ -67,4 +67,10 @@ test('waterfall orders spans as a tree and measures offsets', () => {
   assert.equal(rows[2]!.offsetMs, 120);
   assert.equal(rows[2]!.durationMs, 10);
   assert.equal(totalMs, 1100);
+});
+
+test('replaceField fixes a misspelled field everywhere, and only as a field', () => {
+  assert.equal(replaceField('levl:ERROR (levl:WARN OR -levl:INFO) levl', 'levl', 'level'),
+    'level:ERROR (level:WARN OR -level:INFO) levl');
+  assert.equal(replaceField('k8s.pod.nme:a xk8s.pod.nme:b', 'k8s.pod.nme', 'k8s.pod.name'), 'k8s.pod.name:a xk8s.pod.nme:b');
 });

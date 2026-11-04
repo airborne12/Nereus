@@ -28,3 +28,9 @@ export function tokenAt(q: string, cursor: number): { start: number; end: number
   if (colon < 0) return { start: start + offset, end, field: null, value: text };
   return { start: start + offset, end, field: text.slice(0, colon), value: text.slice(colon + 1).replace(/^"/, '') };
 }
+
+/** Rename field `from` to `to` wherever it is used as `from:` in the query. */
+export function replaceField(q: string, from: string, to: string): string {
+  const esc = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return q.replace(new RegExp(`(^|[\\s(-])${esc}:`, 'g'), `$1${to}:`);
+}

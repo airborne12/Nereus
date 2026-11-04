@@ -109,3 +109,12 @@ test('top values of a field honour the query', { skip: !enabled }, async () => {
   const counts = body.values.map((v: any) => Number(v.n));
   assert.deepEqual(counts, [...counts].sort((a, b) => b - a));
 });
+
+test('search warns about fields the data does not have', { skip: !enabled }, async () => {
+  const typo = await get('/api/search', { source: 'logs', q: 'levl:ERROR', from, to, limit: '5' });
+  assert.equal(typo.status, 200);
+  assert.deepEqual(typo.body.warnings, [{ kind: 'unknown_field', field: 'levl', suggestion: 'level' }]);
+  const fine = await get('/api/search', { source: 'logs', q: 'level:error k8s.pod.name:cart-1', from, to, limit: '5' });
+  assert.deepEqual(fine.body.warnings, []);
+  assert.ok(fine.body.rows.length > 0, 'lower-case level matches');
+});

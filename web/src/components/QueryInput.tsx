@@ -87,7 +87,7 @@ export function QueryInput({ source, value, range, onSubmit }: Props) {
         ref={input}
         className="query-input"
         aria-label="Search query"
-        placeholder={source === 'logs' ? 'level:ERROR "timeout after" k8s.pod.name:checkout-*' : 'service:frontend duration:>50000'}
+        placeholder={source === 'logs' ? 'level:error "timeout after" k8s.pod.name:checkout-*' : 'checkout status:error duration:>50ms'}
         value={text}
         spellCheck={false}
         onChange={(e) => {

@@ -19,7 +19,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { QuerySyntaxError } from './query/ast.ts';
 import { fieldsFromDescribe, histogramSql, rowsSql, traceSql, valuesSql, type Field } from './query/build.ts';
-import { CompileError } from './query/compile.ts';
+import { CompileError, unknownFields } from './query/compile.ts';
 import { logsSource, tracesSource, type Source } from './query/source.ts';
 import { Doris, configFromEnv } from './db.ts';
 import { type AuthContext, authRoutes, authenticate } from './auth/http.ts';
@@ -133,8 +133,11 @@ export function createApp({ doris, db, auth, webDir }: AppOptions): Server {
         limit: intParam(url, 'limit'), columns,
       });
       const started = performance.now();
-      const rows = await doris.query(sql);
-      return send(res, 200, { rows, elapsedMs: Math.round(performance.now() - started) });
+      const [rows, known] = await Promise.all([doris.query(sql), fields(source)]);
+      // Fields the data has never had: the query is valid but they match nothing.
+      const warnings = unknownFields(source, param(url, 'q', false) ?? '', known.map((f) => f.name))
+        .map((u) => ({ kind: 'unknown_field', ...u }));
+      return send(res, 200, { rows, warnings, elapsedMs: Math.round(performance.now() - started) });
     }
     if (url.pathname === '/api/histogram') {
       const source = sourceParam(url);

@@ -5,7 +5,7 @@ import { Histogram } from './components/Histogram.tsx';
 import { QueryInput } from './components/QueryInput.tsx';
 import { ResultsTable } from './components/ResultsTable.tsx';
 import { TraceView } from './components/TraceView.tsx';
-import { addFilter } from './lib/filters.ts';
+import { addFilter, replaceField } from './lib/filters.ts';
 import type { Row } from './lib/rows.ts';
 import { PRESETS, type SearchState, parseState, resolveWindow, serializeState } from './lib/state.ts';
 
@@ -43,6 +43,7 @@ export function App({ userMenu }: { userMenu?: ReactNode }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [hist, setHist] = useState<{ stepSeconds: number; buckets: api.Bucket[] }>({ stepSeconds: 60, buckets: [] });
   const [elapsed, setElapsed] = useState<number | null>(null);
+  const [warnings, setWarnings] = useState<api.Warning[]>([]);
   const [error, setError] = useState<string | null>(null);
   // The search the rows on screen answer; it differs from the current one while loading.
   const searchKey = JSON.stringify([state.source, state.q, range.from, range.to]);
@@ -66,12 +67,14 @@ export function App({ userMenu }: { userMenu?: ReactNode }) {
     ]).then(([s, h]) => {
       setRows(s.rows);
       setElapsed(s.elapsedMs);
+      setWarnings(s.warnings ?? []);
       setHist(h);
       setShownKey(searchKey);
     }, (e) => {
       if (ac.signal.aborted) return;
       setError(String(e.message ?? e));
       setRows([]);
+      setWarnings([]);
       setHist({ stepSeconds: 60, buckets: [] });
       setShownKey(searchKey);
     });
@@ -106,6 +109,18 @@ export function App({ userMenu }: { userMenu?: ReactNode }) {
         </div>
       )}
       {error && <div className="error" role="alert">{error}</div>}
+      {!error && warnings.map((w) => (
+        <div className="warning" role="status" key={w.field}>
+          No data has a field <code>{w.field}</code>, so it matches nothing.
+          {w.suggestion && (
+            <> Did you mean{' '}
+              <button type="button" className="link" onClick={() => go({ q: replaceField(state.q, w.field, w.suggestion!) })}>
+                {w.suggestion}
+              </button>?
+            </>
+          )}
+        </div>
+      ))}
       <Histogram buckets={hist.buckets} stepSeconds={hist.stepSeconds} range={range}
         series={state.source === 'logs' ? LOG_SERIES : TRACE_SERIES}
         onSelect={(r) => go({ window: r })} />

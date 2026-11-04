@@ -156,6 +156,67 @@ test('Back restores the previous search', async () => {
   assert.equal(await page.getByRole('alert').count(), 0);
 });
 
+test('lower-case levels and a misspelled field', async () => {
+  await page.goto(`${base}/?source=logs&t=24h`);
+  await settled();
+  await query().fill('level:error');
+  await query().press('Escape');
+  await query().press('Enter');
+  await page.waitForURL(/q=level/);
+  await settled();
+  const levels = [...new Set(await page.locator('td.c-lvl').allInnerTexts())];
+  assert.deepEqual(levels, ['ERROR']);
+  await query().fill('levl:ERROR');
+  await query().press('Escape');
+  await query().press('Enter');
+  const warning = page.getByRole('status').filter({ hasText: 'levl' });
+  await warning.waitFor();
+  assert.match(await warning.innerText(), /No data has a field levl.*Did you mean level\?/s);
+  await shot('6b-warning');
+  await warning.getByRole('button', { name: 'level' }).click();
+  await page.waitForURL(/q=level%3AERROR/);
+  await settled();
+  assert.equal(await query().inputValue(), 'level:ERROR');
+  assert.ok(await rows().count() > 0);
+});
+
+test('traces: bare words, short status values, unit durations, a pasted trace id', async () => {
+  await page.goto(`${base}/?source=traces&t=24h&q=${encodeURIComponent('checkout status:error duration:>1ms')}`);
+  await settled();
+  assert.ok(await rows().count() > 0, 'checkout status:error duration:>1ms finds spans');
+  const statuses = [...new Set(await page.locator('table.results tbody td.c-lvl').allInnerTexts())];
+  assert.deepEqual(statuses, ['error']);
+  await rows().first().click();
+  const tid = await page.locator('.kv', { hasText: 'trace_id' }).locator('dd').first().innerText();
+  await page.getByRole('button', { name: 'Close details' }).click();
+  await query().fill(tid.toUpperCase());
+  await query().press('Escape');
+  await query().press('Enter');
+  await page.waitForURL(new RegExp(`q=${tid.toUpperCase()}`));
+  await settled();
+  const n = await rows().count();
+  assert.ok(n >= 2, `spans of the pasted trace: ${n}`);
+});
+
+test('a phone-width screen has no horizontal scroll and keeps the body column', async () => {
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: await page.context().storageState() });
+  const p = await phone.newPage();
+  await p.goto(`${base}/?source=logs&t=24h`);
+  await p.locator('.status', { hasText: /^Showing/ }).waitFor();
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 0);
+  const body = (await p.locator('table.results tbody td.c-body').first().boundingBox())!;
+  assert.ok(body.width > 150, `body column ${body.width}px wide`);
+  const input = (await p.getByLabel('Search query').boundingBox())!;
+  assert.ok(input.width > 300, `query box ${input.width}px wide`);
+  await p.locator('table.results tbody tr').first().click();
+  const panel = (await p.getByLabel('Event details').boundingBox())!;
+  assert.equal(Math.round(panel.width), 390);
+  if (shots) await p.screenshot({ path: `${shots}/9-phone-detail.png` });
+  await p.getByRole('button', { name: 'Close details' }).click();
+  if (shots) await p.screenshot({ path: `${shots}/9-phone.png` });
+  await phone.close();
+});
+
 test('settings: an API key is shown once and works as a bearer token', async () => {
   await page.getByRole('button', { name: 'Settings' }).click();
   await page.getByRole('heading', { name: 'API keys' }).waitFor();
@@ -163,6 +224,8 @@ test('settings: an API key is shown once and works as a bearer token', async () 
   await page.getByRole('button', { name: 'Create key' }).click();
   const key = await page.getByTestId('new-key').innerText();
   assert.match(key, /^dsk_[\w-]{43}$/);
+  // The list reloads after the key is shown; wait for its row.
+  await page.locator('table.list').first().getByRole('cell', { name: 'ci', exact: true }).waitFor();
   assert.match(await page.locator('table.list').first().innerText(), /ci\s+dsk_/);
   await shot('7-settings');
   const anon = await fetch(`${base}/api/fields?source=logs`);

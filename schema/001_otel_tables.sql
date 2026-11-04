@@ -72,7 +72,9 @@ CREATE TABLE IF NOT EXISTS ${DB}.otel_traces (
     INDEX idx_trace_id (trace_id) USING INVERTED,
     INDEX idx_span_id (span_id) USING INVERTED,
     INDEX idx_parent_span_id (parent_span_id) USING INVERTED,
-    INDEX idx_span_name (span_name) USING INVERTED,
+    -- Tokenized like ClickStack's lower(SpanName) index: a bare word finds "GET /checkout".
+    INDEX idx_span_name (span_name) USING INVERTED
+        PROPERTIES ("parser" = "unicode", "lower_case" = "true", "support_phrase" = "true"),
     INDEX idx_span_kind (span_kind) USING INVERTED,
     INDEX idx_status_code (status_code) USING INVERTED,
     INDEX idx_duration (duration) USING INVERTED,

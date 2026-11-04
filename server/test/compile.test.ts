@@ -21,7 +21,7 @@ test('bare words search the default field and are ANDed', () => {
 });
 
 test('fields, aliases and phrases', () => {
-  assert.equal(w('level:ERROR'), "search('severity_text:ERROR')");
+  assert.equal(w('level:ERROR'), "search('(severity_text:ERROR OR severity_text:error OR severity_text:Error)')");
   assert.equal(w('service:checkout "timeout after"'),
     `search('(service_name:checkout AND body:"timeout after")')`);
   // A keyword index holds whole values: a quoted value is one escaped term.
@@ -31,8 +31,8 @@ test('fields, aliases and phrases', () => {
 test('boolean operators, precedence and negation', () => {
   assert.equal(w('a OR b c'), "search('(body:a OR (body:b AND body:c))')");
   assert.equal(w('(a OR b) AND NOT c'), "search('((body:a OR body:b) AND NOT body:c)')");
-  assert.equal(w('-level:DEBUG'), "search('NOT severity_text:DEBUG')");
-  assert.equal(w('level:(WARN OR ERROR)'), "search('(severity_text:WARN OR severity_text:ERROR)')");
+  assert.equal(w('-level:DEBUG'), "search('NOT (severity_text:DEBUG OR severity_text:debug OR severity_text:Debug)')");
+  assert.equal(w('service:(cart OR payment)'), "search('(service_name:cart OR service_name:payment)')");
 });
 
 test('wildcards and regexes go to search() on indexed fields', () => {
@@ -96,4 +96,46 @@ test('syntax errors carry a position', () => {
   assert.throws(() => parseQuery('(a OR b'), QuerySyntaxError);
   assert.throws(() => parseQuery('a:[1 2]'), QuerySyntaxError);
   assert.throws(() => parseQuery('a:(b:c)'), QuerySyntaxError);
+});
+
+test('case-insensitive fields match the usual spellings, aliases map short values', () => {
+  assert.equal(w('level:error'), "search('(severity_text:ERROR OR severity_text:error OR severity_text:Error)')");
+  assert.equal(w('level:Error'), "search('(severity_text:ERROR OR severity_text:error OR severity_text:Error)')");
+  assert.equal(w('level:warning'), "search('(severity_text:WARN OR severity_text:warn OR severity_text:Warn)')");
+  assert.equal(w('level:err*'), "search('(severity_text:ERR* OR severity_text:err* OR severity_text:Err*)')");
+  assert.equal(wt('status:error'), "search('(status_code:STATUS_CODE_ERROR OR status_code:status_code_error OR status_code:Status_code_error)')");
+  assert.equal(wt('kind:server'), "search('(span_kind:SPAN_KIND_SERVER OR span_kind:span_kind_server OR span_kind:Span_kind_server)')");
+  assert.equal(w('level:eRRor'), "search('(severity_text:ERROR OR severity_text:error OR severity_text:Error OR severity_text:eRRor)')");
+  // Fields without the flag stay exact.
+  assert.equal(w('service:Cart'), "search('service_name:Cart')");
+});
+
+test('durations take unit suffixes; plain numbers stay microseconds', () => {
+  assert.equal(wt('duration:>50ms'), 'duration > 50000');
+  assert.equal(wt('duration:[1.5s TO 2m]'), 'duration >= 1500000 AND duration <= 120000000');
+  assert.equal(wt('duration:250us'), 'duration = 250');
+  assert.equal(wt('duration:>500'), 'duration > 500');
+  assert.throws(() => wt('duration:>fast'), /not a duration/);
+  assert.throws(() => w('severity_number:>5ms'), /not a number/);
+});
+
+test('a pasted trace or span id also searches the id column', () => {
+  const tid = '4BF92F3577B34DA6A3CE929D0E0E4736';
+  assert.equal(wt(tid), `search('((span_name:${tid} OR service_name:${tid}) OR trace_id:${tid.toLowerCase()})')`);
+  assert.equal(w('00f067aa0ba902b7'), "search('(body:00f067aa0ba902b7 OR span_id:00f067aa0ba902b7)')");
+  assert.equal(w('deadbeef'), "search('body:deadbeef')");
+});
+
+test('traces: bare words search span names and services', () => {
+  assert.equal(wt('checkout'), "search('(span_name:checkout OR service_name:checkout)')");
+  assert.equal(wt('name:"GET /checkout"'), `search('span_name:"GET /checkout"')`);
+});
+
+test('unknown fields are reported with a likely correction', async () => {
+  const { unknownFields } = await import('../src/query/compile.ts');
+  const known = ['body', 'level', 'severity_text', 'service', 'service_name', 'k8s.pod.name', 'thread.id'];
+  assert.deepEqual(unknownFields(logs, 'levl:ERROR timeout', known), [{ field: 'levl', suggestion: 'level' }]);
+  assert.deepEqual(unknownFields(logs, 'k8s.pod.nme:x', known), [{ field: 'k8s.pod.nme', suggestion: 'k8s.pod.name' }]);
+  assert.deepEqual(unknownFields(logs, 'customer.tier:gold', known), [{ field: 'customer.tier', suggestion: null }]);
+  assert.deepEqual(unknownFields(logs, 'level:ERROR resource_attributes.k8s.pod.name:a scope_name:x -k8s.pod.name:b', known), []);
 });

@@ -17,6 +17,13 @@ export function formatTime(t: unknown): string {
     `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 }
 
+/** The time cell: the date part can be hidden on narrow screens. */
+function TimeCell({ t }: { t: unknown }) {
+  const text = formatTime(t);
+  const cut = text.lastIndexOf(' ');
+  return <td className="c-time mono"><span className="date">{text.slice(0, cut + 1)}</span>{text.slice(cut + 1)}</td>;
+}
+
 function levelClass(level: unknown): string {
   const l = String(level ?? '').toUpperCase();
   if (l.startsWith('ERR') || l === 'FATAL') return 'lvl lvl-error';
@@ -47,7 +54,7 @@ export function ResultsTable({ source, rows, selected, onSelect }: Props) {
       <tbody>
         {rows.map((r, i) => (
           <tr key={i} className={i === selected ? 'selected' : ''} onClick={() => onSelect(i)} data-row={i}>
-            <td className="c-time mono">{formatTime(r.timestamp)}</td>
+            <TimeCell t={r.timestamp} />
             <td className="c-svc">{String(r.service_name ?? '')}</td>
             {source === 'logs' ? (
               <>

@@ -14,6 +14,15 @@ export interface Column {
   name: string;
   type: ColumnType;
   index: IndexKind;
+  /**
+   * Values are matched in their upper-case, lower-case and capitalised forms (ERROR, error,
+   * Error), for keyword-indexed fields whose writers disagree on case, such as log levels.
+   */
+  caseInsensitive?: boolean;
+  /** Short values users type -> stored values, matched case-insensitively (error -> STATUS_CODE_ERROR). */
+  valueAliases?: Record<string, string>;
+  /** Unit of a number column; values may then carry a unit suffix (50ms, 1.5s). */
+  unit?: 'us';
 }
 
 export interface Source {
@@ -26,10 +35,18 @@ export interface Source {
   attributeColumns: string[];
   /** Search bar field name -> column name (or column.path). */
   aliases: Record<string, string>;
+  /** A bare term that looks like an id also matches this column (pasted trace or span ids). */
+  idColumns?: { pattern: RegExp; column: string }[];
   columns: Column[];
 }
 
-const col = (name: string, type: ColumnType, index: IndexKind = 'none'): Column => ({ name, type, index });
+const col = (name: string, type: ColumnType, index: IndexKind = 'none', extra: Partial<Column> = {}): Column =>
+  ({ name, type, index, ...extra });
+
+const ID_COLUMNS = [
+  { pattern: /^[0-9a-fA-F]{32}$/, column: 'trace_id' },
+  { pattern: /^[0-9a-fA-F]{16}$/, column: 'span_id' },
+];
 
 /** otel_logs as created by schema/001_otel_tables.sql. */
 export function logsSource(db = 'otel'): Source {
@@ -48,6 +65,7 @@ export function logsSource(db = 'otel'): Source {
       trace: 'trace_id',
       span: 'span_id',
     },
+    idColumns: ID_COLUMNS,
     columns: [
       col('service_name', 'string', 'keyword'),
       col('timestamp', 'datetime'),
@@ -55,7 +73,7 @@ export function logsSource(db = 'otel'): Source {
       col('trace_id', 'string', 'keyword'),
       col('span_id', 'string', 'keyword'),
       col('severity_number', 'number'),
-      col('severity_text', 'string', 'keyword'),
+      col('severity_text', 'string', 'keyword', { caseInsensitive: true, valueAliases: { warning: 'WARN', err: 'ERROR' } }),
       col('body', 'string', 'fulltext'),
       col('resource_attributes', 'variant', 'keyword'),
       col('log_attributes', 'variant', 'keyword'),
@@ -71,7 +89,7 @@ export function tracesSource(db = 'otel'): Source {
     name: 'traces',
     table: `${db}.otel_traces`,
     timestampColumn: 'timestamp',
-    defaultFields: ['span_name'],
+    defaultFields: ['span_name', 'service_name'],
     attributeColumns: ['span_attributes', 'resource_attributes'],
     aliases: {
       service: 'service_name',
@@ -82,6 +100,7 @@ export function tracesSource(db = 'otel'): Source {
       span: 'span_id',
       parent: 'parent_span_id',
     },
+    idColumns: ID_COLUMNS,
     columns: [
       col('service_name', 'string', 'keyword'),
       col('timestamp', 'datetime'),
@@ -90,13 +109,22 @@ export function tracesSource(db = 'otel'): Source {
       col('span_id', 'string', 'keyword'),
       col('trace_state', 'string'),
       col('parent_span_id', 'string', 'keyword'),
-      col('span_name', 'string', 'keyword'),
-      col('span_kind', 'string', 'keyword'),
+      col('span_name', 'string', 'fulltext'),
+      col('span_kind', 'string', 'keyword', {
+        caseInsensitive: true,
+        valueAliases: {
+          server: 'SPAN_KIND_SERVER', client: 'SPAN_KIND_CLIENT', internal: 'SPAN_KIND_INTERNAL',
+          producer: 'SPAN_KIND_PRODUCER', consumer: 'SPAN_KIND_CONSUMER',
+        },
+      }),
       col('end_time', 'datetime'),
-      col('duration', 'number', 'keyword'),
+      col('duration', 'number', 'keyword', { unit: 'us' }),
       col('span_attributes', 'variant', 'keyword'),
       col('status_message', 'string'),
-      col('status_code', 'string', 'keyword'),
+      col('status_code', 'string', 'keyword', {
+        caseInsensitive: true,
+        valueAliases: { error: 'STATUS_CODE_ERROR', ok: 'STATUS_CODE_OK', unset: 'STATUS_CODE_UNSET' },
+      }),
       col('resource_attributes', 'variant', 'keyword'),
       col('scope_name', 'string'),
       col('scope_version', 'string'),

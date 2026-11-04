@@ -85,7 +85,12 @@ Browser tests (Playwright + Chromium) drive the built page against a live Doris:
 
 The search bar language is a Lucene query_string subset: `field:value`, `"phrases"`,
 `wild*cards`, `/regex/`, `[a TO b]`, `>=x`, `AND`/`OR`/`NOT`/`-`, parentheses, `field:(a OR b)`,
-`field:*`; adjacent terms are ANDed and bare terms search `body` (logs) or `span_name` (traces).
+`field:*`; adjacent terms are ANDed and bare terms search `body` (logs) or `span_name` and
+`service_name` (traces). A bare 32- or 16-hex-digit term also matches `trace_id` / `span_id`, so a
+pasted id works. Levels, span kinds and statuses match in any case and take short values
+(`level:error`, `status:error`, `kind:server`). `duration` is stored in microseconds and takes unit
+suffixes (`duration:>50ms`, `[1.5s TO 2m]`). A field no data has (`levl:`) still compiles but
+`/api/search` returns a warning with the likely correction.
 Unknown dotted fields such as `k8s.pod.name` are looked up in the attribute VARIANT columns.
 `server/src/query/compile.ts` sends indexed terms to one `search()` call and everything else
 (ranges, numbers, unindexed columns) to plain SQL.
@@ -133,6 +138,8 @@ bench/verify_search.sh -h <fe> -P 9030 -D otel
   `create_schema: false`. The exporter's record shape is fixed: it has no `trace_flags`,
   `event_name` or `scope_attributes`, and extra columns would stay NULL.
 - `otel_traces.duration` is in **microseconds**.
+- `span_name` has a tokenized index (like ClickStack's index on `lower(SpanName)`), so a word of a
+  span name finds it. Tables created before this change: run `schema/upgrades/001_span_name_fulltext.sql`.
 - `span_kind` and `status_code` hold the OTLP enum names: `SPAN_KIND_SERVER`,
   `STATUS_CODE_ERROR`, not `Server` / `Error`.
 - Daily `AUTO PARTITION`; `partition.retention_count` is the TTL in days. The partition

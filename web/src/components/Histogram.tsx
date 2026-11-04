@@ -17,9 +17,11 @@ const PAD_BOTTOM = 20;
 
 function tickLabel(ms: number, spanMs: number): string {
   const d = new Date(ms);
-  return spanMs > 2 * 86400_000
-    ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-    : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const day = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  // Past half a day the same clock time repeats, so ticks carry the date too.
+  if (spanMs > 2 * 86400_000) return day;
+  return spanMs > 12 * 3600_000 ? `${day} ${time}` : time;
 }
 
 /** Stacked counts per time bucket. Drag across it to zoom into that time range. */
@@ -64,7 +66,9 @@ export function Histogram({ buckets, stepSeconds, range, series, onSelect }: Pro
   };
   const barW = Math.max(1, (stepSeconds * 1000 / span) * plotW - 1);
   const yMax = max || 1;
-  const ticks = Array.from({ length: 6 }, (_, i) => range.from + (span * i) / 5);
+  // About one label per 130 px, between 2 and 6.
+  const nTicks = Math.min(6, Math.max(2, Math.floor(plotW / 130)));
+  const ticks = Array.from({ length: nTicks }, (_, i) => range.from + (span * i) / (nTicks - 1));
   const total = stacks.reduce((s, [, m]) => s + [...m.values()].reduce((a, b) => a + b, 0), 0);
 
   return (

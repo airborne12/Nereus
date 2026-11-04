@@ -70,13 +70,19 @@ export const auth = {
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
+export interface Warning {
+  kind: 'unknown_field';
+  field: string;
+  suggestion: string | null;
+}
+
 export interface Range {
   from: number;
   to: number;
 }
 
 export function search(source: SourceName, q: string, r: Range, limit: number, signal?: AbortSignal) {
-  return get<{ rows: Row[]; elapsedMs: number }>('/api/search',
+  return get<{ rows: Row[]; elapsedMs: number; warnings: Warning[] }>('/api/search',
     { source, q, from: iso(r.from), to: iso(r.to), limit }, signal);
 }
 
