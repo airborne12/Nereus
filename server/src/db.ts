@@ -1,0 +1,59 @@
+// Doris connection pool. Every connection gets the session settings that compiled search
+// queries depend on.
+
+import mysql from 'mysql2/promise';
+
+export interface DorisConfig {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  /** Seconds; Doris cancels a query that runs longer. */
+  queryTimeout: number;
+  connectionLimit: number;
+}
+
+export function configFromEnv(env: NodeJS.ProcessEnv = process.env): DorisConfig {
+  return {
+    host: env.DORIS_HOST ?? '127.0.0.1',
+    port: Number(env.DORIS_PORT ?? 9030),
+    user: env.DORIS_USER ?? 'root',
+    password: env.DORIS_PASSWORD ?? '',
+    queryTimeout: Number(env.DORIS_QUERY_TIMEOUT ?? 60),
+    connectionLimit: Number(env.DORIS_POOL_SIZE ?? 10),
+  };
+}
+
+export type Row = Record<string, unknown>;
+
+export class Doris {
+  private pool: mysql.Pool;
+
+  constructor(cfg: DorisConfig) {
+    this.pool = mysql.createPool({
+      host: cfg.host,
+      port: cfg.port,
+      user: cfg.user,
+      password: cfg.password,
+      connectionLimit: cfg.connectionLimit,
+      // DATETIME(6) values stay strings in UTC, exactly as stored.
+      dateStrings: true,
+      supportBigNumbers: true,
+      bigNumberStrings: true,
+    });
+    const timeout = Math.trunc(cfg.queryTimeout);
+    this.pool.on('connection', (conn) => {
+      // search() turns the BKD index-skip heuristic into an error, so disable it.
+      conn.query(`SET inverted_index_skip_threshold = 0, query_timeout = ${timeout}`);
+    });
+  }
+
+  async query(sql: string): Promise<Row[]> {
+    const [rows] = await this.pool.query(sql);
+    return rows as Row[];
+  }
+
+  async close(): Promise<void> {
+    await this.pool.end();
+  }
+}

@@ -6,8 +6,9 @@ API service and web UI. "DorisStack" is a working code name.
 
 Design: <https://claude.ai/artifact/RUahRwDXWZPii2gSTZCU67>
 
-Status: **M0 (foundation)**. Tables, collector configuration, a single-host compose file and
-ingestion/search checks are here. The API service and UI start in M1.
+Status: **M0 done, M1 in progress**. Tables, collector configuration, a single-host compose
+file and ingestion checks (M0); the search compiler and the first API endpoints (M1). The UI
+comes next.
 
 ## Layout
 
@@ -19,6 +20,35 @@ ingestion/search checks are here. The API service and UI start in M1.
 | `bench/otelgen.py` | Synthetic OTel data in the exact JSON the `doris` exporter sends |
 | `bench/load.sh` | Parallel Stream Load of generated files; rows/s and loss check |
 | `bench/verify_search.sh` | `search()` vs plain SQL row-count checks for the query compiler |
+| `bench/otlp_send.py` | The same synthetic data sent as real OTLP/HTTP to a collector |
+| `server/` | API service (TypeScript, Node 24): search compiler, SQL builder, HTTP API |
+
+## API service
+
+```bash
+cd server && npm install
+DORIS_HOST=<fe> DORIS_PORT=9030 DORIS_DB=otel PORT=8090 node src/server.ts
+curl -G localhost:8090/api/search --data-urlencode source=logs \
+  --data-urlencode 'q=level:ERROR "timeout after" k8s.pod.name:checkout-*' \
+  --data-urlencode from=2026-11-04T00:00:00Z --data-urlencode to=2026-11-05T00:00:00Z
+```
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /api/search?source=logs\|traces&q=&from=&to=&limit=&columns=` | matching rows, newest first |
+| `GET /api/histogram?source=&q=&from=&to=&buckets=&groupBy=` | counts per time bucket, optionally per column value |
+| `GET /api/trace/<id>?from=&to=` | all spans of a trace |
+
+The search bar language is a Lucene query_string subset: `field:value`, `"phrases"`,
+`wild*cards`, `/regex/`, `[a TO b]`, `>=x`, `AND`/`OR`/`NOT`/`-`, parentheses, `field:(a OR b)`,
+`field:*`; adjacent terms are ANDed and bare terms search `body` (logs) or `span_name` (traces).
+Unknown dotted fields such as `k8s.pod.name` are looked up in the attribute VARIANT columns.
+`server/src/query/compile.ts` sends indexed terms to one `search()` call and everything else
+(ranges, numbers, unindexed columns) to plain SQL.
+
+Tests: `npm test` (unit), and against a live Doris loaded by `bench/otelgen.py`:
+`DORIS_TEST=1 DORIS_PORT=9030 DORIS_DB=otel_bench npm test` compares every compiled query with a
+hand-written reference SQL and checks that hostile input stays a literal.
 
 ## Quick start (docker)
 
@@ -55,6 +85,8 @@ bench/verify_search.sh -h <fe> -P 9030 -D otel
   `create_schema: false`. The exporter's record shape is fixed: it has no `trace_flags`,
   `event_name` or `scope_attributes`, and extra columns would stay NULL.
 - `otel_traces.duration` is in **microseconds**.
+- `span_kind` and `status_code` hold the OTLP enum names: `SPAN_KIND_SERVER`,
+  `STATUS_CODE_ERROR`, not `Server` / `Error`.
 - Daily `AUTO PARTITION`; `partition.retention_count` is the TTL in days. The partition
   column must be `NOT NULL`.
 - Attributes are `VARIANT`. Frequent paths become columnar subcolumns on their own, so
@@ -73,6 +105,8 @@ throughput is far below a release build and only shows the pipeline works.
 | Size on disk (with inverted indexes, before compaction) | about 7x smaller than the JSON |
 | `search()` vs SQL: phrase, term, VARIANT path, wildcard, AND/OR/NOT, trace_id | identical counts |
 | `search()` ranges `[a TO b]` | 0 rows (Doris gap 1) |
+| Real collector (otelcol-contrib 0.164.0, doris exporter 0.164.1), OTLP/HTTP | 4,718 spans, 7,057 logs, 3 x 1,440 metric points sent, all rows in Doris, 0 exporter errors |
+| Search compiler on live Doris (M1) | 20 queries equal to reference SQL, 7 hostile inputs stay literals |
 
 ## Doris gaps found
 

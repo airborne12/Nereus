@@ -1,0 +1,22 @@
+{
+  "name": "@dorisstack/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DorisStack API service: search compiler, query execution, metadata",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "node --test test/*.test.ts",
+    "test:doris": "DORIS_TEST=1 node --test test/*.doris.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.5"
+  }
+}
