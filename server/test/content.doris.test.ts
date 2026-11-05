@@ -188,3 +188,58 @@ test('dashboards: tiles are validated and saved; favorites', { skip }, async () 
   assert.equal((await call('DELETE', `/api/dashboards/${id}`, admin)).status, 200);
   assert.equal((await call('GET', `/api/dashboards/${id}`)).status, 404);
 });
+
+test('tile alerts: a grouped p99 fires for the worst group; removing the tile removes them', { skip }, async () => {
+  const [{ t }] = await doris.query(`SELECT max(timestamp) AS t FROM ${db}.otel_traces`) as any[];
+  const end = Date.parse(`${String(t).replace(' ', 'T')}Z`) + 1000;
+  const lit = (ms: number) => `'${new Date(ms).toISOString().replace('T', ' ').replace('Z', '')}'`;
+  const p99s = await doris.query(`SELECT service_name AS s, percentile_approx(duration, 0.99) AS v FROM ${db}.otel_traces
+    WHERE timestamp >= ${lit(end - 3600_000)} AND timestamp < ${lit(end)} GROUP BY s ORDER BY v DESC`) as any[];
+  assert.ok(p99s.length >= 2);
+  const [worst, second] = [p99s[0], p99s[1]];
+  const latency = { title: 'p99 by service', w: 6, chart: { source: 'traces', display: 'line', series: [{ agg: 'p99', field: 'duration' }], groupBy: 'service' } };
+  const volume = { title: 'Requests', w: 6, chart: { source: 'traces', display: 'number', series: [{ agg: 'count' }], where: 'is_root:1' } };
+  const dash = (await call('POST', '/api/dashboards', member, { name: 'Latency', tiles: [latency, volume] })).body;
+  const [lt, vt] = dash.tiles;
+  const threshold = (Number(worst.v) + Number(second.v)) / 2;
+  const a1 = await call('POST', '/api/alerts', member, { dashboardId: dash.id, tileId: lt.id, webhookId: hookId, thresholdType: 'above', threshold, intervalSeconds: 3600 });
+  assert.equal(a1.status, 201, JSON.stringify(a1.body));
+  assert.equal(a1.body.tileTitle, 'p99 by service');
+  assert.equal(a1.body.savedSearchId, null);
+  const a2 = await call('POST', '/api/alerts', member, { dashboardId: dash.id, tileId: vt.id, webhookId: hookId, thresholdType: 'below', threshold: 1e9, intervalSeconds: 3600 });
+  assert.equal(a2.status, 201);
+  assert.equal((await call('POST', '/api/alerts', member, { dashboardId: dash.id, tileId: 'nope', webhookId: hookId, thresholdType: 'above', threshold: 1, intervalSeconds: 60 })).status, 400);
+  assert.equal((await call('POST', '/api/alerts', member, { dashboardId: dash.id, tileId: lt.id, savedSearchId: searchId, webhookId: hookId, thresholdType: 'above', threshold: 1, intervalSeconds: 60 })).status, 400);
+
+  // Only the two tile alerts are due: the saved-search alert of the earlier test was just checked.
+  await content['db'].query('UPDATE alerts SET last_checked_at = now() WHERE dashboard_id IS NULL');
+  const runner = new AlertRunner({ store: content, doris, sources: sourcesFor(db), baseUrl: 'https://ds.example.com', now: () => end });
+  const before = received.length;
+  assert.equal(await runner.tick(), 2);
+  const items = (await call('GET', `/api/alerts?dashboardId=${dash.id}`)).body.items;
+  const [x1, x2] = [items.find((a: any) => a.id === a1.body.id), items.find((a: any) => a.id === a2.body.id)];
+  assert.equal(x1.state, 'ALERT');
+  assert.equal(x1.lastGroup, worst.s, 'the worst service breaches');
+  assert.ok(Math.abs(x1.lastValue - Number(worst.v)) / Number(worst.v) < 0.05, `${x1.lastValue} vs ${worst.v}`);
+  assert.equal(x2.state, 'ALERT', 'fewer requests than a billion');
+  const msgs = received.slice(before);
+  assert.equal(msgs.length, 2);
+  const m1 = msgs.find((m: any) => m.tile.id === lt.id);
+  assert.match(m1.text, new RegExp(`^\\[ALERT\\] "Latency / p99 by service": p99\\(duration\\) = [\\d.]+ for ${worst.s} in the last 1h \\(alert when above `));
+  assert.equal(m1.link, `https://ds.example.com/dashboards/${dash.id}`);
+  assert.equal(m1.tile.group, worst.s);
+  assert.equal((await call('GET', `/api/alerts/${a1.body.id}/history`)).body.items[0].group, worst.s);
+
+  // A tile that disappears behind the alert's back (not through the API) is an error, not a crash.
+  await content['db'].query(`UPDATE dashboards SET tiles = '[]' WHERE id = $1`, [dash.id]);
+  await content['db'].query('UPDATE alerts SET last_checked_at = NULL WHERE dashboard_id = $1', [dash.id]);
+  await runner.tick();
+  assert.match((await call('GET', `/api/alerts/${a2.body.id}/history`)).body.items[0].error, /tile was removed/);
+  // Saving the dashboard without a tile deletes that tile's alerts.
+  await call('PUT', `/api/dashboards/${dash.id}`, member, { ...dash, tiles: [lt] });
+  const left = (await call('GET', `/api/alerts?dashboardId=${dash.id}`)).body.items;
+  assert.deepEqual(left.map((a: any) => a.id), [a1.body.id]);
+  // Deleting the dashboard deletes the rest.
+  await call('DELETE', `/api/dashboards/${dash.id}`, admin);
+  assert.equal((await call('GET', `/api/alerts?dashboardId=${dash.id}`)).body.items.length, 0);
+});

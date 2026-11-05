@@ -414,6 +414,36 @@ test('dashboards: add, edit, duplicate and delete tiles; changes persist', async
   assert.match(await page.locator('table.list tbody').innerText(), /Checkout health\s+2/);
 });
 
+test('tile alerts: create from the tile menu; the bell and the Alerts page show it firing', async () => {
+  const tile = { title: 'Latency by service', w: 6, chart: { source: 'traces', display: 'line', series: [{ agg: 'p99', field: 'duration' }], groupBy: 'service' } };
+  const dash = await page.evaluate(async (t) => (await fetch('/api/dashboards', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Alerting', tiles: [t] }),
+  })).json(), tile);
+  await page.goto(`${base}/dashboards/${dash.id}`);
+  await page.getByRole('button', { name: 'Tile menu Latency by service' }).click();
+  await page.getByRole('menuitem', { name: 'Alerts…' }).click();
+  const dialog = page.getByRole('dialog');
+  assert.match(await dialog.innerText(), /Alert when p99\(duration\) of any service is/);
+  await dialog.getByLabel('Threshold', { exact: true }).fill('0');
+  await dialog.getByLabel('Interval').selectOption({ label: '1h' });
+  await dialog.getByRole('button', { name: 'Create alert' }).click();
+  await dialog.locator('tbody tr').first().waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Alerts for Latency by service: OK' }).waitFor();
+  // Only this alert is due; the runner's clock is at the end of the data.
+  while (await runner.tick() > 0) { /* check everything due */ }
+  await page.reload();
+  await page.getByRole('button', { name: 'Alerts for Latency by service: ALERT' }).waitFor({ timeout: 20_000 });
+  await shot('14-tile-alert');
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Alerts', exact: true }).click();
+  const row = page.locator('table.list tbody tr', { hasText: 'Alerting / Latency by service' });
+  await row.waitFor();
+  const text = await row.innerText();
+  assert.match(text, /p99\(duration\) > 0 per 1h/);
+  assert.match(text, /\((frontend|checkout|cart|payment|shipping|product-catalog)\)/, text);
+  assert.ok(received.some((m) => /^\[ALERT\] "Alerting \/ Latency by service": p99\(duration\) = /.test(m.text)), 'the webhook got the message');
+});
+
 test('service map: calls between services; a service opens its traces', async () => {
   await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: /^Service map/ }).click();
   await page.getByRole('button', { name: 'Time Range' }).click();

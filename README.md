@@ -6,7 +6,7 @@ API service and web UI. "DorisStack" is a working code name.
 
 Design: <https://claude.ai/artifact/RUahRwDXWZPii2gSTZCU67>
 
-Status: **M0 and M1 done, M2 in progress** (remaining: Client sessions, alerts on dashboard tiles). Tables, collector configuration, a single-host compose
+Status: **M0 and M1 done, M2 in progress** (remaining: Client sessions). Tables, collector configuration, a single-host compose
 file and ingestion checks (M0); the search compiler, the API, the search page, and users, login
 and API keys with metadata in PostgreSQL (M1). Configurable data sources come next.
 
@@ -62,7 +62,7 @@ Every `/api/*` call except `/api/auth/*` needs a login: the browser's session co
 | `GET`/`POST /api/saved-searches`, `GET`/`PUT`/`DELETE …/<id>`, `POST …/<id>/favorite` | saved searches (team), stars (yours) |
 | `GET`/`POST /api/dashboards`, `GET`/`PUT`/`DELETE …/<id>`, `POST …/<id>/favorite` | dashboards and their tiles |
 | `GET /api/webhooks`; `POST`, `DELETE …/<id>`, `POST …/<id>/test` (admins) | alert destinations; URLs are shown to admins only |
-| `GET`/`POST /api/alerts`, `DELETE …/<id>`, `POST …/<id>/silence`, `GET …/<id>/history` | alerts on saved searches |
+| `GET`/`POST /api/alerts[?savedSearchId=\|?dashboardId=]`, `DELETE …/<id>`, `POST …/<id>/silence`, `GET …/<id>/history` | alerts on saved searches and dashboard tiles |
 | `POST /api/chart {source, display, series, where, language, filters, groupBy, from, to}` | chart data for Chart explorer and tiles |
 | `GET /api/service-map?where=&language=&filters=&from=&to=` | calls between services and per-service requests, errors, p99 |
 | `GET /api/heatmap?where=&language=&filters=&from=&to=&buckets=` | trace durations per time bucket and duration band (Event Deltas) |
@@ -120,8 +120,10 @@ Browser tests (Playwright + Chromium) drive the built page against a live Doris 
 - **Saved searches** keep the query (source, WHERE and language, filters, SELECT, ORDER BY) and tags,
   not the time range, as in ClickStack. They are shared by the team; stars are per user and appear
   under Saved searches in the navigation (a red dot when an alert on it is firing).
-- **Alerts** belong to a saved search: alert when its count over the last 1m-24h is above or below a
-  threshold. The server checks due alerts every 15 s (`FOR UPDATE SKIP LOCKED`, so several servers
+- **Alerts** watch a saved search (its match count) or a dashboard tile (its first series, e.g. p99
+  latency; with a group by, whichever group breaches first: the highest value for "above", the
+  lowest for "below", among the 100 largest groups). Alert when the value over the last 1m-24h is
+  above or below a threshold. A tile's alerts are deleted with the tile; no data does not breach. The server checks due alerts every 15 s (`FOR UPDATE SKIP LOCKED`, so several servers
   share the work) and posts to the webhook when the state changes, with Slack-compatible `text`, the
   numbers and a link (`PUBLIC_URL`). Silencing keeps checking but sends nothing. Every check is kept
   as history.

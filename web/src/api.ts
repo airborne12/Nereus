@@ -204,8 +204,17 @@ export interface Webhook {
 
 export interface Alert {
   id: number;
-  savedSearchId: number;
+  /** An alert watches a saved search or a dashboard tile. */
+  savedSearchId: number | null;
   savedSearchName: string | null;
+  dashboardId: number | null;
+  dashboardName: string | null;
+  tileId: string | null;
+  tileTitle: string | null;
+  /** "p99(duration)" for a tile alert. */
+  tileMetric: string | null;
+  /** The group whose value was last reported, for a grouped tile. */
+  lastGroup: string | null;
   webhookId: number;
   webhookName: string | null;
   thresholdType: 'above' | 'below';
@@ -220,6 +229,7 @@ export interface Alert {
 export interface AlertCheck {
   checkedAt: string;
   value: number | null;
+  group: string | null;
   state: string;
   error: string | null;
   notified: boolean;
@@ -242,8 +252,8 @@ export const content = {
   createWebhook: (name: string, url: string) => send<Webhook>('POST', '/api/webhooks', { name, url }),
   deleteWebhook: (id: number) => send<{ ok: true }>('DELETE', `/api/webhooks/${id}`),
   testWebhook: (id: number) => send<{ ok: true }>('POST', `/api/webhooks/${id}/test`, {}),
-  alerts: (savedSearchId?: number) => get<{ items: Alert[] }>('/api/alerts', { savedSearchId }),
-  createAlert: (a: { savedSearchId: number; webhookId: number; thresholdType: 'above' | 'below'; threshold: number; intervalSeconds: number }) =>
+  alerts: (savedSearchId?: number, dashboardId?: number) => get<{ items: Alert[] }>('/api/alerts', { savedSearchId, dashboardId }),
+  createAlert: (a: { savedSearchId?: number; dashboardId?: number; tileId?: string; webhookId: number; thresholdType: 'above' | 'below'; threshold: number; intervalSeconds: number }) =>
     send<Alert>('POST', '/api/alerts', a),
   deleteAlert: (id: number) => send<{ ok: true }>('DELETE', `/api/alerts/${id}`),
   silenceAlert: (id: number, minutes: number) => send<{ ok: true }>('POST', `/api/alerts/${id}/silence`, { minutes }),

@@ -93,20 +93,47 @@ export function createDemoContent(ctx: DemoContext, now: () => number) {
   }];
 
   /** One check of an alert over the snapshot, like AlertRunner does against Doris. */
+  const tileOf = (a: J) => dashboards.find((d) => d.id === a.dashboardId)?.tiles.find((t: J) => t.id === a.tileId);
+  function measure(a: J, from: number, to: number): { value: number | null; group: string | null } {
+    if (a.tileId === null) {
+      const s = searches.find((x) => x.id === a.savedSearchId)!;
+      return { value: rowsFor(ctx.sources[s.source]!, { ...s, from: iso(from), to: iso(to) } as SearchSpec).length, group: null };
+    }
+    const t = tileOf(a);
+    if (!t) throw new Error('the tile was removed from its dashboard');
+    const grouped = Boolean(t.chart.groupBy);
+    const r = chart({ ...t.chart, series: [t.chart.series[0]], display: grouped ? 'table' : 'number', from: iso(from), to: iso(to) });
+    const pts = (r.rows as J[]).map((x) => ({ v: x.v0 === null ? NaN : Number(x.v0), g: grouped ? String(x.g ?? '') : null })).filter((p) => Number.isFinite(p.v));
+    if (pts.length === 0) return { value: null, group: null };
+    const best = pts.reduce((b, p) => ((a.thresholdType === 'above' ? p.v > b.v : p.v < b.v) ? p : b));
+    return { value: best.v, group: best.g };
+  }
   function check(a: J) {
-    const s = searches.find((x) => x.id === a.savedSearchId)!;
     const to = now(), from = to - a.intervalSeconds * 1000;
-    const value = rowsFor(ctx.sources[s.source]!, { ...s, from: iso(from), to: iso(to) } as SearchSpec).length;
-    const state = (a.thresholdType === 'above' ? value > a.threshold : value < a.threshold) ? 'ALERT' : 'OK';
+    let value: number | null, group: string | null;
+    try {
+      ({ value, group } = measure(a, from, to));
+    } catch (e) {
+      Object.assign(a, { state: 'ERROR', lastCheckedAt: iso(to) });
+      history.set(a.id, [{ checkedAt: iso(to), value: null, state: 'ERROR', error: (e as Error).message, notified: false, group: null }, ...(history.get(a.id) ?? [])]);
+      return;
+    }
+    const state = value !== null && (a.thresholdType === 'above' ? value > a.threshold : value < a.threshold) ? 'ALERT' : 'OK';
     const notified = state !== a.state && (state === 'ALERT' || a.state === 'ALERT');
-    Object.assign(a, { state, lastValue: value, lastCheckedAt: iso(to) });
-    history.set(a.id, [{ checkedAt: iso(to), value, state, error: notified ? 'demo: the webhook is not called' : null, notified: false }, ...(history.get(a.id) ?? [])]);
+    Object.assign(a, { state, lastValue: value, lastGroup: group, lastCheckedAt: iso(to) });
+    history.set(a.id, [{ checkedAt: iso(to), value, state, error: notified ? 'demo: the webhook is not called' : null, notified: false, group }, ...(history.get(a.id) ?? [])]);
   }
   function addAlert(body: J): J {
-    const s = searches.find((x) => x.id === Number(body.savedSearchId));
     const w = webhooks.find((x) => x.id === Number(body.webhookId));
-    if (!s || !w) throw new Error('no such saved search or webhook');
-    const a: J = { id: nextId++, savedSearchId: s.id, savedSearchName: s.name, webhookId: w.id, webhookName: w.name,
+    const d = body.dashboardId ? dashboards.find((x) => x.id === Number(body.dashboardId)) : null;
+    const t = d?.tiles.find((x: J) => x.id === body.tileId);
+    const s = d ? null : searches.find((x) => x.id === Number(body.savedSearchId));
+    if (!w || (d ? !t : !s)) throw new Error('no such saved search, tile or webhook');
+    const series = t?.chart.series[0];
+    const a: J = { id: nextId++, savedSearchId: s?.id ?? null, savedSearchName: s?.name ?? null,
+      dashboardId: d?.id ?? null, dashboardName: d?.name ?? null, tileId: t?.id ?? null, tileTitle: t?.title ?? null,
+      tileMetric: series ? (series.agg === 'count' ? 'count' : `${series.agg}(${series.field ?? ''})`) : null, lastGroup: null,
+      webhookId: w.id, webhookName: w.name,
       thresholdType: body.thresholdType, threshold: Number(body.threshold), intervalSeconds: Number(body.intervalSeconds),
       state: 'OK', lastCheckedAt: null, lastValue: null, silencedUntil: null, createdAt: iso(now()) };
     alerts.push(a);
@@ -114,6 +141,8 @@ export function createDemoContent(ctx: DemoContext, now: () => number) {
     return a;
   }
   addAlert({ savedSearchId: 1, webhookId: 1, thresholdType: 'above', threshold: 3, intervalSeconds: 900 });
+  // p99 latency of any service above 20 ms over the last 15 minutes.
+  addAlert({ dashboardId: 1, tileId: dashboards[0]!.tiles[2].id, webhookId: 1, thresholdType: 'above', threshold: 20_000, intervalSeconds: 900 });
 
   const alertState = (id: number) => {
     const as = alerts.filter((a) => a.savedSearchId === id);
@@ -142,9 +171,15 @@ export function createDemoContent(ctx: DemoContext, now: () => number) {
         if (method === 'PUT') {
           const { favorite: _f, alertState: _a, ...rest } = body;
           list[i] = { ...list[i], ...rest, id: list[i]!.id, updatedAt: iso(now()) };
+          if (kind === 'dashboard') {
+            // Alerts on removed tiles go with them, as on the server.
+            const kept = new Set((list[i]!.tiles as J[]).map((t) => t.id));
+            for (let k = alerts.length - 1; k >= 0; k--) if (alerts[k]!.dashboardId === list[i]!.id && !kept.has(alerts[k]!.tileId)) alerts.splice(k, 1);
+          }
           return { status: 200, body: view(list[i]!) };
         }
         if (method === 'DELETE') {
+          if (kind === 'dashboard') for (let k = alerts.length - 1; k >= 0; k--) if (alerts[k]!.dashboardId === list[i]!.id) alerts.splice(k, 1);
           list.splice(i, 1);
           return { status: 200, body: { ok: true } };
         }
@@ -168,8 +203,8 @@ export function createDemoContent(ctx: DemoContext, now: () => number) {
       return { status: 200, body: { ok: true } };
     }
     if (path === '/api/alerts' && method === 'GET') {
-      const s = params.get('savedSearchId');
-      return { status: 200, body: { items: alerts.filter((a) => s === null || a.savedSearchId === Number(s)) } };
+      const s = params.get('savedSearchId'), d = params.get('dashboardId');
+      return { status: 200, body: { items: alerts.filter((a) => (s === null || a.savedSearchId === Number(s)) && (d === null || a.dashboardId === Number(d))) } };
     }
     if (path === '/api/alerts' && method === 'POST') return { status: 201, body: addAlert(body) };
     if ((m = /^\/api\/alerts\/(\d+)$/.exec(path)) && method === 'DELETE') {

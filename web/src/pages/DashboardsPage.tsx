@@ -4,6 +4,7 @@ import { ChartView } from '../components/Chart.tsx';
 import { ChartBuilder, DEFAULT_CHART } from '../components/ChartBuilder.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { Modal, timeAgo } from '../components/Modal.tsx';
+import { AlertsModal } from '../components/SavedSearchBar.tsx';
 import { TimePicker } from '../components/TimePicker.tsx';
 import { type TimeWindow, resolveWindow } from '../lib/state.ts';
 
@@ -82,8 +83,21 @@ export function DashboardPage({ id, go, onChanged }: { id: number; go: (url: str
   const [editing, setEditing] = useState<api.Tile | 'new' | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [alertsFor, setAlertsFor] = useState<api.Tile | null>(null);
+  const [alerts, setAlerts] = useState<api.Alert[]>([]);
   const range = useMemo(() => resolveWindow(win, now), [win, now]);
   useEffect(() => { api.content.dashboard(id).then(setD, (e) => setError(e.message)); }, [id]);
+  const loadAlerts = () => api.content.alerts(undefined, id).then((r) => setAlerts(r.items), () => setAlerts([]));
+  useEffect(() => {
+    loadAlerts();
+    const t = setInterval(loadAlerts, 15_000);
+    return () => clearInterval(t);
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Worst state among a tile's alerts, for the bell in its header.
+  const tileAlert = (tileId: string) => {
+    const as = alerts.filter((a) => a.tileId === tileId);
+    return as.length === 0 ? null : as.some((a) => a.state === 'ALERT') ? 'ALERT' : as.some((a) => a.state === 'ERROR') ? 'ERROR' : 'OK';
+  };
   useEffect(() => {
     if (!live) return;
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -96,6 +110,8 @@ export function DashboardPage({ id, go, onChanged }: { id: number; go: (url: str
     try {
       await api.content.updateDashboard(next.id, next);
       setSaved('saved');
+      // Removing a tile removes its alerts on the server.
+      loadAlerts();
       onChanged();
     } catch (e) {
       setSaved('error');
@@ -141,6 +157,10 @@ export function DashboardPage({ id, go, onChanged }: { id: number; go: (url: str
             <div className="tile-head">
               <strong title={t.title}>{t.title}</strong>
               <span className="grow" />
+              {tileAlert(t.id) && (
+                <button type="button" className={`icon-btn tile-bell ${tileAlert(t.id)!.toLowerCase()}`} aria-label={`Alerts for ${t.title}: ${tileAlert(t.id)}`}
+                  title={`Alerts: ${tileAlert(t.id)}`} onClick={() => setAlertsFor(t)}><Icon name="bell" size={13} /></button>
+              )}
               <button type="button" className="icon-btn" aria-label={`Tile menu ${t.title}`} aria-expanded={menu === t.id} onClick={() => setMenu(menu === t.id ? null : t.id)}>⋯</button>
               {menu === t.id && (
                 <div className="menu tile-menu" role="menu" onMouseLeave={() => setMenu(null)}>
@@ -149,6 +169,7 @@ export function DashboardPage({ id, go, onChanged }: { id: number; go: (url: str
                   <button type="button" role="menuitem" disabled={i === 0} onClick={() => { setMenu(null); move(i, -1); }}>Move left</button>
                   <button type="button" role="menuitem" disabled={i === tiles.length - 1} onClick={() => { setMenu(null); move(i, 1); }}>Move right</button>
                   <button type="button" role="menuitem" onClick={() => { setMenu(null); go(`/chart?chart=${encodeURIComponent(JSON.stringify(t.chart))}`); }}>Open in Chart explorer</button>
+                  <button type="button" role="menuitem" onClick={() => { setMenu(null); setAlertsFor(t); }}>Alerts…</button>
                   <hr />
                   <button type="button" role="menuitem" className="danger" onClick={() => { setMenu(null); save({ ...d, tiles: tiles.filter((x) => x.id !== t.id) }); }}>Delete</button>
                 </div>
@@ -158,6 +179,7 @@ export function DashboardPage({ id, go, onChanged }: { id: number; go: (url: str
           </section>
         ))}
       </div>
+      {alertsFor && d && <AlertsModal target={{ kind: 'tile', dashboard: d, tile: alertsFor }} onClose={() => setAlertsFor(null)} onChanged={loadAlerts} />}
       {editing && (
         <TileEditor tile={editing === 'new' ? null : editing} range={range} onClose={() => setEditing(null)}
           onSave={(t) => { setEditing(null); save({ ...d, tiles: editing === 'new' ? [...tiles, t] : tiles.map((x) => (x.id === t.id ? t : x)) }); }} />

@@ -432,3 +432,6 @@ body.demo #root { flex: 1; min-height: 0; }
 .map-edge.has-errors path { stroke: var(--lvl-error); }
 .map-edge.active path { opacity: 1; stroke: var(--accent); }
 .map-edge-label { fill: var(--text-2); font-size: 10.5px; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+.tile-bell.ok { color: var(--lvl-debug); }
+.tile-bell.alert { color: var(--lvl-error); }
+.tile-bell.error { color: var(--lvl-warn); }

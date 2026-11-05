@@ -3,7 +3,7 @@
 //   GET|POST /api/saved-searches        GET|PUT|DELETE /api/saved-searches/<id>   POST .../<id>/favorite {on}
 //   GET|POST /api/dashboards            GET|PUT|DELETE /api/dashboards/<id>       POST .../<id>/favorite {on}
 //   GET /api/webhooks (URLs for admins only); POST, DELETE /api/webhooks/<id>, POST .../<id>/test (admins)
-//   GET|POST /api/alerts[?savedSearchId=]  DELETE /api/alerts/<id>  POST .../<id>/silence {minutes}
+//   GET|POST /api/alerts[?savedSearchId=|?dashboardId=] (on a saved search or a dashboard tile)  DELETE /api/alerts/<id>  POST .../<id>/silence {minutes}
 //   GET /api/alerts/<id>/history
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -86,8 +86,8 @@ export function contentRoutes(store: ContentStore, send: Send, fetchImpl: typeof
     }
 
     if (path === '/api/alerts' && m === 'GET') {
-      const s = url.searchParams.get('savedSearchId');
-      send(res, 200, { items: await store.listAlerts(s === null ? undefined : Number(s)) });
+      const s = url.searchParams.get('savedSearchId'), d = url.searchParams.get('dashboardId');
+      send(res, 200, { items: await store.listAlerts({ savedSearchId: s === null ? undefined : Number(s), dashboardId: d === null ? undefined : Number(d) }) });
       return true;
     }
     if (path === '/api/alerts' && m === 'POST') {

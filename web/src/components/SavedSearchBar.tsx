@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import * as api from '../api.ts';
-import { intervalLabel } from '../pages/AlertsPage.tsx';
+import { alertCondition, intervalLabel } from '../pages/AlertsPage.tsx';
+import { seriesLabel } from './Chart.tsx';
 import { Icon } from './Icon.tsx';
 import { Modal, StateChip, timeAgo } from './Modal.tsx';
 
@@ -32,13 +33,22 @@ export function SaveSearchModal({ fields, onSaved, onClose }: { fields: SearchFi
 
 const INTERVALS = [60, 300, 900, 1800, 3600, 21600, 43200, 86400];
 
-/** Alerts of one saved search: list, add, silence, delete. */
-export function AlertsModal({ search, onClose, onChanged }: { search: api.SavedSearch; onClose: () => void; onChanged: () => void }) {
+export type AlertTarget =
+  | { kind: 'search'; search: api.SavedSearch }
+  | { kind: 'tile'; dashboard: api.Dashboard; tile: api.Tile };
+
+/** Alerts of one saved search or one dashboard tile: list, add, silence, delete. */
+export function AlertsModal({ target, onClose, onChanged }: { target: AlertTarget; onClose: () => void; onChanged: () => void }) {
   const [alerts, setAlerts] = useState<api.Alert[]>([]);
   const [hooks, setHooks] = useState<api.Webhook[] | null>(null);
   const [form, setForm] = useState({ thresholdType: 'above' as 'above' | 'below', threshold: 10, intervalSeconds: 300, webhookId: 0 });
   const [error, setError] = useState<string | null>(null);
-  const load = () => api.content.alerts(search.id).then((r) => setAlerts(r.items), (e) => setError(e.message));
+  const onTile = target.kind === 'tile';
+  const title = onTile ? target.tile.title : target.search.name;
+  // A tile alert watches its first series; with a group by, whichever group breaches.
+  const metric = onTile ? seriesLabel(target.tile.chart.series[0]!) : 'count';
+  const load = () => (onTile ? api.content.alerts(undefined, target.dashboard.id) : api.content.alerts(target.search.id))
+    .then((r) => setAlerts(onTile ? r.items.filter((a) => a.tileId === target.tile.id) : r.items), (e) => setError(e.message));
   useEffect(() => {
     load();
     api.content.webhooks().then((r) => { setHooks(r.items); setForm((f) => ({ ...f, webhookId: r.items[0]?.id ?? 0 })); }, () => setHooks([]));
@@ -46,7 +56,7 @@ export function AlertsModal({ search, onClose, onChanged }: { search: api.SavedS
   async function add() {
     setError(null);
     try {
-      await api.content.createAlert({ savedSearchId: search.id, ...form });
+      await api.content.createAlert(onTile ? { dashboardId: target.dashboard.id, tileId: target.tile.id, ...form } : { savedSearchId: target.search.id, ...form });
       await load();
       onChanged();
     } catch (e) {
@@ -54,18 +64,18 @@ export function AlertsModal({ search, onClose, onChanged }: { search: api.SavedS
     }
   }
   return (
-    <Modal title={`Alerts for "${search.name}"`} onClose={onClose} wide>
+    <Modal title={`Alerts for "${title}"`} onClose={onClose} wide>
       {alerts.length > 0 && (
         <table className="list">
-          <thead><tr><th>State</th><th>Condition</th><th>Notify</th><th>Last check</th><th>Matches</th><th /></tr></thead>
+          <thead><tr><th>State</th><th>Condition</th><th>Notify</th><th>Last check</th><th>{onTile ? 'Value' : 'Matches'}</th><th /></tr></thead>
           <tbody>
             {alerts.map((a) => (
               <tr key={a.id}>
                 <td><StateChip state={a.state} />{a.silencedUntil && Date.parse(a.silencedUntil) > Date.now() && <span className="badge">silenced</span>}</td>
-                <td>count {a.thresholdType === 'above' ? '>' : '<'} {a.threshold} per {intervalLabel(a.intervalSeconds)}</td>
+                <td>{alertCondition(a)}</td>
                 <td>{a.webhookName}</td>
                 <td>{timeAgo(a.lastCheckedAt)}</td>
-                <td className="mono">{a.lastValue ?? '–'}</td>
+                <td className="mono">{a.lastValue ?? '–'}{a.lastGroup !== null && <span className="muted"> ({a.lastGroup || '(empty)'})</span>}</td>
                 <td>
                   <button type="button" className="link small" onClick={() => api.content.silenceAlert(a.id, a.silencedUntil && Date.parse(a.silencedUntil) > Date.now() ? 0 : 60).then(load)}>
                     {a.silencedUntil && Date.parse(a.silencedUntil) > Date.now() ? 'Unsilence' : 'Silence 1h'}</button>{' '}
@@ -81,11 +91,11 @@ export function AlertsModal({ search, onClose, onChanged }: { search: api.SavedS
         <p className="muted">No webhooks yet. An admin adds them under Team settings → Webhooks; alerts are sent there.</p>
       ) : (
         <form className="row alert-form" onSubmit={(e) => { e.preventDefault(); add(); }}>
-          <span>Alert when the count is</span>
+          <span>Alert when {onTile ? <code>{metric}</code> : 'the count'}{onTile && target.tile.chart.groupBy ? ` of any ${target.tile.chart.groupBy}` : ''} is</span>
           <select aria-label="Threshold type" value={form.thresholdType} onChange={(e) => setForm({ ...form, thresholdType: e.target.value as 'above' | 'below' })}>
             <option value="above">above</option><option value="below">below</option>
           </select>
-          <input aria-label="Threshold" type="number" min={0} value={form.threshold} onChange={(e) => setForm({ ...form, threshold: Number(e.target.value) })} />
+          <input aria-label="Threshold" type="number" min={onTile ? undefined : 0} step="any" value={form.threshold} onChange={(e) => setForm({ ...form, threshold: Number(e.target.value) })} />
           <span>over</span>
           <select aria-label="Interval" value={form.intervalSeconds} onChange={(e) => setForm({ ...form, intervalSeconds: Number(e.target.value) })}>
             {INTERVALS.map((s) => <option key={s} value={s}>{intervalLabel(s)}</option>)}
@@ -140,7 +150,7 @@ export function SavedSearchBar({ search, dirty, fields, onUpdated, onSavedAs, on
           <button type="button" className="link" onClick={() => setConfirm(false)}>No</button></span>
       ) : <button type="button" className="icon-btn" aria-label="Delete saved search" title="Delete saved search" onClick={() => setConfirm(true)}><Icon name="close" size={12} /></button>}
       {error && <span className="error small">{error}</span>}
-      {alerts && <AlertsModal search={search} onClose={() => setAlerts(false)}
+      {alerts && <AlertsModal target={{ kind: 'search', search }} onClose={() => setAlerts(false)}
         onChanged={() => api.content.search(search.id).then(onUpdated)} />}
     </div>
   );

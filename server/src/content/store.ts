@@ -1,6 +1,7 @@
 // Saved searches, dashboards, favorites, webhooks and alerts (PostgreSQL). Items are shared by
 // the team; favorites belong to a user.
 
+import { metricLabel } from './alerts.ts';
 import type pg from 'pg';
 import { AuthError } from '../auth/store.ts';
 import { AGGREGATES } from '../query/build.ts';
@@ -103,7 +104,10 @@ function dashboard(r: J, fav: boolean) {
 
 function alert(r: J) {
   return {
-    id: Number(r.id), savedSearchId: Number(r.saved_search_id), savedSearchName: r.saved_search_name ?? null,
+    id: Number(r.id), savedSearchId: r.saved_search_id === null ? null : Number(r.saved_search_id), savedSearchName: r.saved_search_name ?? null,
+    dashboardId: r.dashboard_id === null ? null : Number(r.dashboard_id), dashboardName: r.dashboard_name ?? null,
+    tileId: r.tile_id ?? null, tileTitle: r.tile_title ?? null, tileMetric: r.tile_series ? metricLabel(r.tile_series as { agg: string; field?: string }) : null,
+    lastGroup: r.last_group ?? null,
     webhookId: Number(r.webhook_id), webhookName: r.webhook_name ?? null, thresholdType: r.threshold_type,
     threshold: Number(r.threshold), intervalSeconds: Number(r.interval_seconds), state: r.state,
     lastCheckedAt: iso(r.last_checked_at), lastValue: r.last_value === null ? null : Number(r.last_value),
@@ -193,8 +197,21 @@ export class ContentStore {
       const r = await this.db.query('INSERT INTO dashboards (name, tiles, tags, created_by) VALUES ($1, $2, $3, $4) RETURNING id', [...v, userId]);
       return this.getDashboard(userId, Number(r.rows[0].id));
     }
-    const r = await this.db.query('UPDATE dashboards SET name = $1, tiles = $2, tags = $3, updated_at = now() WHERE id = $4', [...v, id(dashId)]);
-    if (r.rowCount === 0) throw new AuthError(404, 'no such dashboard');
+    // Alerts on tiles that are no longer there go with them, in the same transaction.
+    const c = await this.db.connect();
+    try {
+      await c.query('BEGIN');
+      const r = await c.query('UPDATE dashboards SET name = $1, tiles = $2, tags = $3, updated_at = now() WHERE id = $4', [...v, id(dashId)]);
+      if (r.rowCount === 0) throw new AuthError(404, 'no such dashboard');
+      const kept = (JSON.parse(v[1] as string) as J[]).map((t) => String(t.id));
+      await c.query('DELETE FROM alerts WHERE dashboard_id = $1 AND NOT (tile_id = ANY($2::text[]))', [dashId, kept]);
+      await c.query('COMMIT');
+    } catch (e) {
+      await c.query('ROLLBACK');
+      throw e;
+    } finally {
+      c.release();
+    }
     return this.getDashboard(userId, dashId);
   }
 
@@ -242,26 +259,43 @@ export class ContentStore {
   }
 
   // ---------------- alerts
-  private static ALERT_SELECT = `SELECT a.*, s.name AS saved_search_name, w.name AS webhook_name FROM alerts a
-    JOIN saved_searches s ON s.id = a.saved_search_id JOIN webhooks w ON w.id = a.webhook_id`;
+  private static ALERT_SELECT = `SELECT a.*, s.name AS saved_search_name, w.name AS webhook_name, d.name AS dashboard_name,
+      (SELECT t->>'title' FROM jsonb_array_elements(d.tiles) t WHERE t->>'id' = a.tile_id) AS tile_title,
+      (SELECT t->'chart'->'series'->0 FROM jsonb_array_elements(d.tiles) t WHERE t->>'id' = a.tile_id) AS tile_series
+    FROM alerts a JOIN webhooks w ON w.id = a.webhook_id
+    LEFT JOIN saved_searches s ON s.id = a.saved_search_id LEFT JOIN dashboards d ON d.id = a.dashboard_id`;
 
-  async listAlerts(savedSearchId?: number) {
-    const r = savedSearchId === undefined
-      ? await this.db.query(`${ContentStore.ALERT_SELECT} ORDER BY a.id`)
-      : await this.db.query(`${ContentStore.ALERT_SELECT} WHERE a.saved_search_id = $1 ORDER BY a.id`, [id(savedSearchId)]);
+  async listAlerts(by: { savedSearchId?: number; dashboardId?: number } = {}) {
+    const r = by.savedSearchId !== undefined
+      ? await this.db.query(`${ContentStore.ALERT_SELECT} WHERE a.saved_search_id = $1 ORDER BY a.id`, [id(by.savedSearchId)])
+      : by.dashboardId !== undefined
+        ? await this.db.query(`${ContentStore.ALERT_SELECT} WHERE a.dashboard_id = $1 ORDER BY a.id`, [id(by.dashboardId)])
+        : await this.db.query(`${ContentStore.ALERT_SELECT} ORDER BY a.id`);
     return r.rows.map(alert);
   }
 
+  /** An alert on a saved search ({savedSearchId}) or on a dashboard tile ({dashboardId, tileId}). */
   async createAlert(userId: number, body: J) {
     const type = body.thresholdType;
     if (type !== 'above' && type !== 'below') bad("thresholdType must be 'above' or 'below'");
+    const onTile = body.dashboardId !== undefined && body.dashboardId !== null;
+    if (onTile === (body.savedSearchId !== undefined && body.savedSearchId !== null)) bad('give either savedSearchId or dashboardId and tileId');
     const threshold = Number(body.threshold);
-    if (!Number.isFinite(threshold) || threshold < 0) bad('threshold must be a number of matches (0 or more)');
+    // A search alert counts matches; a tile's series can be any number (latency, a rate, a gauge).
+    if (!Number.isFinite(threshold) || (!onTile && threshold < 0)) bad(onTile ? 'threshold must be a number' : 'threshold must be a number of matches (0 or more)');
     const interval = Number(body.intervalSeconds);
     if (!INTERVALS.includes(interval)) bad(`intervalSeconds must be one of ${INTERVALS.join(', ')}`);
+    let tileId: string | null = null;
+    if (onTile) {
+      tileId = str(body.tileId, 'tileId', 100);
+      const d = await this.db.query('SELECT tiles FROM dashboards WHERE id = $1', [id(body.dashboardId)]);
+      if (d.rowCount === 0) bad('no such dashboard');
+      if (!(d.rows[0].tiles as J[]).some((t) => t.id === tileId)) bad('no such tile on this dashboard');
+    }
     try {
-      const r = await this.db.query(`INSERT INTO alerts (saved_search_id, webhook_id, threshold_type, threshold, interval_seconds, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`, [id(body.savedSearchId), id(body.webhookId), type, threshold, interval, userId]);
+      const r = await this.db.query(`INSERT INTO alerts (saved_search_id, dashboard_id, tile_id, webhook_id, threshold_type, threshold, interval_seconds, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [onTile ? null : id(body.savedSearchId), onTile ? id(body.dashboardId) : null, tileId, id(body.webhookId), type, threshold, interval, userId]);
       return (await this.db.query(`${ContentStore.ALERT_SELECT} WHERE a.id = $1`, [r.rows[0].id])).rows.map(alert)[0]!;
     } catch (e) {
       if ((e as { code?: string }).code === '23503') bad('no such saved search or webhook');
@@ -282,9 +316,9 @@ export class ContentStore {
   }
 
   async alertHistory(alertId: number, limit = 50) {
-    const r = await this.db.query('SELECT checked_at, value, state, error, notified FROM alert_history WHERE alert_id = $1 ORDER BY checked_at DESC LIMIT $2',
+    const r = await this.db.query('SELECT checked_at, value, state, error, notified, grp FROM alert_history WHERE alert_id = $1 ORDER BY checked_at DESC LIMIT $2',
       [id(alertId), limit]);
-    return r.rows.map((x) => ({ checkedAt: iso(x.checked_at), value: x.value === null ? null : Number(x.value), state: x.state, error: x.error, notified: x.notified }));
+    return r.rows.map((x) => ({ checkedAt: iso(x.checked_at), value: x.value === null ? null : Number(x.value), state: x.state, error: x.error, notified: x.notified, group: x.grp }));
   }
 
   /**
@@ -292,19 +326,23 @@ export class ContentStore {
    * statement, so two servers never evaluate the same alert in the same interval.
    */
   async claimDueAlerts(limit = 20) {
-    const r = await this.db.query(`UPDATE alerts a SET last_checked_at = now()
-      FROM saved_searches s, webhooks w
-      WHERE a.id IN (SELECT id FROM alerts WHERE last_checked_at IS NULL OR last_checked_at <= now() - make_interval(secs => interval_seconds)
+    // `tile` is the tile's JSON as it is now, or null once it was removed.
+    const r = await this.db.query(`WITH claimed AS (
+        UPDATE alerts SET last_checked_at = now()
+        WHERE id IN (SELECT id FROM alerts WHERE last_checked_at IS NULL OR last_checked_at <= now() - make_interval(secs => interval_seconds)
                      ORDER BY last_checked_at NULLS FIRST LIMIT $1 FOR UPDATE SKIP LOCKED)
-        AND s.id = a.saved_search_id AND w.id = a.webhook_id
-      RETURNING a.*, s.name AS saved_search_name, s.source, s.where_text, s.language, s.filters, w.url AS webhook_url,
-        (a.silenced_until IS NOT NULL AND a.silenced_until > now()) AS silenced`, [limit]);
+        RETURNING *)
+      SELECT a.*, s.name AS saved_search_name, s.source, s.where_text, s.language, s.filters, d.name AS dashboard_name,
+        (SELECT t FROM jsonb_array_elements(d.tiles) t WHERE t->>'id' = a.tile_id) AS tile, w.url AS webhook_url,
+        (a.silenced_until IS NOT NULL AND a.silenced_until > now()) AS silenced
+      FROM claimed a JOIN webhooks w ON w.id = a.webhook_id
+      LEFT JOIN saved_searches s ON s.id = a.saved_search_id LEFT JOIN dashboards d ON d.id = a.dashboard_id`, [limit]);
     return r.rows;
   }
 
-  async recordCheck(alertId: number, value: number | null, state: 'OK' | 'ALERT' | 'ERROR', error: string | null, notified: boolean) {
-    await this.db.query('UPDATE alerts SET state = $2, last_value = $3 WHERE id = $1', [alertId, state, value]);
-    await this.db.query('INSERT INTO alert_history (alert_id, value, state, error, notified) VALUES ($1, $2, $3, $4, $5)',
-      [alertId, value, state, error, notified]);
+  async recordCheck(alertId: number, value: number | null, state: 'OK' | 'ALERT' | 'ERROR', error: string | null, notified: boolean, group: string | null = null) {
+    await this.db.query('UPDATE alerts SET state = $2, last_value = $3, last_group = $4 WHERE id = $1', [alertId, state, value, group]);
+    await this.db.query('INSERT INTO alert_history (alert_id, value, state, error, notified, grp) VALUES ($1, $2, $3, $4, $5, $6)',
+      [alertId, value, state, error, notified, group]);
   }
 }
