@@ -50,7 +50,7 @@ before(async () => {
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   browser = await chromium.launch();
   page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  page.on('pageerror', (e) => console.error('page error:', e.message, e.stack?.split('\n').slice(0, 5).join(' | ')));
+  page.on('pageerror', (e) => console.error('page error:', e.message));
   if (shots) mkdirSync(shots, { recursive: true });
   stop = async () => {
     await browser.close();
@@ -325,8 +325,6 @@ test('admin adds a webhook; an alert on the saved search fires and is listed', a
   assert.equal(received.at(-1)!.text, '[TEST] DorisStack webhook test');
 
   await page.getByRole('list', { name: 'Favorite saved searches' }).getByRole('button', { name: 'Payment errors' }).click();
-  await page.waitForTimeout(1500);
-  await shot('debug-before-alerts');
   await page.locator('.saved-bar').getByRole('button', { name: /Alerts/ }).click();
   const dialog = page.getByRole('dialog', { name: 'Alerts for "Payment errors"' });
   await dialog.getByLabel('Threshold', { exact: true }).fill('3');

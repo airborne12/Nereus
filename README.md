@@ -6,7 +6,7 @@ API service and web UI. "DorisStack" is a working code name.
 
 Design: <https://claude.ai/artifact/RUahRwDXWZPii2gSTZCU67>
 
-Status: **M0 done, M1 in progress**. Tables, collector configuration, a single-host compose
+Status: **M0 and M1 done, M2 in progress**. Tables, collector configuration, a single-host compose
 file and ingestion checks (M0); the search compiler, the API, the search page, and users, login
 and API keys with metadata in PostgreSQL (M1). Configurable data sources come next.
 
@@ -40,7 +40,8 @@ curl -G localhost:8090/api/search --data-urlencode source=logs \
 | Variable | Meaning |
 | --- | --- |
 | `DORIS_HOST`, `DORIS_PORT`, `DORIS_USER`, `DORIS_PASSWORD`, `DORIS_DB` | Doris FE (MySQL protocol) and the telemetry database |
-| `META_DATABASE_URL` | PostgreSQL for users, sessions and API keys; migrations run at start-up |
+| `META_DATABASE_URL` | PostgreSQL for users, sessions, API keys, saved searches, dashboards and alerts; migrations run at start-up |
+| `PUBLIC_URL` | address of the UI, for links in alert messages |
 | `COOKIE_SECURE=1` | mark the session cookie Secure (behind HTTPS) |
 | `PORT`, `WEB_DIST` | listen port (8090), built UI directory (`web/dist`) |
 
@@ -58,6 +59,11 @@ Every `/api/*` call except `/api/auth/*` needs a login: the browser's session co
 | `GET /api/auth/status`, `POST /api/auth/setup`, `/login`, `/logout` | session state, first admin, sign in and out |
 | `GET`/`POST /api/keys`, `DELETE /api/keys/<id>` | your API keys (the key itself is returned once) |
 | `GET`/`POST /api/users`, `POST /api/users/<id>/disabled` | user management (admins) |
+| `GET`/`POST /api/saved-searches`, `GET`/`PUT`/`DELETE …/<id>`, `POST …/<id>/favorite` | saved searches (team), stars (yours) |
+| `GET`/`POST /api/dashboards`, `GET`/`PUT`/`DELETE …/<id>`, `POST …/<id>/favorite` | dashboards and their tiles |
+| `GET /api/webhooks`; `POST`, `DELETE …/<id>`, `POST …/<id>/test` (admins) | alert destinations; URLs are shown to admins only |
+| `GET`/`POST /api/alerts`, `DELETE …/<id>`, `POST …/<id>/silence`, `GET …/<id>/history` | alerts on saved searches |
+| `POST /api/chart {source, display, series, where, language, filters, groupBy, from, to}` | chart data for Chart explorer and tiles |
 
 Users, sessions and keys: passwords are scrypt hashes, session and API key tokens are 256-bit
 random values stored as SHA-256 hashes, sessions last 7 days, 10 failed logins per address and
@@ -106,6 +112,25 @@ cd ../server && DORIS_HOST=<fe> DORIS_PORT=9030 META_DATABASE_URL=... node src/s
 
 Browser tests (Playwright + Chromium) drive the built page against a live Doris and PostgreSQL:
 `npm run build && DORIS_PORT=9030 DORIS_DB=otel_bench npm run e2e`.
+
+## Saved searches, alerts, charts and dashboards
+
+- **Saved searches** keep the query (source, WHERE and language, filters, SELECT, ORDER BY) and tags,
+  not the time range, as in ClickStack. They are shared by the team; stars are per user and appear
+  under Saved searches in the navigation (a red dot when an alert on it is firing).
+- **Alerts** belong to a saved search: alert when its count over the last 1m-24h is above or below a
+  threshold. The server checks due alerts every 15 s (`FOR UPDATE SKIP LOCKED`, so several servers
+  share the work) and posts to the webhook when the state changes, with Slack-compatible `text`, the
+  numbers and a link (`PUBLIC_URL`). Silencing keeps checking but sends nothing. Every check is kept
+  as history.
+- **Webhooks** are added by admins under Team settings. Members choose one by name and never see its
+  URL. This is the only request the server makes to an outside address, it goes only to addresses an
+  admin entered, and redirects are not followed.
+- **Chart explorer**: logs, traces or metrics (`otel_metrics_gauge`), Time Series / Table / Number, up
+  to 10 series of count, count distinct, sum, avg, min, max, p50, p90, p95, p99 of any number field or
+  attribute path, a WHERE and a Group by. Save to dashboard adds it as a tile.
+- **Dashboards**: tiles in a 12-column grid (widths 3-12) with one time range, Live (30 s) and Refresh;
+  New Tile, Edit, Duplicate, Move, Delete, Open in Chart explorer. Every change is saved.
 
 ## Schema notes
 

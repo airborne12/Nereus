@@ -5,17 +5,19 @@ import {
   defaultFacetFields, facetsSql, histogramStep, searchHistogramSql, searchRowsSql, selectColumns, type Filter, type SearchSpec,
 } from '../../../server/src/query/build.ts';
 import { unknownFields } from '../../../server/src/query/compile.ts';
-import { logsSource, tracesSource, type Source } from '../../../server/src/query/source.ts';
+import { logsSource, metricsSource, tracesSource, type Source } from '../../../server/src/query/source.ts';
+import { createDemoContent } from './content.ts';
 import { compileFilter, type DemoRow, fieldValue } from './evaluate.ts';
 
 interface Snapshot {
   logs: DemoRow[];
   traces: DemoRow[];
+  metrics?: DemoRow[];
   fields: Record<string, { name: string; type: string }[]>;
 }
 
-const VARIANTS = ['resource_attributes', 'log_attributes', 'span_attributes'];
-const sources: Record<string, Source> = { logs: logsSource('demo'), traces: tracesSource('demo') };
+const VARIANTS = ['resource_attributes', 'log_attributes', 'span_attributes', 'attributes'];
+const sources: Record<string, Source> = { logs: logsSource('demo'), traces: tracesSource('demo'), metrics: metricsSource('demo') };
 
 const msOf = (t: string) => Date.parse(`${t.replace(' ', 'T')}Z`);
 function shiftTime(t: string, offset: number): string {
@@ -132,7 +134,8 @@ export async function install(): Promise<void> {
   const snap = (await res.json()) as Snapshot;
   const newest = Math.max(...[...snap.logs, ...snap.traces].map((r) => msOf(String(r.timestamp))));
   const offset = Date.now() - newest - 5_000;
-  for (const rows of [snap.logs, snap.traces]) {
+  snap.metrics ??= [];
+  for (const rows of [snap.logs, snap.traces, snap.metrics]) {
     for (const r of rows) {
       r.timestamp = shiftTime(String(r.timestamp), offset);
       if (typeof r.end_time === 'string') r.end_time = shiftTime(r.end_time, offset);
@@ -141,7 +144,8 @@ export async function install(): Promise<void> {
     }
     rows.sort((a, b) => (b._ms as number) - (a._ms as number));
   }
-  const data: Record<string, DemoRow[]> = { logs: snap.logs, traces: snap.traces };
+  const data: Record<string, DemoRow[]> = { logs: snap.logs, traces: snap.traces, metrics: snap.metrics };
+  const contentApi = createDemoContent({ sources, data, matcher }, () => Date.now());
   const all = [...snap.logs, ...snap.traces].map((r) => r._ms as number);
   banner(snap.logs.length, snap.traces.length, Math.round((Math.max(...all) - Math.min(...all)) / 60_000));
   const strip = (r: DemoRow) => {
@@ -251,6 +255,8 @@ export async function install(): Promise<void> {
       }
       const dis = /^\/api\/users\/(\d+)\/disabled$/.exec(path);
       if (dis) { const u = users.find((x) => x.id === Number(dis[1])); if (u) u.disabled = Boolean((body as { disabled: boolean }).disabled); return json(200, { user: u }); }
+      const c = contentApi(method, path, p, (body ?? {}) as Record<string, unknown>);
+      if (c) return json(c.status, c.body);
       return json(404, { error: 'not found' });
     } catch (e) {
       return json(400, { error: (e as Error).message });
