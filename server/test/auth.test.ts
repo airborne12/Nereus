@@ -1,5 +1,6 @@
 // Password hashing (always) and the auth endpoints against a real PostgreSQL (PG_TEST=1).
 
+import { IngestKeys } from '../src/sessions/http.ts';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
@@ -39,7 +40,7 @@ before(async () => {
   // Doris is never reached by these tests; the pool connects lazily.
   const doris = new Doris({ ...configFromEnv(), port: 1 });
   const webDir = new URL('../../web/dist', import.meta.url).pathname;
-  const server = createApp({ doris, db: 'otel', auth: { store, secureCookie: false }, content: new ContentStore(meta.pool), webDir });
+  const server = createApp({ doris, db: 'otel', auth: { store, secureCookie: false }, content: new ContentStore(meta.pool), webDir, ingestKeys: new IngestKeys(meta.pool) });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   stop = async () => {

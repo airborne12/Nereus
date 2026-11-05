@@ -6,7 +6,7 @@ API service and web UI. "DorisStack" is a working code name.
 
 Design: <https://claude.ai/artifact/RUahRwDXWZPii2gSTZCU67>
 
-Status: **M0 and M1 done, M2 in progress** (remaining: Client sessions). Tables, collector configuration, a single-host compose
+Status: **M0 and M1 done, M2 done**: every ClickStack page is built. Tables, collector configuration, a single-host compose
 file and ingestion checks (M0); the search compiler, the API, the search page, and users, login
 and API keys with metadata in PostgreSQL (M1). Configurable data sources come next.
 
@@ -66,6 +66,9 @@ Every `/api/*` call except `/api/auth/*` needs a login: the browser's session co
 | `POST /api/chart {source, display, series, where, language, filters, groupBy, from, to}` | chart data for Chart explorer and tiles |
 | `GET /api/service-map?where=&language=&filters=&from=&to=` | calls between services and per-service requests, errors, p99 |
 | `GET /api/heatmap?where=&language=&filters=&from=&to=&buckets=` | trace durations per time bucket and duration band (Event Deltas) |
+| `POST /api/ingest/sessions` (ingestion key; CORS) | browser SDK: replay chunks and session events |
+| `GET /api/sessions?where=&language=&filters=&from=&to=`, `GET /api/sessions/<id>?from=&to=` | sessions with a matching event; one session's events and replay |
+| `GET`/`POST /api/ingest-keys`, `DELETE …/<id>` (admins) | ingestion keys for the browser SDK |
 
 Users, sessions and keys: passwords are scrypt hashes, session and API key tokens are 256-bit
 random values stored as SHA-256 hashes, sessions last 7 days, 10 failed logins per address and
@@ -153,6 +156,41 @@ Browser tests (Playwright + Chromium) drive the built page against a live Doris 
   (double-click restores); the query box offers your last 10 queries per source and language
   (this browser only); the time picker understands "last 2 hours", "yesterday", "3h ago",
   "this week", "2026-11-04 10:00 to 12:00".
+
+## Client sessions
+
+The browser SDK (`web/src/sdk`, served as `/sdk/dorisstack-rum.js`, 61 kB gzipped) records a
+session with [rrweb](https://github.com/rrweb-io/rrweb) and its clicks, page views, errors,
+console errors and network requests (method, URL, status, duration):
+
+```html
+<script src="https://dorisstack.example.com/sdk/dorisstack-rum.js"></script>
+<script>
+  DorisStackRUM.init({ url: 'https://dorisstack.example.com', apiKey: 'dsi_…', service: 'shop-web' });
+  DorisStackRUM.setUser({ id: 'u42', email: 'ada@example.com', name: 'Ada' });
+  // DorisStackRUM.track('checkout', { total: 42 }) adds a custom event
+</script>
+```
+
+A session ends after 30 minutes without activity or 4 hours. Rows go to `otel_sessions`
+(`schema/002_sessions.sql`, zstd, keyed by session); a replay chunk bigger than a Doris STRING
+value is split into parts and joined back on read. **Client sessions** lists the sessions with an
+event matching the WHERE (`type:error`, `email:ada@example.com`, `url:checkout`, `"text"`) and
+replays one, with a timeline of its events that seeks the player. `web/sdk-example/shop.html` is
+a small site that uses the SDK; `web/demo/record-sessions.ts` records sessions on it.
+
+Privacy and security:
+
+- Every input value is masked by default (`maskAllInputs`); `maskAllText: true` masks all text,
+  class `ds-mask` masks an element's text and `ds-block` leaves it out. Request and response
+  bodies are never recorded; a clicked form field is described without its text.
+- Ingestion keys (`dsi_…`, Team settings, admins) are meant to sit in public pages: they only
+  write session data and are refused by every other endpoint (own table and prefix). Anyone with
+  the key can send data, as with ClickStack; revoke a leaked key. The endpoint answers CORS for any
+  origin without credentials, takes up to 10 MB a request and rejects events more than a day from
+  the server clock. There is no per-key rate limit yet.
+- Replays render the recorded DOM in rrweb's iframe sandbox without `allow-scripts`, so recorded
+  scripts do not run. The viewer's browser does load the recorded page's images and styles.
 
 ## Schema notes
 

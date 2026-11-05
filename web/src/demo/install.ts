@@ -5,7 +5,7 @@ import {
   defaultFacetFields, facetsSql, heatmapSql, HEAT_BANDS_PER_DECADE, histogramStep, OTHER_GROUP, searchHistogramSql, serviceMapSql, searchRowsSql, selectColumns, type Filter, type SearchSpec,
 } from '../../../server/src/query/build.ts';
 import { unknownFields } from '../../../server/src/query/compile.ts';
-import { logsSource, metricsSource, tracesSource, type Source } from '../../../server/src/query/source.ts';
+import { logsSource, metricsSource, sessionsSource, tracesSource, type Source } from '../../../server/src/query/source.ts';
 import { createDemoContent } from './content.ts';
 import { compileFilter, type DemoRow, fieldValue } from './evaluate.ts';
 
@@ -13,6 +13,8 @@ interface Snapshot {
   logs: DemoRow[];
   traces: DemoRow[];
   metrics?: DemoRow[];
+  /** otel_sessions rows of a few sessions recorded on the example shop (demo/record-sessions.ts). */
+  sessions?: DemoRow[];
   fields: Record<string, { name: string; type: string }[]>;
 }
 
@@ -145,6 +147,29 @@ export async function install(): Promise<void> {
     rows.sort((a, b) => (b._ms as number) - (a._ms as number));
   }
   const data: Record<string, DemoRow[]> = { logs: snap.logs, traces: snap.traces, metrics: snap.metrics };
+
+  // Sessions end two minutes ago; rrweb timestamps inside the replay move with them.
+  const sessionSource = sessionsSource('demo');
+  const sessRows = snap.sessions ?? [];
+  const sOff = sessRows.length ? Date.now() - Math.max(...sessRows.map((r) => msOf(String(r.timestamp)))) - 120_000 : 0;
+  const parts = new Map<string, Map<number, string[]>>();
+  for (const r of sessRows) {
+    r.timestamp = shiftTime(String(r.timestamp), sOff);
+    r._ms = msOf(String(r.timestamp));
+    if (typeof r.attributes === 'string') r.attributes = JSON.parse(r.attributes);
+    if (r.kind === 'replay') {
+      const bySeq = parts.get(String(r.session_id)) ?? new Map<number, string[]>();
+      const ps = bySeq.get(Number(r.seq)) ?? [];
+      ps[Number(r.part)] = String(r.payload);
+      bySeq.set(Number(r.seq), ps);
+      parts.set(String(r.session_id), bySeq);
+    }
+  }
+  const replays = new Map([...parts].map(([sid, bySeq]) => [sid, [...bySeq].sort((a, b) => a[0] - b[0]).map(([, ps]) =>
+    (JSON.parse(ps.join('')) as { timestamp: number }[]).map((e) => ({ ...e, timestamp: e.timestamp + sOff })))]));
+  const sessionEvents = sessRows.filter((r) => r.kind === 'event');
+  const bad = (r: DemoRow) => r.event_type === 'error' || (r.event_type === 'console' && String(r.message ?? '').startsWith('error'))
+    || (r.event_type === 'network' && (Number((r.attributes as Record<string, unknown> | null)?.status ?? 1) >= 400 || Number((r.attributes as Record<string, unknown> | null)?.status ?? 1) === 0));
   const contentApi = createDemoContent({ sources, data, matcher }, () => Date.now());
   const all = [...snap.logs, ...snap.traces].map((r) => r._ms as number);
   banner(snap.logs.length, snap.traces.length, Math.round((Math.max(...all) - Math.min(...all)) / 60_000));
@@ -269,6 +294,39 @@ export async function install(): Promise<void> {
       }
       const dis = /^\/api\/users\/(\d+)\/disabled$/.exec(path);
       if (dis) { const u = users.find((x) => x.id === Number(dis[1])); if (u) u.disabled = Boolean((body as { disabled: boolean }).disabled); return json(200, { user: u }); }
+      if (path === '/api/sessions') {
+        const spec = specOf(p);
+        if (spec.language === 'sql') throw new Error('The offline demo runs Lucene queries only; SQL mode needs a Doris cluster.');
+        const match = matcher(sessionSource, spec);
+        const rows = inWindow(p, sessRows);
+        const hit = new Set(rows.filter((r) => r.kind === 'event' && match(r)).map((r) => String(r.session_id)));
+        const by = new Map<string, DemoRow[]>();
+        for (const r of rows) if (hit.has(String(r.session_id))) by.set(String(r.session_id), [...(by.get(String(r.session_id)) ?? []), r]);
+        const sessions = [...by].map(([sid, rs]) => {
+          rs.sort((a, b) => (a._ms as number) - (b._ms as number));
+          const last = rs.at(-1)!;
+          const n = (f: (r: DemoRow) => boolean) => rs.filter(f).length;
+          return { session_id: sid, started: rs[0]!.timestamp, ended: last.timestamp, service: last.service_name,
+            user_email: last.user_email, user_name: last.user_name, user_id: last.user_id, first_url: rs.find((r) => r.url)?.url ?? null,
+            user_agent: last.user_agent, clicks: n((r) => r.event_type === 'click'), pages: n((r) => r.event_type === 'navigation'),
+            errors: n(bad), requests: n((r) => r.event_type === 'network'), replay_parts: n((r) => r.kind === 'replay') };
+        }).sort((a, b) => String(b.started).localeCompare(String(a.started)));
+        return json(200, { sessions, sql: '(offline demo: computed in the browser)' });
+      }
+      const sm = /^\/api\/sessions\/([^/]+)$/.exec(path);
+      if (sm) {
+        const sid = decodeURIComponent(sm[1]!);
+        const rs = sessRows.filter((r) => r.session_id === sid).sort((a, b) => (a._ms as number) - (b._ms as number));
+        if (rs.length === 0) return json(404, { error: 'no such session in this time range' });
+        const last = rs.at(-1)!;
+        return json(200, {
+          session: { sessionId: sid, service: last.service_name, user: { id: last.user_id, email: last.user_email, name: last.user_name },
+            userAgent: last.user_agent, started: rs[0]!.timestamp, ended: last.timestamp },
+          events: sessionEvents.filter((r) => r.session_id === sid).sort((a, b) => (a._ms as number) - (b._ms as number))
+            .map((r) => ({ t: r.timestamp, type: r.event_type, url: r.url, message: r.message, attributes: r.attributes ?? null })),
+          replay: replays.get(sid) ?? [],
+        });
+      }
       if (path === '/api/service-map' || path === '/api/heatmap') {
         const traces = sources.traces!;
         const spec = specOf(p);

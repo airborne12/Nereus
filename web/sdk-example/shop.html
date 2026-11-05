@@ -1,0 +1,74 @@
+<!doctype html>
+<!-- A small shop that uses the DorisStack browser SDK. Open it as
+     shop.html?ds=<DorisStack address>&key=<ingestion key>[&user=<email>]; the e2e test and
+     web/demo/record-sessions.ts record sessions on it. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acme Shop</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f7f7fa; color: #222; }
+    header { background: #3b3bb3; color: #fff; padding: 12px 20px; display: flex; gap: 20px; align-items: center; }
+    header a { color: #fff; }
+    main { padding: 20px; max-width: 760px; }
+    .products { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .product { background: #fff; border-radius: 8px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+    button { background: #3b3bb3; color: #fff; border: 0; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+    input { padding: 6px; border: 1px solid #bbb; border-radius: 4px; width: 220px; }
+    #message { margin-top: 12px; color: #b00; }
+  </style>
+</head>
+<body>
+  <header><strong>Acme Shop</strong><a href="#" id="nav-products">Products</a><a href="#" id="nav-cart">Cart (<span id="count">0</span>)</a></header>
+  <main>
+    <section id="products">
+      <h1>Products</h1>
+      <div class="products">
+        <div class="product"><h3>Teapot</h3><p>$24</p><button id="add-teapot">Add to cart</button></div>
+        <div class="product"><h3>Mug</h3><p>$8</p><button id="add-mug">Add to cart</button></div>
+        <div class="product"><h3>Kettle</h3><p>$39</p><button id="add-kettle">Add to cart</button></div>
+      </div>
+    </section>
+    <section id="cart" hidden>
+      <h1>Cart</h1>
+      <p><label>Card number <input id="card" autocomplete="off"></label></p>
+      <button id="checkout">Pay now</button>
+      <div id="message"></div>
+    </section>
+  </main>
+  <script>
+    // ?ds=&key= are read once, kept for the tab, and removed from the address bar, so the
+    // recorded page URLs are the shop's own.
+    const q = new URLSearchParams(location.search);
+    if (q.has('ds')) sessionStorage.setItem('shop.ds', JSON.stringify({ ds: q.get('ds'), key: q.get('key'), user: q.get('user') }));
+    const cfg = JSON.parse(sessionStorage.getItem('shop.ds') || '{}');
+    history.replaceState({}, '', location.pathname);
+    const p = new Map(Object.entries(cfg));
+    const s = document.createElement('script');
+    s.src = `${p.get('ds')}/sdk/dorisstack-rum.js`;
+    s.onload = () => {
+      DorisStackRUM.init({ url: p.get('ds'), apiKey: p.get('key'), service: 'acme-shop' });
+      const email = p.get('user') || 'ada@example.com';
+      DorisStackRUM.setUser({ id: `u-${email.length * 97}`, email, name: email.split('@')[0] });
+      window.dsReady = true;
+    };
+    document.head.appendChild(s);
+    let count = 0;
+    for (const id of ['add-teapot', 'add-mug', 'add-kettle']) {
+      document.getElementById(id).onclick = () => { document.getElementById('count').textContent = String(++count); };
+    }
+    const show = (cart) => {
+      document.getElementById('products').hidden = cart;
+      document.getElementById('cart').hidden = !cart;
+    };
+    document.getElementById('nav-cart').onclick = (e) => { e.preventDefault(); history.pushState({}, '', '/cart'); document.title = 'Cart - Acme Shop'; show(true); };
+    document.getElementById('nav-products').onclick = (e) => { e.preventDefault(); history.pushState({}, '', '/'); document.title = 'Acme Shop'; show(false); };
+    document.getElementById('checkout').onclick = async () => {
+      const res = await fetch('/api/checkout', { method: 'POST' });
+      document.getElementById('message').textContent = `Payment failed (${res.status})`;
+      setTimeout(() => { throw new Error('Checkout failed: payment service unavailable'); }, 0);
+    };
+  </script>
+</body>
+</html>

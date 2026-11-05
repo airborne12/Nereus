@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p . && vite build",
+    "build": "tsc -p . && vite build && vite build -c vite.sdk.config.ts",
     "build:demo": "tsc -p . && vite build --mode demo --outDir dist-demo && cp demo/demo-data.json dist-demo/",
     "typecheck": "tsc -p .",
     "test": "node --test test/*.test.ts",
@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "rrweb": "2.1.7"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

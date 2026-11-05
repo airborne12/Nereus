@@ -4,6 +4,7 @@
 //
 //   npm run build && DORIS_PORT=9930 DORIS_DB=otel_bench SHOTS=/tmp/shots npm run e2e
 
+import { IngestKeys } from '../../server/src/sessions/http.ts';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -41,7 +42,7 @@ before(async () => {
   const webDir = new URL('../dist', import.meta.url).pathname;
   const auth = { store: new AuthStore(meta.pool), secureCookie: false };
   const content = new ContentStore(meta.pool);
-  const server = createApp({ doris, db: DB, auth, content, webDir });
+  const server = createApp({ doris, db: DB, auth, content, webDir, ingestKeys: new IngestKeys(meta.pool) });
   // The clock sits at the end of the loaded data, so alert windows contain events.
   const t = String(((await doris.query(`SELECT max(timestamp) AS t FROM ${DB}.otel_logs`)) as { t: string }[])[0]!.t);
   const end = Date.parse(`${String(t).replace(' ', 'T')}Z`) + 1000;
@@ -270,10 +271,10 @@ test('errors and unknown fields are explained', async () => {
   assert.ok(await total() > 0);
 });
 
-test('planned pages say so; going back to Search keeps the query', async () => {
+test('leaving Search and coming back keeps the query', async () => {
   const nav = page.getByRole('navigation', { name: 'Main' });
   await nav.getByRole('button', { name: 'Client sessions' }).click();
-  assert.match(await page.locator('.planned').innerText(), /Not built yet/);
+  await page.getByRole('heading', { name: 'Client sessions' }).waitFor();
   await nav.getByRole('button', { name: 'Search', exact: true }).click();
   await settled();
   assert.equal(await where().inputValue(), 'level:ERROR');
@@ -539,6 +540,88 @@ test('search extras: group by, denoise, CSV, column resize, query history, natur
     return Number(p.get('to')) - Number(p.get('from')) === 2 * 3600_000;
   });
   await shot('13-search-extras');
+});
+
+test('client sessions: the SDK on another site records a session that replays, masked', async () => {
+  // An admin creates an ingestion key in Team settings.
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Team settings' }).click();
+  await page.getByLabel('Ingestion key name').fill('acme shop');
+  await page.getByRole('button', { name: 'Create ingestion key' }).click();
+  const key = await page.getByTestId('new-ingest-key').innerText();
+  assert.match(key, /^dsi_/);
+
+  // The shop runs on its own origin and loads the SDK from DorisStack.
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync(new URL('../sdk-example/shop.html', import.meta.url), 'utf8');
+  const shopServer = createServer((req, res) => {
+    if (req.method === 'POST' && req.url?.startsWith('/api/checkout')) return res.writeHead(503).end('down');
+    res.writeHead(200, { 'content-type': 'text/html' }).end(html);
+  });
+  await new Promise<void>((r) => shopServer.listen(0, '127.0.0.1', r));
+  const shop = `http://127.0.0.1:${(shopServer.address() as AddressInfo).port}`;
+  const visitor = await browser.newContext({ viewport: { width: 1100, height: 700 } });
+  const sp = await visitor.newPage();
+  await sp.goto(`${shop}/?ds=${encodeURIComponent(base)}&key=${encodeURIComponent(key)}`);
+  await sp.waitForFunction(() => (window as any).dsReady === true);
+  await sp.click('#add-teapot');
+  // Pauses like a person's, so the replay has a few seconds to seek in.
+  await sp.waitForTimeout(800);
+  await sp.click('#add-mug');
+  await sp.waitForTimeout(800);
+  await sp.click('#nav-cart');
+  await sp.click('#card');
+  await sp.fill('#card', '4111 1111 1111 1111');
+  await sp.waitForTimeout(1200);
+  await sp.click('#checkout');
+  await sp.locator('#message', { hasText: 'Payment failed (503)' }).waitFor();
+  await sp.waitForTimeout(300);
+  const sid = await sp.evaluate(async () => { await (window as any).DorisStackRUM.flush(); return (window as any).DorisStackRUM.sessionId(); });
+  await visitor.close();
+  await new Promise<void>((r) => shopServer.close(() => r()));
+
+  // Inputs are masked: the card number is nowhere in what was stored.
+  const [{ n, leaks }] = await doris.query(`SELECT count(*) AS n, sum(if(payload LIKE '%4111%' OR message LIKE '%4111%', 1, 0)) AS leaks FROM ${DB}.otel_sessions WHERE session_id = '${sid}'`) as any[];
+  assert.ok(Number(n) > 5, `${n} rows`);
+  assert.equal(Number(leaks), 0);
+
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Client sessions' }).click();
+  const row = page.locator(`tr[data-session="${sid}"]`);
+  await row.waitFor({ timeout: 30_000 });
+  const cells = await row.locator('td').allInnerTexts();
+  assert.match(cells[0]!, /ada@example\.com/);
+  assert.match(cells[0]!, /acme-shop/);
+  assert.ok(Number(cells[5]) >= 4, `clicks ${cells[5]}`);
+  assert.ok(Number(cells[6]) >= 2, `errors ${cells[6]}: the failed request and the thrown error`);
+  await page.getByLabel('Session filter').fill('email:nobody@example.com');
+  await page.getByLabel('Session filter').press('Enter');
+  await page.locator('.empty', { hasText: 'No sessions' }).waitFor();
+  await page.getByLabel('Session filter').fill('"payment service unavailable"');
+  await page.getByLabel('Session filter').press('Enter');
+  await row.click();
+
+  // The replay renders the recorded page in a sandbox that runs no scripts.
+  const frame = page.locator('[data-testid="replay"] iframe');
+  await frame.waitFor({ timeout: 30_000 });
+  const sandbox = (await frame.getAttribute('sandbox')) ?? '';
+  assert.ok(sandbox !== null && !sandbox.includes('allow-scripts'), `sandbox="${sandbox}"`);
+  await page.frameLocator('[data-testid="replay"] iframe').getByText('Teapot').waitFor();
+  const list = page.getByRole('complementary', { name: 'Session events' });
+  const text = await list.innerText();
+  assert.match(text, /navigation/i);
+  assert.match(text, /button#add-teapot "Add to cart"/);
+  assert.match(text, /POST http:\/\/127\.0\.0\.1:\d+\/api\/checkout 503/);
+  assert.match(text, /Checkout failed: payment service unavailable/);
+  assert.match(text, /input#card/);
+  assert.doesNotMatch(text, /4111/);
+  const urls = (await doris.query(`SELECT url FROM ${DB}.otel_sessions WHERE session_id = '${sid}' AND event_type = 'navigation' ORDER BY timestamp`) as any[]).map((r) => r.url);
+  assert.deepEqual(urls.map((u: string) => new URL(u).pathname), ['/', '/cart'], 'page views, without the example\'s parameters');
+  await list.getByRole('tab', { name: /^Errors/ }).click();
+  assert.equal(await list.locator('li').count(), 2);
+  await list.locator('li', { hasText: 'Checkout failed' }).getByRole('button').click();
+  assert.notEqual(await page.getByLabel('Replay time').innerText(), '0:00 / 0:00');
+  await page.getByRole('button', { name: 'Play' }).click();
+  await page.getByRole('button', { name: 'Pause' }).waitFor();
+  await shot('15-session-replay');
 });
 
 test('a phone-width screen has no horizontal scroll', async () => {

@@ -125,13 +125,3 @@ const PLANNED: Partial<Record<Page, string>> = {
   sessions: 'Client sessions: browser session replay linked to traces.',
   'service-map': 'Service map: services and the calls between them, from traces.',
 };
-
-export function PlannedPage({ page }: { page: Page }) {
-  return (
-    <div className="planned">
-      <h1>{ITEMS.find((i) => i.page === page)?.label}</h1>
-      <p>{PLANNED[page]}</p>
-      <p className="muted">Not built yet: planned for milestone M2 or M3. Search is available now.</p>
-    </div>
-  );
-}

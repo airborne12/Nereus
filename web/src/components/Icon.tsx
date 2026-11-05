@@ -2,7 +2,7 @@
 
 export type IconName =
   | 'table' | 'floppy' | 'chart' | 'bell' | 'laptop' | 'sitemap' | 'grid' | 'settings' | 'collapse' | 'expand'
-  | 'play' | 'bolt' | 'code' | 'close' | 'filter' | 'search' | 'copy' | 'plus' | 'minus' | 'columns' | 'wrap' | 'download'
+  | 'play' | 'bolt' | 'code' | 'close' | 'filter' | 'search' | 'copy' | 'plus' | 'minus' | 'columns' | 'wrap' | 'download' | 'pause'
   | 'chevron-down' | 'chevron-right' | 'pin' | 'maximize' | 'link';
 
 const PATHS: Record<IconName, string> = {
@@ -28,6 +28,7 @@ const PATHS: Record<IconName, string> = {
   columns: 'M4 4h16v16H4zM10 4v16M15 4v16',
   wrap: 'M4 6h16M4 12h13a3 3 0 0 1 0 6h-4M4 18h5M14 16l-2 2 2 2',
   download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+  pause: 'M8 5v14M16 5v14',
   'chevron-down': 'M6 9l6 6 6-6',
   'chevron-right': 'M9 6l6 6-6 6',
   pin: 'M15 4l5 5-4 1-4 4 1 5-3-3-5 5 5-5-3-3 5 1 4-4z',

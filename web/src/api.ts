@@ -288,3 +288,51 @@ export function heatmap(s: Omit<Spec, 'source'>, signal?: AbortSignal) {
   return get<{ cells: { t: string; b: number | string; n: number | string }[]; stepSeconds: number }>('/api/heatmap',
     { ...specParams({ ...s, source: 'traces' }), buckets: 60 }, signal);
 }
+
+export interface SessionSummary {
+  session_id: string;
+  started: string;
+  ended: string;
+  service: string;
+  user_email: string | null;
+  user_name: string | null;
+  user_id: string | null;
+  first_url: string | null;
+  user_agent: string | null;
+  clicks: number | string;
+  pages: number | string;
+  errors: number | string;
+  requests: number | string;
+  replay_parts: number | string;
+}
+
+export interface SessionEvent {
+  t: string;
+  type: 'click' | 'navigation' | 'error' | 'console' | 'network' | 'custom';
+  url: string | null;
+  message: string | null;
+  attributes: Record<string, unknown> | null;
+}
+
+export interface SessionDetail {
+  session: { sessionId: string; service: string; user: { id: string | null; email: string | null; name: string | null }; userAgent: string | null; started: string; ended: string };
+  events: SessionEvent[];
+  /** rrweb events, one list per recorded chunk. */
+  replay: { type: number; timestamp: number }[][];
+}
+
+export function sessions(s: Omit<Spec, 'source'>, signal?: AbortSignal) {
+  return get<{ sessions: SessionSummary[]; sql: string }>('/api/sessions', specParams({ ...s, source: 'logs' }), signal);
+}
+
+export function session(id: string, range: Range, signal?: AbortSignal) {
+  return get<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`, { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, signal);
+}
+
+export interface IngestKey { id: number; name: string; prefix: string; createdBy: string | null; createdAt: string; lastUsedAt: string | null; revoked: boolean }
+
+export const ingestKeys = {
+  list: () => get<{ keys: IngestKey[] }>('/api/ingest-keys', {}),
+  create: (name: string) => send<{ key: string; id: number }>('POST', '/api/ingest-keys', { name }),
+  revoke: (id: number) => send<{ ok: true }>('DELETE', `/api/ingest-keys/${id}`),
+};

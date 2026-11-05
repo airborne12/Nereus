@@ -33,9 +33,10 @@ import {
   traceSql, valuesSql, type Field,
 } from './query/build.ts';
 import { CompileError, unknownFields } from './query/compile.ts';
-import { logsSource, metricsSource, tracesSource, type Source } from './query/source.ts';
+import { logsSource, metricsSource, sessionsSource, tracesSource, type Source } from './query/source.ts';
 import { Doris, configFromEnv } from './db.ts';
 import { type AuthContext, authRoutes, authenticate } from './auth/http.ts';
+import { IngestKeys, sessionRoutes } from './sessions/http.ts';
 import { AuthError, AuthStore } from './auth/store.ts';
 import { metaPoolFromEnv, migrate } from './meta.ts';
 
@@ -46,6 +47,8 @@ export interface AppOptions {
   db: string;
   auth: AuthContext;
   content: ContentStore;
+  /** Ingestion keys of the browser SDK (POST /api/ingest/sessions). */
+  ingestKeys: IngestKeys;
   /** For webhook tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /** Directory of the built web UI (web/dist); other paths than /api are served from it. */
@@ -73,7 +76,8 @@ async function serveStatic(root: string, pathname: string, res: ServerResponse):
   const body = await readFile(file);
   res.writeHead(200, {
     'content-type': MIME[extname(file)] ?? 'application/octet-stream',
-    'cache-control': file.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+    // Hashed assets never change; index.html and the SDK (a fixed URL other sites load) are revalidated.
+    'cache-control': file.endsWith('index.html') || pathname.startsWith('/sdk/') ? 'no-cache' : 'public, max-age=31536000, immutable',
   });
   res.end(body);
 }
@@ -104,8 +108,9 @@ export function sourcesFor(db: string): Record<string, Source> {
   return { logs: logsSource(db), traces: tracesSource(db), metrics: metricsSource(db) };
 }
 
-export function createApp({ doris, db, auth, content, fetchImpl, webDir }: AppOptions): Server {
+export function createApp({ doris, db, auth, content, ingestKeys, fetchImpl, webDir }: AppOptions): Server {
   const account = authRoutes(auth, send);
+  const sessions = sessionRoutes({ doris, keys: ingestKeys, source: sessionsSource(db), send });
   const contentApi = contentRoutes(content, send, fetchImpl);
   const sources = sourcesFor(db);
   const sourceParam = (url: URL): Source => {
@@ -158,6 +163,8 @@ export function createApp({ doris, db, auth, content, fetchImpl, webDir }: AppOp
       if (req.method !== 'GET' || !webDir) return send(res, 404, { error: 'not found' });
       return serveStatic(webDir, path, res);
     }
+    // Browser SDK ingestion: authorised by an ingestion key only, never by a session cookie.
+    if (path === '/api/ingest/sessions') return sessions.ingest(req, res);
     if (path.startsWith('/api/auth/')) {
       if (await account.handlePublic(req, res, path)) return;
       return send(res, 404, { error: 'not found' });
@@ -166,6 +173,7 @@ export function createApp({ doris, db, auth, content, fetchImpl, webDir }: AppOp
     if (!user) return send(res, 401, { error: 'login required' });
     if (await account.handleAccount(req, res, path, user)) return;
     if (await contentApi(req, res, url, user)) return;
+    if (await sessions.handle(req, res, url, user, () => searchSpec(url))) return;
     if (path === '/api/chart' && req.method === 'POST') {
       const b = await readJson(req);
       const source = sources[String(b.source)];
@@ -265,7 +273,7 @@ if (import.meta.main) {
   const content = new ContentStore(meta);
   const db = process.env.DORIS_DB ?? 'otel';
   new AlertRunner({ store: content, doris, sources: sourcesFor(db), baseUrl: process.env.PUBLIC_URL ?? null }).start();
-  createApp({ doris, db, auth, content, webDir }).listen(port, () => {
+  createApp({ doris, db, auth, content, ingestKeys: new IngestKeys(meta), webDir }).listen(port, () => {
     console.log(`dorisstack server listening on :${port}`);
   });
 }

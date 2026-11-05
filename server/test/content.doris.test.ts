@@ -1,6 +1,7 @@
 // Saved searches, dashboards, webhooks, alerts and charts through the HTTP API, on a fresh
 // PostgreSQL database and a live Doris loaded by bench/otelgen.py. Skipped unless DORIS_TEST=1.
 
+import { IngestKeys } from '../src/sessions/http.ts';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -33,7 +34,7 @@ before(async () => {
   const m = await auth.createUser('mia@example.com', 'Mia', 'memberpass', 'member');
   admin = (await auth.createApiKey(a.id, 't')).key;
   member = (await auth.createApiKey(m.id, 't')).key;
-  const server = createApp({ doris, db, auth: { store: auth, secureCookie: false }, content });
+  const server = createApp({ doris, db, auth: { store: auth, secureCookie: false }, content, ingestKeys: new IngestKeys(meta.pool) });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   // A webhook receiver, like a Slack incoming webhook.

@@ -435,3 +435,35 @@ body.demo #root { flex: 1; min-height: 0; }
 .tile-bell.ok { color: var(--lvl-debug); }
 .tile-bell.alert { color: var(--lvl-error); }
 .tile-bell.error { color: var(--lvl-warn); }
+
+/* ---------------------------------------------------------------- client sessions */
+.sessions-list td.bad { color: var(--lvl-error); font-weight: 600; }
+.ellipsis { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-page { display: flex; flex-direction: column; min-height: 0; }
+.session-view { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; min-height: 0; height: calc(100vh - 110px); }
+.player { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); overflow: hidden; }
+.player-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); overflow: hidden; }
+.player-host { position: relative; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.25); background: #fff; }
+.player-host .replayer-wrapper { position: absolute; top: 0; left: 0; }
+.player-bar { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-top: 1px solid var(--border); }
+.progress { position: relative; flex: 1; height: 8px; border-radius: 4px; background: var(--panel-2); cursor: pointer; }
+.progress-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 4px; }
+.progress .mark { position: absolute; top: -3px; width: 3px; height: 14px; border-radius: 1px; transform: translateX(-1px); }
+.progress .mark.bad { background: var(--lvl-error); }
+.progress .mark.page { background: var(--text-3); }
+.session-events { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+.session-events .segmented { margin: 8px; flex-wrap: wrap; }
+.session-events ul { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+.session-events li { border-bottom: 1px solid var(--border); }
+.session-events li.current { background: var(--selected); }
+.session-events li.bad .ev-msg { color: var(--lvl-error); }
+.session-events .ev { display: grid; grid-template-columns: 40px 76px minmax(0, 1fr); gap: 6px; width: 100%; text-align: left; background: none; border: 0; color: var(--text); padding: 6px 10px; cursor: pointer; font-size: 12px; }
+.session-events .ev:hover { background: var(--hover); }
+.ev-type { font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-2); }
+.ev-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-detail { margin: 0 10px 8px; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px; max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+@media (max-width: 900px) {
+  .session-view { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .player-stage { height: 320px; flex: none; }
+  .session-events { max-height: 400px; }
+}

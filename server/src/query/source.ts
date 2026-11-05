@@ -159,3 +159,33 @@ export function metricsSource(db = 'otel'): Source {
     ],
   };
 }
+
+/**
+ * otel_sessions (schema/002_sessions.sql): the events of browser sessions, searched to find
+ * sessions. Replay payloads are never selected through the search language.
+ */
+export function sessionsSource(db = 'otel'): Source {
+  return {
+    name: 'sessions',
+    table: `${db}.otel_sessions`,
+    timestampColumn: 'timestamp',
+    defaultFields: ['message', 'url'],
+    attributeColumns: ['attributes'],
+    aliases: { service: 'service_name', type: 'event_type', email: 'user_email', user: 'user_email', session: 'session_id' },
+    idColumns: [],
+    columns: [
+      col('session_id', 'string', 'keyword'),
+      col('timestamp', 'datetime'),
+      col('kind', 'string'),
+      col('event_type', 'string', 'keyword'),
+      col('service_name', 'string', 'keyword'),
+      col('url', 'string', 'fulltext'),
+      col('user_id', 'string', 'keyword'),
+      col('user_email', 'string', 'keyword'),
+      col('user_name', 'string'),
+      col('user_agent', 'string'),
+      col('message', 'string', 'fulltext'),
+      col('attributes', 'variant', 'keyword'),
+    ],
+  };
+}

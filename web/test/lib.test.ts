@@ -196,3 +196,41 @@ test('state: groupBy and denoise round-trip through the URL', async () => {
   assert.deepEqual(parseState(serializeState(s)), s);
   assert.deepEqual(parseState(serializeState(DEFAULT_STATE)), DEFAULT_STATE);
 });
+
+test('sdk sessions: kept while active, new after 30 minutes idle or 4 hours; the user carries over', async () => {
+  const { touchSession, IDLE_MS, MAX_MS } = await import('../src/sdk/core.ts');
+  let n = 0;
+  const id = () => `id${++n}`;
+  const a = touchSession(null, 1000, id);
+  assert.deepEqual([a.state.id, a.rotated], ['id1', false]);
+  const b = touchSession({ ...a.state, seq: 3, user: { id: 'u' } }, 1000 + IDLE_MS - 1, id);
+  assert.deepEqual([b.state.id, b.state.seq, b.rotated], ['id1', 3, false]);
+  const c = touchSession(b.state, b.state.lastActive + IDLE_MS, id);
+  assert.deepEqual([c.state.id, c.state.seq, c.rotated, c.state.user], ['id2', 0, true, { id: 'u' }]);
+  let s = touchSession(null, 0, id).state;
+  for (let t = 60_000; t < MAX_MS; t += 600_000) s = touchSession(s, t, id).state;
+  assert.notEqual(touchSession(s, MAX_MS, id).state.id, s.id, 'a busy session still ends after 4 hours');
+});
+
+test('sdk: clicked elements are described without form field text', async () => {
+  const { describeElement } = await import('../src/sdk/core.ts');
+  const el = (tagName: string, extra: Record<string, unknown> = {}) => ({ tagName, getAttribute: () => null, ...extra });
+  assert.equal(describeElement(el('BUTTON', { id: 'buy', className: 'btn primary big', textContent: '  Buy\n now ' })), 'button#buy.btn.primary "Buy now"');
+  assert.equal(describeElement(el('INPUT', { id: 'card', textContent: '4111 1111' })), 'input#card');
+  assert.equal(describeElement({ tagName: 'A', getAttribute: (n: string) => (n === 'aria-label' ? 'Cart' : null), textContent: '3' }), 'a "Cart"');
+});
+
+test('sdk batch: replay chunks under the body size, each its own seq; events ride with the first', async () => {
+  const { Batch, MAX_BODY_CHARS } = await import('../src/sdk/core.ts');
+  const b = new Batch();
+  const big = 'x'.repeat(MAX_BODY_CHARS / 2 + 10);
+  for (let i = 0; i < 3; i++) b.addReplay({ timestamp: 100 + i, data: big } as never);
+  b.addEvent({ t: 5, type: 'click', message: 'a' });
+  let seq = 7;
+  const bodies = b.take(() => seq++);
+  assert.deepEqual(bodies.map((x) => [x.replay.map((r) => [r.seq, r.t, r.events.length]), x.events.length]),
+    [[[[7, 100, 1]], 1], [[[8, 101, 1]], 0], [[[9, 102, 1]], 0]]);
+  assert.ok(b.empty);
+  for (let i = 0; i < 2500; i++) b.addEvent({ t: i, type: 'network' });
+  assert.deepEqual(b.take(() => 0).map((x) => [x.replay.length, x.events.length]), [[0, 1000], [0, 1000], [0, 500]]);
+});
