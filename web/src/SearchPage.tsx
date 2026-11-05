@@ -7,6 +7,7 @@ import { PatternsView } from './components/PatternsView.tsx';
 import { QueryInput } from './components/QueryInput.tsx';
 import { ResultsTable } from './components/ResultsTable.tsx';
 import { RowSidePanel } from './components/RowSidePanel.tsx';
+import { SaveSearchModal, SavedSearchBar, type SearchFields } from './components/SavedSearchBar.tsx';
 import { TimePicker } from './components/TimePicker.tsx';
 import { quoteValue, replaceField } from './lib/filters.ts';
 import { splitSelect } from './lib/select.ts';
@@ -29,15 +30,15 @@ const TRACE_SERIES = [
   { name: 'STATUS_CODE_ERROR', label: 'Error', color: 'var(--lvl-error)' },
 ];
 
-function useUrlState(): [SearchState, (s: SearchState) => void] {
+function useUrlState(): [SearchState, (s: SearchState, replace?: boolean) => void] {
   const [state, setState] = useState(() => parseState(window.location.search));
   useEffect(() => {
     const onPop = () => setState(parseState(window.location.search));
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
-  const update = useCallback((s: SearchState) => {
-    window.history.pushState(null, '', serializeState(s));
+  const update = useCallback((s: SearchState, replace = false) => {
+    window.history[replace ? 'replaceState' : 'pushState'](null, '', serializeState(s));
     setState(s);
   }, []);
   return [state, update];
@@ -67,7 +68,7 @@ function FilterPills({ filters, onChange }: { filters: Filter[]; onChange: (f: F
   );
 }
 
-export function SearchPage() {
+export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => void; onChanged: () => void }) {
   const [state, setState] = useUrlState();
   const [now, setNow] = useState(() => Date.now());
   const range = useMemo(() => resolveWindow(state.window, now), [state.window, now]);
@@ -97,6 +98,22 @@ export function SearchPage() {
   const [wrap, setWrap] = useState(false);
   const [showSql, setShowSql] = useState(false);
   const whereBox = useRef<HTMLDivElement>(null);
+  const [saved, setSaved] = useState<api.SavedSearch | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Opening ?saved=<id> loads that search; a URL that already carries a query keeps it.
+  useEffect(() => {
+    if (state.saved === null) return setSaved(null);
+    const ac = new AbortController();
+    api.content.search(state.saved).then((s) => {
+      setSaved(s);
+      const p = new URLSearchParams(window.location.search);
+      if (!['where', 'q', 'filters', 'select', 'orderBy', 'lang'].some((k) => p.has(k))) {
+        setState({ ...state, source: s.source, where: s.where, language: s.language, filters: s.filters, select: s.select, orderBy: s.orderBy }, true);
+      }
+    }, () => setSaved(null));
+    return () => ac.abort();
+  }, [state.saved]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const spec: api.Spec = useMemo(() => ({ source: state.source, where: state.where, language: state.language, filters: state.filters, range }),
     [state.source, state.where, state.language, state.filters, range]);
@@ -119,6 +136,7 @@ export function SearchPage() {
       api.search(spec, { select: state.select, orderBy: state.orderBy, limit: PAGE }, ac.signal),
       api.histogram(spec, groupBy, ac.signal),
     ]).then(([s, h]) => {
+      if (ac.signal.aborted) return;
       setRows(s.rows);
       setColumns(s.columns);
       setElapsed(s.elapsedMs);
@@ -141,7 +159,7 @@ export function SearchPage() {
   useEffect(() => {
     const ac = new AbortController();
     setFacets((f) => ({ ...f, loading: true }));
-    api.facets(spec, ac.signal).then((r) => setFacets({ ...r, loading: false }), () => !ac.signal.aborted && setFacets({ sampled: 0, facets: [], loading: false }));
+    api.facets(spec, ac.signal).then((r) => !ac.signal.aborted && setFacets({ ...r, loading: false }), () => !ac.signal.aborted && setFacets({ sampled: 0, facets: [], loading: false }));
     return () => ac.abort();
   }, [spec]);
 
@@ -193,8 +211,22 @@ export function SearchPage() {
     },
   };
 
+  const fields: SearchFields = { source: state.source, where: state.where, language: state.language, filters: state.filters, select: state.select, orderBy: state.orderBy };
+  const savedDirty = saved !== null && (['source', 'where', 'language', 'select', 'orderBy'] as const).some((k) => saved[k] !== fields[k])
+    || (saved !== null && JSON.stringify(saved.filters) !== JSON.stringify(fields.filters));
+
   return (
     <div className="search-page">
+      {saved && (
+        <SavedSearchBar search={saved} dirty={savedDirty} fields={fields} go={navigate}
+          onUpdated={(s) => { setSaved(s); onChanged(); }}
+          onSavedAs={() => setSaving(true)}
+          onDeleted={() => { onChanged(); go({ saved: null }); }} />
+      )}
+      {saving && (
+        <SaveSearchModal fields={fields} onClose={() => setSaving(false)}
+          onSaved={(s) => { setSaving(false); setSaved(s); onChanged(); go({ saved: s.id }); }} />
+      )}
       <form className="search-head" onSubmit={(e) => { e.preventDefault(); run(); }}>
         <div className="row">
           <select className="source" aria-label="Source" value={state.source}
@@ -212,6 +244,7 @@ export function SearchPage() {
             <input aria-label="ORDER BY" className="mono" value={draft.orderBy} placeholder="timestamp DESC"
               onChange={(e) => setDraft({ ...draft, orderBy: e.target.value })} />
           </label>
+          {!saved && <button type="button" className="btn" onClick={() => setSaving(true)}><Icon name="floppy" size={12} /> Save</button>}
         </div>
         <div className="row">
           <div className="where grow" ref={whereBox}>

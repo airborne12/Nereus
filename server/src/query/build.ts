@@ -1,7 +1,7 @@
 // Full SELECT statements for the search page: result rows, the time histogram, one trace.
 // Every statement bounds the time column so Doris prunes daily partitions.
 
-import { CompileError, compileWhere, fieldExpr, sqlString } from './compile.ts';
+import { CompileError, compileWhere, fieldExpr, numericFieldExpr, sqlString } from './compile.ts';
 import type { Source } from './source.ts';
 
 export interface TimeRange {
@@ -276,4 +276,66 @@ export function defaultFacetFields(source: Source, fields: Field[]): string[] {
     .filter((f) => !NOT_FACETS.has(f.name) && !(f.name in source.aliases))
     .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name))
     .map((f) => f.name);
+}
+
+// ---------------------------------------------------------------- charts (Chart explorer, dashboard tiles)
+
+export type Aggregate = 'count' | 'count_distinct' | 'sum' | 'avg' | 'min' | 'max' | 'p50' | 'p90' | 'p95' | 'p99';
+export const AGGREGATES: Aggregate[] = ['count', 'count_distinct', 'sum', 'avg', 'min', 'max', 'p50', 'p90', 'p95', 'p99'];
+
+export interface Series {
+  agg: Aggregate;
+  /** The field aggregated; not used by count. */
+  field?: string;
+}
+
+export interface ChartSpec extends SearchSpec {
+  display: 'line' | 'table' | 'number';
+  series: Series[];
+  groupBy?: string;
+  maxBuckets?: number;
+}
+
+function aggregateSql(source: Source, s: Series): string {
+  if (!AGGREGATES.includes(s.agg)) throw new CompileError(`unknown aggregate '${s.agg}'`);
+  if (s.agg === 'count') return 'count(*)';
+  if (!s.field) throw new CompileError(`${s.agg} needs a field`);
+  if (s.agg === 'count_distinct') return `approx_count_distinct(${fieldExpr(source, s.field)})`;
+  const num = numericFieldExpr(source, s.field);
+  if (s.agg.startsWith('p')) return `percentile_approx(${num}, ${Number(s.agg.slice(1)) / 100})`;
+  return `${s.agg}(${num})`;
+}
+
+/**
+ * One query per chart. Lines: a row per time bucket (and group) with v0..vn. Tables: a row per group
+ * (top 100 by the first series). Numbers: one row.
+ */
+export function chartSql(source: Source, spec: ChartSpec): { sql: string; stepSeconds: number | null } {
+  if (!Array.isArray(spec.series) || spec.series.length === 0 || spec.series.length > 10) {
+    throw new CompileError('a chart needs 1 to 10 series');
+  }
+  const values = spec.series.map((s, i) => `${aggregateSql(source, s)} AS v${i}`).join(', ');
+  const where = searchWhere(source, spec);
+  const group = spec.groupBy ? fieldExpr(source, spec.groupBy) : null;
+  if (spec.display === 'number') {
+    return { sql: `SELECT ${values} FROM ${source.table} WHERE ${where}`, stepSeconds: null };
+  }
+  if (spec.display === 'table') {
+    const sql = group
+      ? `SELECT ${group} AS g, ${values} FROM ${source.table} WHERE ${where} GROUP BY g ORDER BY v0 DESC LIMIT 100`
+      : `SELECT ${values} FROM ${source.table} WHERE ${where}`;
+    return { sql, stepSeconds: null };
+  }
+  if (spec.display !== 'line') throw new CompileError(`unknown display '${String(spec.display)}'`);
+  const { fromMs, toMs } = timeBounds(source, spec);
+  const [stepSeconds, floor] = histogramStep(fromMs, toMs, spec.maxBuckets ?? 60);
+  const bucket = floor.replace('%s', source.timestampColumn);
+  const sql = `SELECT ${bucket} AS t${group ? `, ${group} AS g` : ''}, ${values} FROM ${source.table} WHERE ${where} ` +
+    `GROUP BY t${group ? ', g' : ''} ORDER BY t LIMIT 10000`;
+  return { sql, stepSeconds };
+}
+
+/** Matches of a saved search in a window: the number an alert compares with its threshold. */
+export function countSql(source: Source, spec: SearchSpec): string {
+  return `SELECT count(*) AS n FROM ${source.table} WHERE ${searchWhere(source, spec)}`;
 }

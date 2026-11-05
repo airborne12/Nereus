@@ -274,6 +274,19 @@ export function fieldExpr(source: Source, field: string): string {
   return exprs.length === 1 ? exprs[0]! : `coalesce(${exprs.join(', ')})`;
 }
 
+/**
+ * A SQL expression reading a field as a number, for aggregates: number columns as they are,
+ * attribute paths cast to DOUBLE. Text columns cannot be aggregated numerically.
+ */
+export function numericFieldExpr(source: Source, field: string): string {
+  const exprs = resolve(source, field).map((t) => {
+    if (t.path !== null) return sqlExpr(t, 'DOUBLE');
+    if (t.column.type !== 'number') throw new CompileError(`'${field}' is not a number field`);
+    return t.column.name;
+  });
+  return exprs.length === 1 ? exprs[0]! : `coalesce(${exprs.join(', ')})`;
+}
+
 // ---------------------------------------------------------------- combination
 
 function toSql(f: Frag): string {

@@ -311,3 +311,82 @@ button, input, select { font: inherit; color: inherit; }
 body.demo { display: flex; flex-direction: column; }
 body.demo #root { flex: 1; min-height: 0; }
 .demo-banner { padding: 5px 12px; font-size: 11.5px; background: var(--selected); color: var(--text); border-bottom: 1px solid var(--border); }
+
+/* ---------- nav favorites */
+.nav-row { display: flex; align-items: center; }
+.nav-row .nav-item { flex: 1; min-width: 0; }
+.fav-toggle { border: 0; background: none; color: var(--text-3); cursor: pointer; padding: 4px; border-radius: 4px; }
+.fav-toggle:hover { background: var(--hover); color: var(--text); }
+.nav-favs { list-style: none; margin: 0 0 4px; padding: 0 0 0 30px; display: flex; flex-direction: column; }
+.nav-favs button { display: flex; gap: 6px; width: 100%; border: 0; background: none; padding: 3px 6px; border-radius: 4px; cursor: pointer; color: var(--text-2); font-size: 11.5px; text-align: left; }
+.nav-favs button:hover { background: var(--hover); color: var(--text); }
+.nav-favs button span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-fav-empty { padding: 2px 6px; }
+
+/* ---------- list pages */
+.list-page { overflow: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.list-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.list-head h1, .chart-page-head h1 { margin: 0; font-size: 16px; }
+.list-head input, .list-head select { height: 28px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); padding: 0 8px; }
+.list tr.clickable { cursor: pointer; }
+.list tr.clickable:hover { background: var(--hover); }
+.list tr.expanded > td { background: var(--panel-2); }
+.list.inner { margin: 4px 0; }
+.c-star { width: 32px; }
+.star { border: 0; background: none; cursor: pointer; color: var(--text-3); font-size: 15px; line-height: 1; padding: 0 4px; }
+.star.on { color: var(--lvl-warn); }
+.state { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 3px; margin-right: 4px; }
+.state-ok { color: var(--ok); border: 1px solid var(--ok); }
+.state-alert { color: #fff; background: var(--lvl-error); }
+.state-error { color: var(--lvl-warn); border: 1px solid var(--lvl-warn); }
+.danger { color: var(--lvl-error); }
+
+/* ---------- saved search bar */
+.saved-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.title-input { border: 1px solid transparent; background: none; font-weight: 700; font-size: 14px; padding: 2px 6px; border-radius: 4px; min-width: 160px; }
+.title-input:hover, .title-input:focus { border-color: var(--border); background: var(--panel-2); }
+.tags-input { height: 24px; width: 180px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); padding: 0 6px; font-size: 11.5px; }
+
+/* ---------- modals and forms */
+.modal.wide { width: min(1100px, 100%); }
+.form { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.form label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
+.form input, .form select { height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); font-weight: 400; }
+.form .row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.alert-form { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.alert-form input, .alert-form select { height: 28px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); padding: 0 6px; }
+.alert-form input { width: 90px; }
+
+/* ---------- charts */
+.chart-page { overflow: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.chart-page-head { display: flex; align-items: center; gap: 8px; }
+.chart-builder { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+.chart-builder .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.chart-builder .series select, .chart-builder .series input { height: 28px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); padding: 0 6px; }
+.chart-builder .series input { width: 260px; }
+.chart-builder .series .sql-kw { border: 0; width: 64px; }
+.sql-field.group { width: 240px; }
+.chart-panel { border: 1px solid var(--border); border-radius: 6px; padding: 10px; background: var(--panel); min-height: 120px; }
+.linechart { position: relative; }
+.linechart svg { display: block; }
+.linechart .grid { stroke: var(--border); stroke-dasharray: 2 3; }
+.linechart .cursor { stroke: var(--text-3); }
+.chart-tip { position: absolute; top: 8px; z-index: 5; min-width: 160px; padding: 6px 8px; font-size: 11.5px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 16px rgb(0 0 0 / 0.2); pointer-events: none; }
+.chart-tip i, .chart-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--text-2); margin-top: 4px; }
+.chart-number { display: flex; gap: 32px; flex-wrap: wrap; padding: 12px 4px; }
+.chart-number div { display: flex; flex-direction: column; }
+.chart-number strong { font-size: 30px; font-variant-numeric: tabular-nums; }
+.chart-table { max-height: 320px; overflow: auto; }
+.results .num { text-align: right; }
+
+/* ---------- dashboards */
+.dashboard-page { overflow: auto; padding: 10px 14px 24px; display: flex; flex-direction: column; gap: 10px; }
+.dashboard-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tiles { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 10px; }
+.tile { position: relative; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); padding: 8px 10px; min-width: 0; }
+.tile-head { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.tile-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-menu { position: absolute; top: 32px; right: 8px; bottom: auto; left: auto; width: 190px; }
+.menu button:disabled { opacity: 0.4; cursor: default; }
+@media (max-width: 900px) { .tile { grid-column: span 12 !important; } }

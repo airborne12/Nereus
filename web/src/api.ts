@@ -16,7 +16,12 @@ export function setUnauthorizedHandler(f: () => void): void {
 }
 
 async function parse<T>(res: Response): Promise<T> {
-  const body = await res.json().catch(() => ({}));
+  // Only a body that is not JSON is tolerated; an abort while reading must stay an abort, or a
+  // superseded request would "succeed" with an empty object.
+  const body = await res.json().catch((e: unknown) => {
+    if (e instanceof Error && e.name === 'AbortError') throw e;
+    return {};
+  });
   if (res.status === 401) onUnauthorized();
   if (!res.ok) throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
   return body as T;
@@ -138,4 +143,125 @@ export function fields(source: SourceName, signal?: AbortSignal) {
 export function values(source: SourceName, field: string, q: string, r: Range, signal?: AbortSignal) {
   return get<{ values: { v: string; n: string | number }[] }>('/api/values',
     { source, field, q, from: iso(r.from), to: iso(r.to), limit: 10 }, signal);
+}
+
+// ---------------------------------------------------------------- saved searches, dashboards, alerts, charts
+
+export interface SavedSearch {
+  id: number;
+  name: string;
+  source: SourceName;
+  where: string;
+  language: Language;
+  filters: Filter[];
+  select: string;
+  orderBy: string;
+  tags: string[];
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  favorite: boolean;
+  alertState: 'OK' | 'ALERT' | 'ERROR' | null;
+}
+
+export type ChartSourceName = SourceName | 'metrics';
+export type Aggregate = 'count' | 'count_distinct' | 'sum' | 'avg' | 'min' | 'max' | 'p50' | 'p90' | 'p95' | 'p99';
+export const AGGREGATES: Aggregate[] = ['count', 'count_distinct', 'sum', 'avg', 'min', 'max', 'p50', 'p90', 'p95', 'p99'];
+
+export interface ChartDef {
+  source: ChartSourceName;
+  display: 'line' | 'table' | 'number';
+  series: { agg: Aggregate; field?: string }[];
+  where: string;
+  language: Language;
+  filters: Filter[];
+  groupBy?: string;
+}
+
+export interface Tile {
+  id: string;
+  title: string;
+  chart: ChartDef;
+  w: number;
+}
+
+export interface Dashboard {
+  id: number;
+  name: string;
+  tiles: Tile[];
+  tags: string[];
+  createdBy: string | null;
+  updatedAt: string;
+  favorite: boolean;
+}
+
+export interface Webhook {
+  id: number;
+  name: string;
+  url?: string;
+}
+
+export interface Alert {
+  id: number;
+  savedSearchId: number;
+  savedSearchName: string | null;
+  webhookId: number;
+  webhookName: string | null;
+  thresholdType: 'above' | 'below';
+  threshold: number;
+  intervalSeconds: number;
+  state: 'OK' | 'ALERT' | 'ERROR';
+  lastCheckedAt: string | null;
+  lastValue: number | null;
+  silencedUntil: string | null;
+}
+
+export interface AlertCheck {
+  checkedAt: string;
+  value: number | null;
+  state: string;
+  error: string | null;
+  notified: boolean;
+}
+
+export const content = {
+  searches: () => get<{ items: SavedSearch[] }>('/api/saved-searches', {}),
+  search: (id: number) => get<SavedSearch>(`/api/saved-searches/${id}`, {}),
+  createSearch: (s: Partial<SavedSearch>) => send<SavedSearch>('POST', '/api/saved-searches', s),
+  updateSearch: (id: number, s: Partial<SavedSearch>) => putJson<SavedSearch>(`/api/saved-searches/${id}`, s),
+  deleteSearch: (id: number) => send<{ ok: true }>('DELETE', `/api/saved-searches/${id}`),
+  favoriteSearch: (id: number, on: boolean) => send<{ ok: true }>('POST', `/api/saved-searches/${id}/favorite`, { on }),
+  dashboards: () => get<{ items: Dashboard[] }>('/api/dashboards', {}),
+  dashboard: (id: number) => get<Dashboard>(`/api/dashboards/${id}`, {}),
+  createDashboard: (d: Partial<Dashboard>) => send<Dashboard>('POST', '/api/dashboards', d),
+  updateDashboard: (id: number, d: Partial<Dashboard>) => putJson<Dashboard>(`/api/dashboards/${id}`, d),
+  deleteDashboard: (id: number) => send<{ ok: true }>('DELETE', `/api/dashboards/${id}`),
+  favoriteDashboard: (id: number, on: boolean) => send<{ ok: true }>('POST', `/api/dashboards/${id}/favorite`, { on }),
+  webhooks: () => get<{ items: Webhook[] }>('/api/webhooks', {}),
+  createWebhook: (name: string, url: string) => send<Webhook>('POST', '/api/webhooks', { name, url }),
+  deleteWebhook: (id: number) => send<{ ok: true }>('DELETE', `/api/webhooks/${id}`),
+  testWebhook: (id: number) => send<{ ok: true }>('POST', `/api/webhooks/${id}/test`, {}),
+  alerts: (savedSearchId?: number) => get<{ items: Alert[] }>('/api/alerts', { savedSearchId }),
+  createAlert: (a: { savedSearchId: number; webhookId: number; thresholdType: 'above' | 'below'; threshold: number; intervalSeconds: number }) =>
+    send<Alert>('POST', '/api/alerts', a),
+  deleteAlert: (id: number) => send<{ ok: true }>('DELETE', `/api/alerts/${id}`),
+  silenceAlert: (id: number, minutes: number) => send<{ ok: true }>('POST', `/api/alerts/${id}/silence`, { minutes }),
+  alertHistory: (id: number) => get<{ items: AlertCheck[] }>(`/api/alerts/${id}/history`, {}),
+};
+
+async function putJson<T>(path: string, body: unknown): Promise<T> {
+  return parse<T>(await fetch(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }));
+}
+
+export interface ChartResult {
+  rows: Record<string, unknown>[];
+  stepSeconds: number | null;
+  sql: string;
+}
+
+export async function chart(def: ChartDef, r: Range, signal?: AbortSignal): Promise<ChartResult> {
+  return parse<ChartResult>(await fetch('/api/chart', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, signal,
+    body: JSON.stringify({ ...def, from: iso(r.from), to: iso(r.to) }),
+  }));
 }

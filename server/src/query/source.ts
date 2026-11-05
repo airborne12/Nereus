@@ -132,3 +132,30 @@ export function tracesSource(db = 'otel'): Source {
     ],
   };
 }
+
+/** otel_metrics_gauge: one row per data point; charted by aggregating `value`. */
+export function metricsSource(db = 'otel'): Source {
+  return {
+    name: 'metrics',
+    table: `${db}.otel_metrics_gauge`,
+    timestampColumn: 'timestamp',
+    defaultFields: ['metric_name'],
+    attributeColumns: ['attributes', 'resource_attributes'],
+    aliases: { service: 'service_name', metric: 'metric_name', name: 'metric_name' },
+    idColumns: [],
+    columns: [
+      col('service_name', 'string'),
+      col('timestamp', 'datetime'),
+      col('service_instance_id', 'string'),
+      col('metric_name', 'string', 'keyword'),
+      col('metric_description', 'string'),
+      col('metric_unit', 'string'),
+      col('attributes', 'variant', 'keyword'),
+      col('start_time', 'datetime'),
+      col('value', 'number'),
+      col('resource_attributes', 'variant'),
+      col('scope_name', 'string'),
+      col('scope_version', 'string'),
+    ],
+  };
+}

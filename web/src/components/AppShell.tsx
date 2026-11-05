@@ -22,18 +22,26 @@ function readCollapsed(): boolean {
   }
 }
 
+export interface Favorites {
+  searches: { id: number; name: string; alertState: string | null }[];
+  dashboards: { id: number; name: string; alertState: string | null }[];
+}
+
 interface Props {
   page: Page;
   user: api.User;
+  favorites: Favorites;
   onNavigate: (p: Page) => void;
+  onOpen: (url: string) => void;
   onLogout: () => void;
   children: ReactNode;
 }
 
 /** Left navigation (collapsible to icons) and the page beside it. */
-export function AppShell({ page, user, onNavigate, onLogout, children }: Props) {
+export function AppShell({ page, user, favorites, onNavigate, onOpen, onLogout, children }: Props) {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [menu, setMenu] = useState(false);
+  const [showFav, setShowFav] = useState<Record<string, boolean>>({ saved: true, dashboards: true });
   useEffect(() => {
     try {
       localStorage.setItem('ds.navCollapsed', collapsed ? '1' : '0');
@@ -53,12 +61,34 @@ export function AppShell({ page, user, onNavigate, onLogout, children }: Props) 
         <ul className="nav-items">
           {ITEMS.map((it) => (
             <li key={it.page}>
-              <button type="button" className={`nav-item${page === it.page ? ' active' : ''}`} title={collapsed ? it.label : undefined}
-                aria-current={page === it.page ? 'page' : undefined} onClick={() => onNavigate(it.page)}>
-                <Icon name={it.icon} />
-                {!collapsed && <span>{it.label}</span>}
-                {!collapsed && it.beta && <span className="badge">Beta</span>}
-              </button>
+              <div className="nav-row">
+                <button type="button" className={`nav-item${page === it.page ? ' active' : ''}`} title={collapsed ? it.label : undefined}
+                  aria-current={page === it.page ? 'page' : undefined} onClick={() => onNavigate(it.page)}>
+                  <Icon name={it.icon} />
+                  {!collapsed && <span>{it.label}</span>}
+                  {!collapsed && it.beta && <span className="badge">Beta</span>}
+                </button>
+                {!collapsed && (it.page === 'saved' || it.page === 'dashboards') && (
+                  <button type="button" className="fav-toggle" aria-label={`${showFav[it.page] ? 'Hide' : 'Show'} favorite ${it.label.toLowerCase()}`}
+                    title={showFav[it.page] ? 'Hide favorites' : 'Show favorites'} onClick={() => setShowFav({ ...showFav, [it.page]: !showFav[it.page] })}>
+                    <Icon name={showFav[it.page] ? 'chevron-down' : 'chevron-right'} size={12} />
+                  </button>
+                )}
+              </div>
+              {!collapsed && (it.page === 'saved' || it.page === 'dashboards') && showFav[it.page] && (
+                <ul className="nav-favs" aria-label={`Favorite ${it.label.toLowerCase()}`}>
+                  {(it.page === 'saved' ? favorites.searches : favorites.dashboards).map((f) => (
+                    <li key={f.id}>
+                      <button type="button" onClick={() => onOpen(it.page === 'saved' ? `/search?saved=${f.id}` : `/dashboards/${f.id}`)}>
+                        {f.alertState === 'ALERT' && <span className="lvl-error">●</span>}<span>{f.name}</span>
+                      </button>
+                    </li>
+                  ))}
+                  {(it.page === 'saved' ? favorites.searches : favorites.dashboards).length === 0 && (
+                    <li className="muted small nav-fav-empty">No favorites. Star on {it.label}.</li>
+                  )}
+                </ul>
+              )}
             </li>
           ))}
         </ul>
@@ -92,12 +122,8 @@ export function AppShell({ page, user, onNavigate, onLogout, children }: Props) 
 }
 
 const PLANNED: Partial<Record<Page, string>> = {
-  saved: 'Saved searches, with tags and favorites, and alerts on a saved search.',
-  chart: 'Chart explorer: time series, tables, numbers and more over logs, traces and metrics.',
-  alerts: 'Alerts on saved searches and dashboard tiles, with webhook and Slack notifications.',
   sessions: 'Client sessions: browser session replay linked to traces.',
   'service-map': 'Service map: services and the calls between them, from traces.',
-  dashboards: 'Dashboards: grids of chart tiles with filters and a shared time range.',
 };
 
 export function PlannedPage({ page }: { page: Page }) {

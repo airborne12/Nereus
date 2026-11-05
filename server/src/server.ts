@@ -6,6 +6,8 @@
 //   GET  /api/auth/status | POST /api/auth/setup | /api/auth/login | /api/auth/logout
 //   GET|POST /api/keys, DELETE /api/keys/<id>
 //   GET|POST /api/users, POST /api/users/<id>/disabled        (admins)
+//   saved searches, dashboards, webhooks, alerts: see content/http.ts
+//   POST /api/chart {source, display, series, where, language, filters, groupBy, from, to}   chart data
 //   GET /api/search?source=logs|traces&where=&language=lucene|sql&filters=<json>&select=&orderBy=
 //                  &from=&to=&limit=&offset=      (q= is the same as where= with lucene)
 //   GET /api/histogram?source=&where=&language=&filters=&from=&to=&buckets=&groupBy=
@@ -20,12 +22,16 @@ import { readFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { QuerySyntaxError } from './query/ast.ts';
+import { AlertRunner } from './content/alerts.ts';
+import { contentRoutes } from './content/http.ts';
+import { ContentStore } from './content/store.ts';
+import { readJson } from './auth/http.ts';
 import {
-  defaultFacetFields, facetsSql, fieldsFromDescribe, type Filter, searchHistogramSql, searchRowsSql, type SearchSpec,
+  type ChartSpec, chartSql, defaultFacetFields, facetsSql, fieldsFromDescribe, type Filter, searchHistogramSql, searchRowsSql, type SearchSpec,
   traceSql, valuesSql, type Field,
 } from './query/build.ts';
 import { CompileError, unknownFields } from './query/compile.ts';
-import { logsSource, tracesSource, type Source } from './query/source.ts';
+import { logsSource, metricsSource, tracesSource, type Source } from './query/source.ts';
 import { Doris, configFromEnv } from './db.ts';
 import { type AuthContext, authRoutes, authenticate } from './auth/http.ts';
 import { AuthError, AuthStore } from './auth/store.ts';
@@ -37,6 +43,9 @@ export interface AppOptions {
   doris: Doris;
   db: string;
   auth: AuthContext;
+  content: ContentStore;
+  /** For webhook tests; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
   /** Directory of the built web UI (web/dist); other paths than /api are served from it. */
   webDir?: string;
 }
@@ -89,9 +98,14 @@ function send(res: ServerResponse, status: number, body: unknown, headers: Recor
   res.end(json);
 }
 
-export function createApp({ doris, db, auth, webDir }: AppOptions): Server {
+export function sourcesFor(db: string): Record<string, Source> {
+  return { logs: logsSource(db), traces: tracesSource(db), metrics: metricsSource(db) };
+}
+
+export function createApp({ doris, db, auth, content, fetchImpl, webDir }: AppOptions): Server {
   const account = authRoutes(auth, send);
-  const sources: Record<string, Source> = { logs: logsSource(db), traces: tracesSource(db) };
+  const contentApi = contentRoutes(content, send, fetchImpl);
+  const sources = sourcesFor(db);
   const sourceParam = (url: URL): Source => {
     const name = param(url, 'source')!;
     const s = sources[name];
@@ -149,6 +163,17 @@ export function createApp({ doris, db, auth, webDir }: AppOptions): Server {
     const user = await authenticate(auth, req);
     if (!user) return send(res, 401, { error: 'login required' });
     if (await account.handleAccount(req, res, path, user)) return;
+    if (await contentApi(req, res, url, user)) return;
+    if (path === '/api/chart' && req.method === 'POST') {
+      const b = await readJson(req);
+      const source = sources[String(b.source)];
+      if (!source) throw new BadRequest(`unknown source '${String(b.source)}'`);
+      const spec = { ...b, where: String(b.where ?? ''), from: String(b.from), to: String(b.to) } as unknown as ChartSpec;
+      const { sql, stepSeconds } = chartSql(source, spec);
+      const started = performance.now();
+      const rows = await doris.query(sql);
+      return send(res, 200, { rows, stepSeconds, sql, elapsedMs: Math.round(performance.now() - started) });
+    }
     if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
 
     if (url.pathname === '/api/search') {
@@ -226,7 +251,10 @@ if (import.meta.main) {
   const port = Number(process.env.PORT ?? 8090);
   const webDir = process.env.WEB_DIST ?? new URL('../../web/dist', import.meta.url).pathname;
   const auth = { store: new AuthStore(meta), secureCookie: process.env.COOKIE_SECURE === '1' };
-  createApp({ doris, db: process.env.DORIS_DB ?? 'otel', auth, webDir }).listen(port, () => {
+  const content = new ContentStore(meta);
+  const db = process.env.DORIS_DB ?? 'otel';
+  new AlertRunner({ store: content, doris, sources: sourcesFor(db), baseUrl: process.env.PUBLIC_URL ?? null }).start();
+  createApp({ doris, db, auth, content, webDir }).listen(port, () => {
     console.log(`dorisstack server listening on :${port}`);
   });
 }

@@ -9,7 +9,7 @@ test('state round-trips through the URL', () => {
   const s = {
     source: 'traces' as const, where: "service:\"a b\" -x", language: 'sql' as const,
     filters: [{ field: 'k8s.pod.name', values: ['a', 'b'] }, { field: 'service', values: ['c'], exclude: true }],
-    select: 'timestamp, span_name', orderBy: 'duration DESC', window: { from: 1000, to: 5000 },
+    select: 'timestamp, span_name', orderBy: 'duration DESC', window: { from: 1000, to: 5000 }, saved: 12,
   };
   assert.deepEqual(parseState(serializeState(s)), s);
   const p = { ...DEFAULT_STATE, window: { preset: '7d' as const } };

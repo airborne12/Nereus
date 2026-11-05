@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { hashPassword, newToken, tokenHash, verifyPassword } from '../src/auth/secrets.ts';
+import { ContentStore } from '../src/content/store.ts';
 import { AuthStore } from '../src/auth/store.ts';
 import { Doris, configFromEnv } from '../src/db.ts';
 import { migrate } from '../src/meta.ts';
@@ -38,7 +39,7 @@ before(async () => {
   // Doris is never reached by these tests; the pool connects lazily.
   const doris = new Doris({ ...configFromEnv(), port: 1 });
   const webDir = new URL('../../web/dist', import.meta.url).pathname;
-  const server = createApp({ doris, db: 'otel', auth: { store, secureCookie: false }, webDir });
+  const server = createApp({ doris, db: 'otel', auth: { store, secureCookie: false }, content: new ContentStore(meta.pool), webDir });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   stop = async () => {

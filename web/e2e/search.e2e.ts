@@ -9,9 +9,12 @@ import { mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { type Browser, type Page, chromium } from 'playwright';
+import { ContentStore } from '../../server/src/content/store.ts';
+import { createServer } from 'node:http';
 import { AuthStore } from '../../server/src/auth/store.ts';
+import { AlertRunner } from '../../server/src/content/alerts.ts';
 import { Doris, configFromEnv } from '../../server/src/db.ts';
-import { createApp } from '../../server/src/server.ts';
+import { createApp, sourcesFor } from '../../server/src/server.ts';
 import { freshMetaDb } from '../../server/test/meta-helper.ts';
 
 const shots = process.env.SHOTS;
@@ -19,22 +22,40 @@ let base = '';
 let browser: Browser;
 let page: Page;
 let stop: () => Promise<void> = async () => {};
+let runner: AlertRunner;
+let doris: Doris;
+let hookUrl = '';
+const received: { text: string }[] = [];
+const DB = process.env.DORIS_DB ?? 'otel_bench';
 
 before(async () => {
-  const doris = new Doris(configFromEnv());
+  doris = new Doris(configFromEnv());
   const meta = await freshMetaDb();
+  const hook = createServer((req, res) => {
+    let b = '';
+    req.on('data', (c) => (b += c));
+    req.on('end', () => { received.push(JSON.parse(b)); res.end('ok'); });
+  });
+  await new Promise<void>((r) => hook.listen(0, '127.0.0.1', r));
+  hookUrl = `http://127.0.0.1:${(hook.address() as AddressInfo).port}/hook`;
   const webDir = new URL('../dist', import.meta.url).pathname;
   const auth = { store: new AuthStore(meta.pool), secureCookie: false };
-  const server = createApp({ doris, db: process.env.DORIS_DB ?? 'otel_bench', auth, webDir });
+  const content = new ContentStore(meta.pool);
+  const server = createApp({ doris, db: DB, auth, content, webDir });
+  // The clock sits at the end of the loaded data, so alert windows contain events.
+  const t = String(((await doris.query(`SELECT max(timestamp) AS t FROM ${DB}.otel_logs`)) as { t: string }[])[0]!.t);
+  const end = Date.parse(`${String(t).replace(' ', 'T')}Z`) + 1000;
+  runner = new AlertRunner({ store: content, doris, sources: sourcesFor(DB), now: () => end });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   browser = await chromium.launch();
   page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  page.on('pageerror', (e) => console.error('page error:', e.message));
+  page.on('pageerror', (e) => console.error('page error:', e.message, e.stack?.split('\n').slice(0, 5).join(' | ')));
   if (shots) mkdirSync(shots, { recursive: true });
   stop = async () => {
     await browser.close();
     await new Promise<void>((r) => server.close(() => r()));
+    await new Promise<void>((r) => hook.close(() => r()));
     await doris.close();
     await meta.drop();
   };
@@ -71,7 +92,7 @@ test('first run asks for an admin account, then opens search on Live Tail', asyn
   assert.equal(await page.getByRole('button', { name: 'Time Range' }).innerText(), 'Live Tail');
   assert.equal(await page.locator('.nav-item.active').innerText(), 'Search');
   for (const item of ['Saved searches', 'Chart explorer', 'Alerts', 'Client sessions', 'Service map', 'Dashboards', 'Team settings']) {
-    assert.equal(await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: item }).count(), 1, item);
+    assert.equal(await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: new RegExp(`^${item}( Beta)?$`) }).count(), 1, item);
   }
 });
 
@@ -251,11 +272,148 @@ test('errors and unknown fields are explained', async () => {
 
 test('planned pages say so; going back to Search keeps the query', async () => {
   const nav = page.getByRole('navigation', { name: 'Main' });
-  await nav.getByRole('button', { name: 'Dashboards' }).click();
+  await nav.getByRole('button', { name: 'Service map' }).click();
   assert.match(await page.locator('.planned').innerText(), /Not built yet/);
   await nav.getByRole('button', { name: 'Search', exact: true }).click();
   await settled();
   assert.equal(await where().inputValue(), 'level:ERROR');
+});
+
+test('save a search, star it, reopen it from the navigation, update it', async () => {
+  await open(`source=logs&t=7d&where=${encodeURIComponent('level:error')}`);
+  await page.getByLabel('Filters').getByRole('region', { name: 'service_name' }).getByRole('checkbox', { name: 'service_name = payment' }).check();
+  await settled();
+  const payment = await total();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Save search' });
+  await dialog.getByLabel('Name').fill('Payment errors');
+  await dialog.getByLabel('Tags').fill('payments, oncall');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await page.waitForURL(/saved=\d+/);
+  assert.equal(await page.getByLabel('Saved search name').inputValue(), 'Payment errors');
+  assert.equal(await page.getByRole('button', { name: 'Update' }).isDisabled(), true, 'nothing to update yet');
+  await page.getByRole('button', { name: 'Star saved search' }).click();
+  const favs = page.getByRole('list', { name: 'Favorite saved searches' });
+  await favs.getByRole('button', { name: 'Payment errors' }).waitFor();
+  await run('level:error OR level:warn');
+  assert.equal(await page.getByRole('button', { name: 'Update' }).isDisabled(), false);
+  await page.getByRole('button', { name: 'Update' }).click();
+  await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('.saved-bar .btn.small')?.disabled === true);
+  await page.goto(`${base}/search/list`);
+  const row = page.locator('table.list tbody tr', { hasText: 'Payment errors' });
+  await row.waitFor();
+  assert.match(await row.innerText(), /level:error OR level:warn[\s\S]*payments[\s\S]*oncall/);
+  await page.getByRole('list', { name: 'Favorite saved searches' }).getByRole('button', { name: 'Payment errors' }).click();
+  await settled();
+  assert.equal(await where().inputValue(), 'level:error OR level:warn');
+  // A saved search keeps the query, not the time range (as in ClickStack): pick one.
+  await page.getByRole('button', { name: 'Time Range' }).click();
+  await page.getByRole('button', { name: 'Last 7 days' }).click();
+  await settled();
+  assert.ok(await total() > payment, 'errors and warnings are more than errors');
+  await shot('8-saved-search');
+});
+
+test('admin adds a webhook; an alert on the saved search fires and is listed', async () => {
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Team settings' }).click();
+  await page.getByLabel('Webhook name').fill('#oncall');
+  await page.getByLabel('Webhook URL').fill(hookUrl);
+  await page.getByRole('button', { name: 'Add webhook' }).click();
+  await page.getByRole('cell', { name: '#oncall', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Send test' }).click();
+  await page.getByRole('status').filter({ hasText: 'Test message sent' }).waitFor();
+  assert.equal(received.at(-1)!.text, '[TEST] DorisStack webhook test');
+
+  await page.getByRole('list', { name: 'Favorite saved searches' }).getByRole('button', { name: 'Payment errors' }).click();
+  await page.waitForTimeout(1500);
+  await shot('debug-before-alerts');
+  await page.locator('.saved-bar').getByRole('button', { name: /Alerts/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Alerts for "Payment errors"' });
+  await dialog.getByLabel('Threshold', { exact: true }).fill('3');
+  await dialog.getByLabel('Interval').selectOption('3600');
+  await dialog.getByRole('button', { name: 'Create alert' }).click();
+  await dialog.getByText('count > 3 per 1h').waitFor();
+  await page.keyboard.press('Escape');
+
+  assert.equal(await runner.tick(), 1);
+  assert.match(received.at(-1)!.text, /^\[ALERT\] "Payment errors": \d+ matches in the last 1h \(alert when above 3\)$/);
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Alerts', exact: true }).click();
+  const row = page.locator('table.list tbody tr', { hasText: 'Payment errors' });
+  await row.waitFor();
+  assert.match(await row.innerText(), /ALERT[\s\S]*count > 3 per 1h[\s\S]*#oncall/);
+  await row.click();
+  await page.locator('tr.expanded').getByText('yes').waitFor();
+  await shot('9-alerts');
+  // The nav marks a favorite whose alert is firing.
+  await page.goto(`${base}/alerts`);
+  await page.getByRole('list', { name: 'Favorite saved searches' }).locator('.lvl-error').waitFor();
+});
+
+test('Chart explorer: p99 by service, a number, then save to a new dashboard', async () => {
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Chart explorer' }).click();
+  await page.getByLabel('Chart source').selectOption('traces');
+  await page.getByLabel('Aggregate 1').selectOption('p99');
+  await page.getByLabel('Field 1').fill('duration');
+  await page.getByLabel('Group by').fill('service');
+  const range = page.getByRole('button', { name: 'Time Range' });
+  await range.click();
+  await page.getByRole('button', { name: 'Last 7 days' }).click();
+  await page.getByRole('button', { name: 'Run' }).click();
+  const legend = page.locator('.chart-legend');
+  await legend.getByText('checkout').waitFor();
+  assert.ok((await legend.locator('span').count()) >= 5, 'a line per service');
+  await shot('10-chart');
+  await page.getByRole('tab', { name: 'Number' }).click();
+  await page.getByLabel('Group by').fill('');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.locator('.chart-number strong').waitFor();
+  assert.match(await page.locator('.chart-number').innerText(), /[\d.,]+k?\s*p99\(duration\)/);
+  await page.getByRole('button', { name: 'Save to dashboard' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Save to dashboard' });
+  await dialog.getByLabel('Tile title').fill('p99 latency');
+  await dialog.getByLabel('New dashboard name').fill('Checkout health');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await page.waitForURL(/\/dashboards\/\d+$/);
+  await page.getByRole('region', { name: 'p99 latency' }).locator('.chart-number strong').waitFor();
+});
+
+test('dashboards: add, edit, duplicate and delete tiles; changes persist', async () => {
+  await page.getByRole('button', { name: 'Time Range' }).click();
+  await page.getByRole('button', { name: 'Last 7 days' }).click();
+  await page.getByRole('button', { name: 'New Tile' }).click();
+  const editor = page.getByRole('dialog', { name: 'New tile' });
+  await editor.getByLabel('Title').fill('Logs by level');
+  await editor.getByRole('tab', { name: 'Table' }).click();
+  await editor.getByLabel('Group by').fill('level');
+  await editor.getByRole('button', { name: 'Run' }).click();
+  await editor.locator('.chart-table').getByText('ERROR').waitFor();
+  await editor.getByRole('button', { name: 'Add tile' }).click();
+  const tile = page.getByRole('region', { name: 'Logs by level' });
+  await tile.getByText('WARN').waitFor();
+  await page.getByText('Saved', { exact: true }).waitFor();
+  await tile.getByRole('button', { name: 'Tile menu Logs by level' }).click();
+  await page.getByRole('menuitem', { name: 'Duplicate' }).click();
+  await page.getByRole('region', { name: 'Logs by level (copy)' }).waitFor();
+  await page.getByRole('region', { name: 'Logs by level (copy)' }).getByRole('button', { name: /Tile menu/ }).click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+  await page.getByRole('dialog', { name: 'Edit tile' }).getByLabel('Title').fill('Logs by service');
+  await page.getByRole('dialog', { name: 'Edit tile' }).getByLabel('Group by').fill('service');
+  await page.getByRole('dialog', { name: 'Edit tile' }).getByRole('button', { name: 'Run' }).click();
+  await page.getByRole('dialog', { name: 'Edit tile' }).getByRole('button', { name: 'Save tile' }).click();
+  await page.getByRole('region', { name: 'Logs by service' }).getByText('frontend').waitFor();
+  await page.getByText('Saved', { exact: true }).waitFor();
+  await shot('11-dashboard');
+  await page.reload();
+  await page.getByRole('region', { name: 'Logs by service' }).waitFor();
+  assert.deepEqual(await page.locator('.tile .tile-head strong').allInnerTexts(), ['p99 latency', 'Logs by level', 'Logs by service']);
+  await page.getByRole('region', { name: 'Logs by level' }).getByRole('button', { name: /Tile menu/ }).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await page.getByText('Saved', { exact: true }).waitFor();
+  await page.reload();
+  await page.getByRole('region', { name: 'Logs by service' }).waitFor();
+  assert.deepEqual(await page.locator('.tile .tile-head strong').allInnerTexts(), ['p99 latency', 'Logs by service']);
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Dashboards', exact: true }).click();
+  assert.match(await page.locator('table.list tbody').innerText(), /Checkout health\s+2/);
 });
 
 test('a phone-width screen has no horizontal scroll', async () => {

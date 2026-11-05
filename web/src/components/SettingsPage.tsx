@@ -130,10 +130,62 @@ function Users({ me }: { me: api.User }) {
   );
 }
 
+function Webhooks() {
+  const [hooks, setHooks] = useState<api.Webhook[]>([]);
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => api.content.webhooks().then((r) => setHooks(r.items), (e) => setError(e.message));
+  useEffect(() => { load(); }, []);
+  async function create(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api.content.createWebhook(name, url);
+      setName('');
+      setUrl('');
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+  return (
+    <section className="card">
+      <h2>Webhooks</h2>
+      <p className="muted">Alerts post JSON with a Slack-compatible <code>text</code> field. A Slack incoming-webhook URL works as is.</p>
+      <form className="row" onSubmit={create}>
+        <input aria-label="Webhook name" placeholder="Name, e.g. #oncall" required value={name} onChange={(e) => setName(e.target.value)} />
+        <input aria-label="Webhook URL" placeholder="https://hooks.slack.com/services/…" required value={url} onChange={(e) => setUrl(e.target.value)} />
+        <button type="submit" className="btn primary">Add webhook</button>
+      </form>
+      {error && <div className="error" role="alert">{error}</div>}
+      {note && <div className="muted small" role="status">{note}</div>}
+      <table className="list">
+        <thead><tr><th>Name</th><th>URL</th><th /></tr></thead>
+        <tbody>
+          {hooks.map((h) => (
+            <tr key={h.id}>
+              <td>{h.name}</td>
+              <td className="mono small">{h.url}</td>
+              <td>
+                <button type="button" className="btn small" onClick={() => api.content.testWebhook(h.id).then(() => setNote(`Test message sent to ${h.name}.`), (e) => setError(e.message))}>Send test</button>{' '}
+                <button type="button" className="btn small" aria-label={`Delete webhook ${h.name}`} onClick={() => api.content.deleteWebhook(h.id).then(load, (e) => setError(e.message))}>Delete</button>
+              </td>
+            </tr>
+          ))}
+          {hooks.length === 0 && <tr><td colSpan={3} className="muted">No webhooks yet.</td></tr>}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 export function SettingsPage({ me }: { me: api.User }) {
   return (
     <div className="settings">
       <ApiKeys />
+      {me.role === 'admin' && <Webhooks />}
       {me.role === 'admin' && <Users me={me} />}
     </div>
   );

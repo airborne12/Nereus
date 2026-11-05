@@ -38,10 +38,12 @@ export interface SearchState {
   select: string;
   orderBy: string;
   window: TimeWindow;
+  /** The saved search this view was opened from (or saved as). */
+  saved: number | null;
 }
 
 export const DEFAULT_STATE: SearchState = {
-  source: 'logs', where: '', language: 'lucene', filters: [], select: '', orderBy: '', window: { preset: 'live' },
+  source: 'logs', where: '', language: 'lucene', filters: [], select: '', orderBy: '', window: { preset: 'live' }, saved: null,
 };
 
 export const DEFAULT_SELECT: Record<SourceName, string> = {
@@ -81,6 +83,7 @@ export function parseState(search: string): SearchState {
     select: p.get('select') ?? '',
     orderBy: p.get('orderBy') ?? '',
     window,
+    saved: /^\d+$/.test(p.get('saved') ?? '') ? Number(p.get('saved')) : null,
   };
 }
 
@@ -92,6 +95,7 @@ export function serializeState(s: SearchState): string {
   if (s.filters.length) p.set('filters', JSON.stringify(s.filters));
   if (s.select) p.set('select', s.select);
   if (s.orderBy) p.set('orderBy', s.orderBy);
+  if (s.saved !== null) p.set('saved', String(s.saved));
   if ('preset' in s.window) p.set('t', s.window.preset);
   else {
     p.set('from', String(Math.round(s.window.from)));

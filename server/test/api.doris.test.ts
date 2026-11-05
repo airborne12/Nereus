@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { Doris, configFromEnv } from '../src/db.ts';
+import { ContentStore } from '../src/content/store.ts';
 import { AuthStore } from '../src/auth/store.ts';
 import { createApp } from '../src/server.ts';
 import { freshMetaDb } from './meta-helper.ts';
@@ -27,7 +28,7 @@ before(async () => {
   const store = new AuthStore(meta.pool);
   const admin = await store.setup('admin@example.com', 'Admin', 'adminpass1');
   apiKey = (await store.createApiKey(admin.id, 'tests')).key;
-  const server = createApp({ doris, db, auth: { store, secureCookie: false } });
+  const server = createApp({ doris, db, auth: { store, secureCookie: false }, content: new ContentStore(meta.pool) });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   close = async () => {
