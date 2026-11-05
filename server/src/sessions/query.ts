@@ -34,3 +34,17 @@ export function sessionRowsSql(source: Source, sessionId: string, fromMs: number
     `FROM ${source.table} WHERE session_id = ${escape(sessionId)} AND timestamp >= ${lit(fromMs)} AND timestamp < ${lit(toMs)} ` +
     `ORDER BY timestamp, seq, part LIMIT 100000`;
 }
+
+/**
+ * The session whose network request carried this trace id (the SDK records the traceparent it
+ * sent), with that session's first and last row so the replay can be opened at the request.
+ */
+export function sessionForTraceSql(source: Source, traceId: string, fromMs: number, toMs: number): string {
+  const t = source.table;
+  const range = (col: string) => `${col} >= ${lit(fromMs)} AND ${col} < ${lit(toMs)}`;
+  return `SELECT r.session_id, r.timestamp, r.user_email, r.user_name, min(s.timestamp) AS started, max(s.timestamp) AS ended FROM ` +
+    `(SELECT session_id, timestamp, user_email, user_name FROM ${t} WHERE ${range('timestamp')} AND event_type = 'network' ` +
+    `AND cast(attributes['trace_id'] AS STRING) = ${escape(traceId)} ORDER BY timestamp LIMIT 1) r ` +
+    `JOIN ${t} s ON s.session_id = r.session_id WHERE ${range('s.timestamp')} ` +
+    `GROUP BY r.session_id, r.timestamp, r.user_email, r.user_name`;
+}

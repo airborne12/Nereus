@@ -12,6 +12,7 @@ import { ContentStore } from '../src/content/store.ts';
 import { Doris, configFromEnv } from '../src/db.ts';
 import { createApp } from '../src/server.ts';
 import { IngestKeys } from '../src/sessions/http.ts';
+import { RateLimiter } from '../src/sessions/limit.ts';
 import { freshMetaDb } from './meta-helper.ts';
 
 const enabled = process.env.DORIS_TEST === '1';
@@ -21,6 +22,7 @@ let base = '';
 let admin = '';
 let member = '';
 let doris: Doris;
+let tight = '';
 let close: () => Promise<void> = async () => {};
 
 before(async () => {
@@ -35,7 +37,13 @@ before(async () => {
   const server = createApp({ doris, db, auth: { store: auth, secureCookie: false }, content: new ContentStore(meta.pool), ingestKeys: new IngestKeys(meta.pool) });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  // A second server with small limits, to see them answer 429.
+  const small = createApp({ doris, db, auth: { store: auth, secureCookie: false }, content: new ContentStore(meta.pool), ingestKeys: new IngestKeys(meta.pool),
+    ingestLimits: { perKey: new RateLimiter(0.001, 3), perClient: new RateLimiter(0.001, 5), trustProxy: true } });
+  await new Promise<void>((r) => small.listen(0, '127.0.0.1', r));
+  tight = `http://127.0.0.1:${(small.address() as AddressInfo).port}`;
   close = async () => {
+    await new Promise<void>((r) => small.close(() => r()));
     await new Promise<void>((r) => server.close(() => r()));
     await doris.close();
     await meta.drop();
@@ -120,4 +128,48 @@ test('a session round-trips: replay chunks byte for byte, events, the list and i
   assert.deepEqual(detail.body.session.user, user);
   assert.equal((await call('GET', `/api/sessions/${sid}?from=${from}`, member)).status, 400);
   assert.equal((await call('GET', `/api/sessions/s_doesnotexist?from=${from}&to=${to}`, member)).status, 404);
+});
+
+test('ingestion is rate limited per client address and per key, with Retry-After and CORS', { skip }, async () => {
+  const key = (await call('POST', '/api/ingest-keys', admin, { name: 'limited' })).body.key;
+  const post = (k: string, ip: string) => fetch(`${tight}/api/ingest/sessions`, {
+    method: 'POST', headers: { authorization: `Bearer ${k}`, 'content-type': 'application/json', 'x-forwarded-for': ip },
+    body: JSON.stringify({ sessionId: 's_ratelimit1', events: [{ t: Date.now(), type: 'custom', message: 'x' }] }),
+  });
+  // Per key: 3, whatever the address.
+  const byKey = await Promise.all(['10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4'].map((ip) => post(key, ip).then((r) => r.status)));
+  assert.deepEqual(byKey.sort(), [200, 200, 200, 429]);
+  // Per address: 5 attempts, even with a wrong key (checked before the key).
+  const statuses: number[] = [];
+  for (let i = 0; i < 6; i++) statuses.push((await post('dsi_wrong', '10.9.9.9')).status);
+  assert.deepEqual(statuses, [401, 401, 401, 401, 401, 429]);
+  const r = await post(key, '10.9.9.9');
+  assert.equal(r.status, 429);
+  assert.ok(Number(r.headers.get('retry-after')) >= 1);
+  assert.equal(r.headers.get('access-control-allow-origin'), '*', 'the page can read the 429');
+});
+
+test('a trace started by a request in a session finds that session', { skip }, async () => {
+  const key = (await call('POST', '/api/ingest-keys', admin, { name: 'traced' })).body.key;
+  const sid = `s_${randomUUID().replace(/-/g, '')}`;
+  const traceId = randomUUID().replace(/-/g, '');
+  const t0 = Date.now() - 30_000;
+  await call('POST', '/api/ingest/sessions', key, {
+    sessionId: sid, user: { email: 'trace@example.com' },
+    events: [
+      { t: t0, type: 'navigation', url: 'https://shop/', message: 'Shop' },
+      { t: t0 + 2000, type: 'network', url: 'https://shop/', message: 'POST https://shop/api/pay 500', attributes: { status: 500, trace_id: traceId, span_id: '1234567890abcdef' } },
+      { t: t0 + 4000, type: 'click', message: 'button' },
+    ],
+  });
+  const from = new Date(t0 - 3600_000).toISOString(), to = new Date(Date.now() + 60_000).toISOString();
+  const hit = await call('GET', `/api/sessions/by-trace/${traceId}?from=${from}&to=${to}`, member);
+  assert.equal(hit.status, 200);
+  assert.equal(hit.body.session.sessionId, sid);
+  assert.equal(hit.body.session.user, 'trace@example.com');
+  assert.equal(Date.parse(`${hit.body.session.at.replace(' ', 'T')}Z`), t0 + 2000);
+  assert.equal(Date.parse(`${hit.body.session.ended.replace(' ', 'T')}Z`), t0 + 4000, 'the whole session, not only the request');
+  const miss = await call('GET', `/api/sessions/by-trace/${'f'.repeat(32)}?from=${from}&to=${to}`, member);
+  assert.deepEqual(miss.body, { session: null });
+  assert.equal((await call('GET', `/api/sessions/by-trace/nothex?from=${from}&to=${to}`, member)).status, 404);
 });

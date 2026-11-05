@@ -68,6 +68,7 @@ Every `/api/*` call except `/api/auth/*` needs a login: the browser's session co
 | `GET /api/heatmap?where=&language=&filters=&from=&to=&buckets=` | trace durations per time bucket and duration band (Event Deltas) |
 | `POST /api/ingest/sessions` (ingestion key; CORS) | browser SDK: replay chunks and session events |
 | `GET /api/sessions?where=&language=&filters=&from=&to=`, `GET /api/sessions/<id>?from=&to=` | sessions with a matching event; one session's events and replay |
+| `GET /api/sessions/by-trace/<trace id>?from=&to=` | the session whose request started a trace |
 | `GET`/`POST /api/ingest-keys`, `DELETE …/<id>` (admins) | ingestion keys for the browser SDK |
 
 Users, sessions and keys: passwords are scrypt hashes, session and API key tokens are 256-bit
@@ -179,6 +180,13 @@ event matching the WHERE (`type:error`, `email:ada@example.com`, `url:checkout`,
 replays one, with a timeline of its events that seeks the player. `web/sdk-example/shop.html` is
 a small site that uses the SDK; `web/demo/record-sessions.ts` records sessions on it.
 
+**Sessions and traces.** The SDK adds a W3C `traceparent` header to the page's own requests (and
+to other origins listed in `tracePropagationTargets`, whose CORS must allow the header) and keeps
+the trace id on the network event; a `traceparent` the page sets itself is kept and recorded. A
+backend instrumented with OpenTelemetry continues that trace, so a request in the replay opens
+its backend trace (Open trace), and a trace's side panel offers the session replay, opened at the
+request.
+
 Privacy and security:
 
 - Every input value is masked by default (`maskAllInputs`); `maskAllText: true` masks all text,
@@ -188,7 +196,11 @@ Privacy and security:
   write session data and are refused by every other endpoint (own table and prefix). Anyone with
   the key can send data, as with ClickStack; revoke a leaked key. The endpoint answers CORS for any
   origin without credentials, takes up to 10 MB a request and rejects events more than a day from
-  the server clock. There is no per-key rate limit yet.
+  the server clock. It is rate limited per client address (`INGEST_RATE_PER_CLIENT`, 5/s, burst
+  30; checked before the key, so guessing keys costs no database lookups) and per key
+  (`INGEST_RATE_PER_KEY`, 100/s, burst 400: a site's visitors share one key), answering 429 with
+  `Retry-After`; set `TRUST_PROXY=1` behind a proxy to use `X-Forwarded-For`. Key lookups are
+  cached for 10 s, so a revoked key stops working within 10 s.
 - Replays render the recorded DOM in rrweb's iframe sandbox without `allow-scripts`, so recorded
   scripts do not run. The viewer's browser does load the recorded page's images and styles.
 

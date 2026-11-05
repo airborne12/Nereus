@@ -58,3 +58,19 @@ test('insertSql: values escaped, statements batched by size', () => {
   const withAttrs = insertSql('t', sessionRows({ sessionId: 's_12345678', events: [{ t: now, type: 'network', attributes: { status: 500 } }] }, now))[0]!;
   assert.ok(withAttrs.includes(`CAST(CAST('{\\"status\\":500}' AS JSON) AS VARIANT)`), withAttrs);
 });
+
+test('rate limiter: burst, then the refill rate; buckets are independent', async () => {
+  const { RateLimiter } = await import('../src/sessions/limit.ts');
+  let t = 0;
+  const l = new RateLimiter(2, 5, () => t);
+  for (let i = 0; i < 5; i++) assert.equal(l.take('a').ok, true);
+  const no = l.take('a');
+  assert.deepEqual(no, { ok: false, retryAfter: 1 });
+  assert.equal(l.take('b').ok, true, 'another key has its own bucket');
+  t = 500;
+  assert.equal(l.take('a').ok, true, 'half a second refills one token at 2/s');
+  assert.equal(l.take('a').ok, false);
+  t = 100_000;
+  for (let i = 0; i < 5; i++) assert.equal(l.take('a').ok, true);
+  assert.equal(l.take('a').ok, false, 'never more than the burst');
+});

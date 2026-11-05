@@ -110,3 +110,39 @@ export function newSessionId(): string {
   crypto.getRandomValues(b);
   return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
+
+// ---------------------------------------------------------------- trace propagation (W3C)
+
+const hex = (bytes: number) => {
+  const b = new Uint8Array(bytes);
+  crypto.getRandomValues(b);
+  return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+};
+
+/** A sampled `traceparent` for a request the browser starts: 00-<trace id>-<span id>-01. */
+export function newTraceparent(): { header: string; traceId: string; spanId: string } {
+  const traceId = hex(16), spanId = hex(8);
+  return { header: `00-${traceId}-${spanId}-01`, traceId, spanId };
+}
+
+/** The ids of a `traceparent` the page set itself (its own OTel instrumentation), or null. */
+export function parseTraceparent(h: string | null | undefined): { traceId: string; spanId: string } | null {
+  const m = /^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/.exec((h ?? '').trim().toLowerCase());
+  if (!m || /^0+$/.test(m[1]!) || /^0+$/.test(m[2]!)) return null;
+  return { traceId: m[1]!, spanId: m[2]! };
+}
+
+/**
+ * Whether a request gets a `traceparent`: always on the page's own origin; on another origin only
+ * when listed (its CORS must allow the header, or the browser blocks the request).
+ */
+export function shouldPropagate(url: string, pageOrigin: string, targets: (string | RegExp)[]): boolean {
+  let u: URL;
+  try {
+    u = new URL(url, pageOrigin);
+  } catch {
+    return false;
+  }
+  if (u.origin === pageOrigin) return true;
+  return targets.some((t) => (typeof t === 'string' ? u.href.startsWith(t) : t.test(u.href)));
+}

@@ -17,7 +17,7 @@ export function agentLabel(ua: string | null): string {
 
 function readUrl() {
   const p = new URLSearchParams(window.location.search);
-  return { session: p.get('session'), from: Number(p.get('from')), to: Number(p.get('to')), where: p.get('where') ?? '' };
+  return { session: p.get('session'), from: Number(p.get('from')), to: Number(p.get('to')), at: Number(p.get('at')) || undefined, where: p.get('where') ?? '' };
 }
 
 /** Client sessions: those with an event matching the search, and the replay of one of them. */
@@ -75,7 +75,7 @@ export function SessionsPage({ go }: { go: (url: string) => void }) {
         </div>
         {detailError && <div className="error">{detailError}</div>}
         {!detail && !detailError && <div className="empty">Loading the recording…</div>}
-        {detail && <SessionPlayer detail={detail} />}
+        {detail && <SessionPlayer detail={detail} at={initial.at} go={go} />}
       </div>
     );
   }

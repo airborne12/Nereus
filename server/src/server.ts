@@ -36,7 +36,7 @@ import { CompileError, unknownFields } from './query/compile.ts';
 import { logsSource, metricsSource, sessionsSource, tracesSource, type Source } from './query/source.ts';
 import { Doris, configFromEnv } from './db.ts';
 import { type AuthContext, authRoutes, authenticate } from './auth/http.ts';
-import { IngestKeys, sessionRoutes } from './sessions/http.ts';
+import { type IngestLimits, IngestKeys, sessionRoutes } from './sessions/http.ts';
 import { AuthError, AuthStore } from './auth/store.ts';
 import { metaPoolFromEnv, migrate } from './meta.ts';
 
@@ -49,6 +49,8 @@ export interface AppOptions {
   content: ContentStore;
   /** Ingestion keys of the browser SDK (POST /api/ingest/sessions). */
   ingestKeys: IngestKeys;
+  /** Ingestion rate limits; from the environment by default (limitsFromEnv). */
+  ingestLimits?: IngestLimits;
   /** For webhook tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /** Directory of the built web UI (web/dist); other paths than /api are served from it. */
@@ -108,9 +110,9 @@ export function sourcesFor(db: string): Record<string, Source> {
   return { logs: logsSource(db), traces: tracesSource(db), metrics: metricsSource(db) };
 }
 
-export function createApp({ doris, db, auth, content, ingestKeys, fetchImpl, webDir }: AppOptions): Server {
+export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, fetchImpl, webDir }: AppOptions): Server {
   const account = authRoutes(auth, send);
-  const sessions = sessionRoutes({ doris, keys: ingestKeys, source: sessionsSource(db), send });
+  const sessions = sessionRoutes({ doris, keys: ingestKeys, source: sessionsSource(db), send, limits: ingestLimits });
   const contentApi = contentRoutes(content, send, fetchImpl);
   const sources = sourcesFor(db);
   const sourceParam = (url: URL): Source => {

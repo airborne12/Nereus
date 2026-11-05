@@ -3,6 +3,7 @@
 //   OPTIONS|POST /api/ingest/sessions   Authorization: Bearer <ingestion key>; CORS for any origin, no cookies
 //   GET /api/sessions?where=&language=&filters=&from=&to=   sessions with a matching event
 //   GET /api/sessions/<id>?from=&to=                         rows of one session (events and replay)
+//   GET /api/sessions/by-trace/<trace id>?from=&to=          the session whose request started a trace
 //   GET /api/ingest-keys; POST {name}, DELETE /api/ingest-keys/<id>   (admins)
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -14,7 +15,8 @@ import type { Doris } from '../db.ts';
 import type { SearchSpec } from '../query/build.ts';
 import type { Source } from '../query/source.ts';
 import { IngestError, insertSql, SESSION_ID, sessionRows } from './ingest.ts';
-import { sessionRowsSql, sessionsListSql } from './query.ts';
+import { RateLimiter } from './limit.ts';
+import { sessionForTraceSql, sessionRowsSql, sessionsListSql } from './query.ts';
 
 export const INGEST_KEY_PREFIX = 'dsi';
 // A full snapshot of a heavy page can be several MB; the SDK batches everything else under 1.5 MB.
@@ -22,8 +24,12 @@ const MAX_INGEST_BODY = 10 * 1024 * 1024;
 
 const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : v === null || v === undefined ? null : String(v));
 
+/** How long a key lookup is cached: a revoked key stops working within this time. */
+const KEY_CACHE_MS = 10_000;
+
 export class IngestKeys {
   private db: pg.Pool;
+  private cache = new Map<string, { ok: boolean; until: number }>();
   constructor(db: pg.Pool) {
     this.db = db;
   }
@@ -47,16 +53,27 @@ export class IngestKeys {
   async revoke(id: number) {
     const r = await this.db.query('UPDATE ingest_keys SET revoked_at = coalesce(revoked_at, now()) WHERE id = $1', [id]);
     if (r.rowCount === 0) throw new AuthError(404, 'no such ingestion key');
+    this.forget();
   }
 
-  /** True for a live ingestion key; marks it used at most once a minute. */
+  /** True for a live ingestion key (cached briefly); marks it used at most once a minute. */
   async verify(token: string): Promise<boolean> {
     if (!token.startsWith(`${INGEST_KEY_PREFIX}_`)) return false;
+    const now = Date.now();
+    const hit = this.cache.get(token);
+    if (hit && hit.until > now) return hit.ok;
     const r = await this.db.query(`SELECT id, last_used_at IS NULL OR last_used_at < now() - interval '1 minute' AS stale
       FROM ingest_keys WHERE key_hash = $1 AND revoked_at IS NULL`, [tokenHash(token)]);
-    if (!r.rows[0]) return false;
-    if (r.rows[0].stale) await this.db.query('UPDATE ingest_keys SET last_used_at = now() WHERE id = $1', [r.rows[0].id]);
-    return true;
+    const ok = Boolean(r.rows[0]);
+    if (this.cache.size > 10_000) this.cache.clear();
+    this.cache.set(token, { ok, until: now + KEY_CACHE_MS });
+    if (ok && r.rows[0].stale) await this.db.query('UPDATE ingest_keys SET last_used_at = now() WHERE id = $1', [r.rows[0].id]);
+    return ok;
+  }
+
+  /** Forget cached lookups (after a revoke in this process). */
+  forget(): void {
+    this.cache.clear();
   }
 }
 
@@ -89,8 +106,26 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 
 type Send = (res: ServerResponse, status: number, body: unknown, headers?: Record<string, string>) => void;
 
-export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Source; send: Send; now?: () => number }) {
+export interface IngestLimits {
+  /** Per ingestion key: a site's visitors share it. */
+  perKey: RateLimiter;
+  /** Per client address. */
+  perClient: RateLimiter;
+  /** Take the client address from X-Forwarded-For (behind a proxy you trust). */
+  trustProxy: boolean;
+}
+
+/** INGEST_RATE_PER_KEY (100/s) and INGEST_RATE_PER_CLIENT (5/s), bursts 4x and 6x; TRUST_PROXY=1. */
+export function limitsFromEnv(env = process.env): IngestLimits {
+  const perKey = Number(env.INGEST_RATE_PER_KEY ?? 100), perClient = Number(env.INGEST_RATE_PER_CLIENT ?? 5);
+  return { perKey: new RateLimiter(perKey, perKey * 4), perClient: new RateLimiter(perClient, perClient * 6), trustProxy: env.TRUST_PROXY === '1' };
+}
+
+export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Source; send: Send; now?: () => number; limits?: IngestLimits }) {
   const { doris, keys, source, send } = o;
+  const limits = o.limits ?? limitsFromEnv();
+  const limited = (res: ServerResponse, r: { ok: false; retryAfter: number }, what: string) =>
+    send(res, 429, { error: `too many requests ${what}, slow down` }, { ...CORS, 'retry-after': String(r.retryAfter) });
 
   /** The ingestion endpoint: no session cookie is read, only the ingestion key. */
   async function ingest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -103,7 +138,14 @@ export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Sourc
       // sendBeacon cannot set headers, so the key may also come as ?key=.
       const h = req.headers.authorization ?? '';
       const token = /^Bearer\s+(\S+)$/i.exec(h)?.[1] ?? new URL(req.url ?? '/', 'http://x').searchParams.get('key') ?? '';
+      // The client's bucket first, so a script trying keys cannot make every attempt a database lookup.
+      const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',')[0]!.trim();
+      const client = (limits.trustProxy && fwd) || req.socket.remoteAddress || 'unknown';
+      const c = limits.perClient.take(client);
+      if (!c.ok) return limited(res, c, 'from this address');
       if (!(await keys.verify(token))) return send(res, 401, { error: 'a valid ingestion key is required' }, CORS);
+      const k = limits.perKey.take(token);
+      if (!k.ok) return limited(res, k, 'for this ingestion key');
       const rows = sessionRows(await readBody(req), (o.now ?? Date.now)());
       for (const sql of insertSql(source.table, rows)) await doris.query(sql);
       send(res, 200, { rows: rows.length }, CORS);
@@ -120,6 +162,17 @@ export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Sourc
     if (path === '/api/sessions' && req.method === 'GET') {
       const sql = sessionsListSql(source, spec());
       send(res, 200, { sessions: await doris.query(sql), sql });
+      return true;
+    }
+    if ((m = /^\/api\/sessions\/by-trace\/([0-9a-f]{32})$/.exec(path)) && req.method === 'GET') {
+      const from = Date.parse(url.searchParams.get('from') ?? ''), to = Date.parse(url.searchParams.get('to') ?? '');
+      if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) throw new AuthError(400, 'from and to are required');
+      const [row] = (await doris.query(sessionForTraceSql(source, m[1]!, from, to))) as Record<string, string>[];
+      if (!row) {
+        send(res, 200, { session: null });
+        return true;
+      }
+      send(res, 200, { session: { sessionId: row.session_id, at: row.timestamp, started: row.started, ended: row.ended, user: row.user_email ?? row.user_name ?? null } });
       return true;
     }
     if ((m = /^\/api\/sessions\/([^/]+)$/.exec(path)) && req.method === 'GET') {

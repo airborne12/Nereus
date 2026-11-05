@@ -467,3 +467,7 @@ body.demo #root { flex: 1; min-height: 0; }
   .player-stage { height: 320px; flex: none; }
   .session-events { max-height: 400px; }
 }
+.session-link { display: flex; gap: 8px; align-items: center; padding: 6px 10px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); font-size: 12px; }
+.trace-chip { margin-left: 4px; padding: 0 4px; border-radius: 3px; background: var(--accent); color: #fff; font-size: 9.5px; text-transform: none; }
+.ev-detail .btn { margin-bottom: 4px; }
+.ev-detail pre { margin: 0; white-space: pre-wrap; word-break: break-all; }

@@ -329,6 +329,11 @@ export function session(id: string, range: Range, signal?: AbortSignal) {
   return get<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`, { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, signal);
 }
 
+export function sessionForTrace(traceId: string, range: Range, signal?: AbortSignal) {
+  return get<{ session: { sessionId: string; at: string; started: string; ended: string; user: string | null } | null }>(
+    `/api/sessions/by-trace/${traceId}`, { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, signal);
+}
+
 export interface IngestKey { id: number; name: string; prefix: string; createdBy: string | null; createdAt: string; lastUsedAt: string | null; revoked: boolean }
 
 export const ingestKeys = {

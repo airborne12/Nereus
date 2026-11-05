@@ -7,6 +7,12 @@ import { Icon } from './Icon.tsx';
 const SPEEDS = [1, 2, 4, 8];
 const FILTERS = [['all', 'All'], ['error', 'Errors'], ['network', 'Network'], ['click', 'Clicks'], ['navigation', 'Pages']] as const;
 
+/** The traces search around a request, opening its trace. */
+export function traceUrl(traceId: string, atMs: number): string {
+  const p = new URLSearchParams({ source: 'traces', where: `trace_id:${traceId}`, from: String(atMs - 15 * 60_000), to: String(atMs + 15 * 60_000), openTrace: traceId });
+  return `/search?${p}`;
+}
+
 export const clock = (ms: number) => {
   const s = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -24,7 +30,7 @@ export function isBad(e: api.SessionEvent): boolean {
  * Replay of one session (rrweb, in a sandboxed iframe without scripts) with its timeline. The
  * recorded page is scaled to fit; events on the right seek the player.
  */
-export function SessionPlayer({ detail }: { detail: api.SessionDetail }) {
+export function SessionPlayer({ detail, at, go }: { detail: api.SessionDetail; at?: number; go?: (url: string) => void }) {
   const stage = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const [player, setPlayer] = useState<ReplayerType | null>(null);
@@ -66,7 +72,10 @@ export function SessionPlayer({ detail }: { detail: api.SessionDetail }) {
       const m = r.getMetaData();
       setMeta({ startTime: m.startTime, totalTime: m.totalTime });
       setPlayer(r);
-      r.pause(0);
+      // Opened at a moment (a trace's request): start there, a second early.
+      const start = at ? Math.max(0, Math.min(m.totalTime, at - m.startTime - 1000)) : 0;
+      r.pause(start);
+      setNow(start);
     });
     return () => {
       cancelled = true;
@@ -143,11 +152,17 @@ export function SessionPlayer({ detail }: { detail: api.SessionDetail }) {
             <li key={i} className={`${isBad(e) ? 'bad' : ''}${Math.abs(e.at - now) < 600 ? ' current' : ''}`}>
               <button type="button" className="ev" onClick={() => { seek(e.at); setOpen(open === i ? null : i); }}>
                 <span className="mono muted">{clock(e.at)}</span>
-                <span className={`ev-type t-${e.type}`}>{e.type}</span>
+                <span className={`ev-type t-${e.type}`}>{e.type}{typeof e.attributes?.trace_id === 'string' && <span className="trace-chip" title="Has a backend trace">trace</span>}</span>
                 <span className="ev-msg" title={e.message ?? ''}>{e.message ?? ''}</span>
               </button>
               {open === i && (e.attributes || e.url) && (
-                <pre className="ev-detail mono">{JSON.stringify({ url: e.url, ...(e.attributes ?? {}) }, null, 2)}</pre>
+                <div className="ev-detail">
+                  {typeof e.attributes?.trace_id === 'string' && go && (
+                    <button type="button" className="btn small" onClick={() => go(traceUrl(String(e.attributes!.trace_id), dorisTimeToMs(e.t)))}>
+                      Open trace</button>
+                  )}
+                  <pre className="mono">{JSON.stringify({ url: e.url, ...(e.attributes ?? {}) }, null, 2)}</pre>
+                </div>
               )}
             </li>
           ))}

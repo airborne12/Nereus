@@ -12,7 +12,7 @@
 // the class `ds-block` are not recorded at all (`ds-mask` masks their text).
 
 import { record } from 'rrweb';
-import { Batch, describeElement, newSessionId, type SdkEvent, type SessionState, touchSession } from './core.ts';
+import { Batch, describeElement, newSessionId, newTraceparent, parseTraceparent, type SdkEvent, type SessionState, shouldPropagate, touchSession } from './core.ts';
 
 export interface InitOptions {
   /** Address of DorisStack. */
@@ -30,6 +30,12 @@ export interface InitOptions {
   recordNetwork?: boolean;
   /** Record console.error and console.warn (default true). */
   recordConsole?: boolean;
+  /**
+   * Other origins whose requests get a W3C `traceparent` header (URL prefixes or patterns), so the
+   * backend trace links to this session. The page's own origin always gets it. A listed API must
+   * allow the header in its CORS (Access-Control-Allow-Headers: traceparent).
+   */
+  tracePropagationTargets?: (string | RegExp)[];
   flushIntervalMs?: number;
 }
 
@@ -105,32 +111,59 @@ function absolute(u: string): string {
   }
 }
 
+/**
+ * The trace of a request: the page's own traceparent when it set one (its OTel instrumentation),
+ * else a new one when the URL may carry it, else none.
+ */
+function traceFor(url: string, existing: string | null): { header: string | null; ids: { trace_id: string; span_id: string } | Record<string, never> } {
+  const own = parseTraceparent(existing);
+  if (own) return { header: null, ids: { trace_id: own.traceId, span_id: own.spanId } };
+  if (!shouldPropagate(url, location.origin, opts!.tracePropagationTargets)) return { header: null, ids: {} };
+  const t = newTraceparent();
+  return { header: t.header, ids: { trace_id: t.traceId, span_id: t.spanId } };
+}
+
 function instrumentNetwork(): void {
   const ours = (u: string) => u.startsWith(endpoint());
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = absolute(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    if (ours(url)) return origFetch(input, init);
     const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    const trace = traceFor(url, headers.get('traceparent'));
+    if (trace.header) {
+      headers.set('traceparent', trace.header);
+      init = { ...init, headers };
+    }
     const t0 = performance.now();
     try {
       const res = await origFetch(input, init);
-      if (!ours(url)) event({ type: 'network', message: `${method} ${url} ${res.status}`, attributes: { method, url, status: res.status, duration_ms: Math.round(performance.now() - t0) } });
+      event({ type: 'network', message: `${method} ${url} ${res.status}`, attributes: { method, url, status: res.status, duration_ms: Math.round(performance.now() - t0), ...trace.ids } });
       return res;
     } catch (e) {
-      if (!ours(url)) event({ type: 'network', message: `${method} ${url} failed`, attributes: { method, url, status: 0, error: String(e), duration_ms: Math.round(performance.now() - t0) } });
+      event({ type: 'network', message: `${method} ${url} failed`, attributes: { method, url, status: 0, error: String(e), duration_ms: Math.round(performance.now() - t0), ...trace.ids } });
       throw e;
     }
   };
+  type Tracked = XMLHttpRequest & { __ds?: { method: string; url: string; traceparent?: string } };
   const open = XMLHttpRequest.prototype.open;
   const send = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function (this: XMLHttpRequest & { __ds?: { method: string; url: string } }, method: string, url: string | URL, ...rest: unknown[]) {
+  const setHeader = XMLHttpRequest.prototype.setRequestHeader;
+  XMLHttpRequest.prototype.open = function (this: Tracked, method: string, url: string | URL, ...rest: unknown[]) {
     this.__ds = { method: method.toUpperCase(), url: absolute(String(url)) };
     return (open as (...a: unknown[]) => void).call(this, method, url, ...rest);
   } as typeof open;
-  XMLHttpRequest.prototype.send = function (this: XMLHttpRequest & { __ds?: { method: string; url: string } }, body?: Document | XMLHttpRequestBodyInit | null) {
+  XMLHttpRequest.prototype.setRequestHeader = function (this: Tracked, name: string, value: string) {
+    if (this.__ds && name.toLowerCase() === 'traceparent') this.__ds.traceparent = value;
+    return setHeader.call(this, name, value);
+  };
+  XMLHttpRequest.prototype.send = function (this: Tracked, body?: Document | XMLHttpRequestBodyInit | null) {
     const info = this.__ds, t0 = performance.now();
-    if (info) {
+    if (info && !ours(info.url)) {
+      const trace = traceFor(info.url, info.traceparent ?? null);
+      if (trace.header) setHeader.call(this, 'traceparent', trace.header);
       this.addEventListener('loadend', () => event({ type: 'network', message: `${info.method} ${info.url} ${this.status || 'failed'}`,
-        attributes: { ...info, status: this.status, duration_ms: Math.round(performance.now() - t0) } }));
+        attributes: { method: info.method, url: info.url, status: this.status, duration_ms: Math.round(performance.now() - t0), ...trace.ids } }));
     }
     return send.call(this, body);
   };
@@ -165,7 +198,7 @@ function instrumentConsole(): void {
 export function init(o: InitOptions): void {
   if (opts) return;
   if (!o.apiKey?.startsWith('dsi_')) throw new Error('DorisStackRUM: apiKey must be an ingestion key (dsi_…)');
-  opts = { service: '', maskAllInputs: true, maskAllText: false, recordReplay: true, recordNetwork: true, recordConsole: true, flushIntervalMs: 5000, ...o };
+  opts = { service: '', maskAllInputs: true, maskAllText: false, recordReplay: true, recordNetwork: true, recordConsole: true, tracePropagationTargets: [], flushIntervalMs: 5000, ...o };
   state = load();
   session();
   if (opts.recordReplay) {

@@ -234,3 +234,19 @@ test('sdk batch: replay chunks under the body size, each its own seq; events rid
   for (let i = 0; i < 2500; i++) b.addEvent({ t: i, type: 'network' });
   assert.deepEqual(b.take(() => 0).map((x) => [x.replay.length, x.events.length]), [[0, 1000], [0, 1000], [0, 500]]);
 });
+
+test('sdk trace propagation: W3C traceparent, own origin always, others only when listed', async () => {
+  const { newTraceparent, parseTraceparent, shouldPropagate } = await import('../src/sdk/core.ts');
+  const t = newTraceparent();
+  assert.match(t.header, /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+  assert.deepEqual(parseTraceparent(t.header), { traceId: t.traceId, spanId: t.spanId });
+  assert.equal(parseTraceparent('00-00000000000000000000000000000000-0000000000000001-01'), null, 'all-zero trace id is invalid');
+  assert.equal(parseTraceparent('garbage'), null);
+  const page = 'https://shop.example.com';
+  assert.equal(shouldPropagate('/api/cart', page, []), true);
+  assert.equal(shouldPropagate('https://shop.example.com/x', page, []), true);
+  assert.equal(shouldPropagate('https://api.example.com/x', page, []), false);
+  assert.equal(shouldPropagate('https://api.example.com/x', page, ['https://api.example.com/']), true);
+  assert.equal(shouldPropagate('https://cdn.other.com/x', page, [/\.example\.com\//]), false);
+  assert.equal(shouldPropagate('https://pay.example.com/x', page, [/\.example\.com\//]), true);
+});

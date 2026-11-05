@@ -553,8 +553,18 @@ test('client sessions: the SDK on another site records a session that replays, m
   // The shop runs on its own origin and loads the SDK from DorisStack.
   const { readFileSync } = await import('node:fs');
   const html = readFileSync(new URL('../sdk-example/shop.html', import.meta.url), 'utf8');
+  // The shop's backend is "instrumented": it continues the browser's traceparent in a server span.
+  let backendTrace = '';
   const shopServer = createServer((req, res) => {
-    if (req.method === 'POST' && req.url?.startsWith('/api/checkout')) return res.writeHead(503).end('down');
+    if (req.method === 'POST' && req.url?.startsWith('/api/checkout')) {
+      const [, traceId, parent] = /^00-([0-9a-f]{32})-([0-9a-f]{16})-01$/.exec(String(req.headers.traceparent ?? '')) ?? [];
+      if (!traceId) return res.writeHead(400).end('no traceparent');
+      backendTrace = traceId;
+      const t = new Date().toISOString().replace('T', ' ').replace('Z', '');
+      return void doris.query(`INSERT INTO ${DB}.otel_traces (service_name, timestamp, trace_id, span_id, parent_span_id, span_name, span_kind, duration, status_code, is_root) ` +
+        `VALUES ('acme-api', '${t}', '${traceId}', 'a1b2c3d4e5f60718', '${parent}', 'POST /api/checkout', 'SPAN_KIND_SERVER', 41000, 'STATUS_CODE_ERROR', 0)`)
+        .then(() => res.writeHead(503).end('down'), () => res.writeHead(500).end('insert failed'));
+    }
     res.writeHead(200, { 'content-type': 'text/html' }).end(html);
   });
   await new Promise<void>((r) => shopServer.listen(0, '127.0.0.1', r));
@@ -622,6 +632,26 @@ test('client sessions: the SDK on another site records a session that replays, m
   await page.getByRole('button', { name: 'Play' }).click();
   await page.getByRole('button', { name: 'Pause' }).waitFor();
   await shot('15-session-replay');
+  await page.getByRole('button', { name: 'Pause' }).click();
+
+  // The failed request carried a traceparent: its backend trace opens from the timeline...
+  assert.match(backendTrace, /^[0-9a-f]{32}$/);
+  await list.getByRole('tab', { name: /^Network/ }).click();
+  const req = list.locator('li', { hasText: '/api/checkout' });
+  await req.getByRole('button').first().click();
+  await req.getByRole('button', { name: 'Open trace' }).click();
+  await page.waitForFunction((t) => new URLSearchParams(location.search).get('where') === `trace_id:${t}`, backendTrace);
+  const panel = page.locator('.wf-row', { hasText: 'POST /api/checkout' });
+  await panel.waitFor({ timeout: 30_000 });
+  assert.match(await panel.innerText(), /acme-api/);
+  // ...and the trace leads back to the session, at the request.
+  await page.getByRole('note').getByRole('button', { name: 'Open session replay' }).waitFor();
+  await shot('16-trace-from-session');
+  await page.getByRole('note').getByRole('button', { name: 'Open session replay' }).click();
+  await page.waitForFunction((id) => new URLSearchParams(location.search).get('session') === id, sid);
+  await page.locator('[data-testid="replay"] iframe').waitFor();
+  await page.waitForFunction(() => document.querySelector('[aria-label="Replay time"]')?.textContent?.startsWith('0:00') === false);
+  await shot('17-back-to-session');
 });
 
 test('a phone-width screen has no horizontal scroll', async () => {

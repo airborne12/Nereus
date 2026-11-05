@@ -25,8 +25,18 @@ const app = createApp({ doris, db: process.env.DORIS_DB ?? 'otel_bench', auth: {
 await new Promise<void>((r) => app.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${(app.address() as AddressInfo).port}`;
 const html = readFileSync(new URL('../sdk-example/shop.html', import.meta.url), 'utf8');
+const DB = process.env.DORIS_DB ?? 'otel_bench';
+// The shop's backend continues the browser's traceparent in a server span, as OTel would.
 const shop = createServer((req, res) => {
-  if (req.method === 'POST' && req.url?.startsWith('/api/checkout')) return res.writeHead(503).end('down');
+  if (req.method === 'POST' && req.url?.startsWith('/api/checkout')) {
+    const [, traceId, parent] = /^00-([0-9a-f]{32})-([0-9a-f]{16})-01$/.exec(String(req.headers.traceparent ?? '')) ?? [];
+    if (!traceId) return res.writeHead(400).end('no traceparent');
+    const t = new Date().toISOString().replace('T', ' ').replace('Z', '');
+    const span = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, '0')).join('');
+    return void doris.query(`INSERT INTO ${DB}.otel_traces (service_name, timestamp, trace_id, span_id, parent_span_id, span_name, span_kind, duration, status_code, status_message, is_root) ` +
+      `VALUES ('acme-api', '${t}', '${traceId}', '${span}', '${parent}', 'POST /api/checkout', 'SPAN_KIND_SERVER', 41000, 'STATUS_CODE_ERROR', 'payment service unavailable', 0)`)
+      .then(() => res.writeHead(503).end('down'));
+  }
   res.writeHead(200, { 'content-type': 'text/html' }).end(html);
 });
 await new Promise<void>((r) => shop.listen(0, '127.0.0.1', r));

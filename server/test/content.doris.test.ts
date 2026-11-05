@@ -191,7 +191,8 @@ test('dashboards: tiles are validated and saved; favorites', { skip }, async () 
 });
 
 test('tile alerts: a grouped p99 fires for the worst group; removing the tile removes them', { skip }, async () => {
-  const [{ t }] = await doris.query(`SELECT max(timestamp) AS t FROM ${db}.otel_traces`) as any[];
+  // The end of the generated data (other tests and demo recordings add newer spans of their own).
+  const [{ t }] = await doris.query(`SELECT max(timestamp) AS t FROM ${db}.otel_traces WHERE service_name = 'frontend'`) as any[];
   const end = Date.parse(`${String(t).replace(' ', 'T')}Z`) + 1000;
   const lit = (ms: number) => `'${new Date(ms).toISOString().replace('T', ' ').replace('Z', '')}'`;
   const p99s = await doris.query(`SELECT service_name AS s, percentile_approx(duration, 0.99) AS v FROM ${db}.otel_traces

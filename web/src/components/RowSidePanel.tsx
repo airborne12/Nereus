@@ -9,6 +9,26 @@ export interface PanelActions {
   onFilter: (field: string, value: string, mode: 'include' | 'exclude' | 'only') => void;
   onSearchValue: (field: string, value: string) => void;
   onAddColumn: (field: string) => void;
+  /** Go to another page of the app (the session replay of a trace). */
+  onNavigate?: (url: string) => void;
+}
+
+/** The browser session whose request started this trace, if the SDK recorded one. */
+function SessionLink({ traceId, range, onNavigate }: { traceId: string; range: api.Range; onNavigate?: (url: string) => void }) {
+  const [s, setS] = useState<{ sessionId: string; at: string; started: string; ended: string; user: string | null } | null>(null);
+  useEffect(() => {
+    const ac = new AbortController();
+    api.sessionForTrace(traceId, range, ac.signal).then((r) => !ac.signal.aborted && setS(r.session), () => {});
+    return () => ac.abort();
+  }, [traceId]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!s || !onNavigate) return null;
+  const p = new URLSearchParams({ session: s.sessionId, from: String(dorisTimeToMs(s.started) - 60_000), to: String(dorisTimeToMs(s.ended) + 60_000), at: String(dorisTimeToMs(s.at)) });
+  return (
+    <div className="session-link" role="note">
+      <Icon name="laptop" size={13} /> Started by a request in a browser session{s.user ? ` of ${s.user}` : ''}.
+      <button type="button" className="link" onClick={() => onNavigate(`/sessions?${p}`)}>Open session replay</button>
+    </div>
+  );
 }
 
 type Tab = 'overview' | 'columns' | 'trace' | 'context';
@@ -139,6 +159,7 @@ function TraceTab({ traceId, around, focusSpan, actions }: { traceId: string; ar
   if (spans.length === 0) return <div className="empty">No matching spans or logs found</div>;
   return (
     <div className="trace-tab">
+      <SessionLink traceId={traceId} range={{ from: around - 86400_000, to: around + 86400_000 }} onNavigate={actions.onNavigate} />
       <div className="trace-summary">
         <span>{spans.length} spans, <span className={errors ? 'lvl-error' : ''}>{errors} errors</span> · {formatDuration(totalMs * 1000)}</span>
         <span className="grow" />

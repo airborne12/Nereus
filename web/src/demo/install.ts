@@ -134,13 +134,18 @@ function banner(rows: number, spans: number, minutes: number): void {
 export async function install(): Promise<void> {
   const res = await fetch(new URL('demo-data.json', document.baseURI));
   const snap = (await res.json()) as Snapshot;
-  const newest = Math.max(...[...snap.logs, ...snap.traces].map((r) => msOf(String(r.timestamp))));
+  // Backend spans of recorded sessions (_session) move with the sessions, everything else together.
+  const newest = Math.max(...[...snap.logs, ...snap.traces.filter((r) => !r._session)].map((r) => msOf(String(r.timestamp))));
   const offset = Date.now() - newest - 5_000;
+  const sessRows = snap.sessions ?? [];
+  const sOff = sessRows.length ? Date.now() - Math.max(...sessRows.map((r) => msOf(String(r.timestamp)))) - 120_000 : 0;
   snap.metrics ??= [];
   for (const rows of [snap.logs, snap.traces, snap.metrics]) {
     for (const r of rows) {
-      r.timestamp = shiftTime(String(r.timestamp), offset);
-      if (typeof r.end_time === 'string') r.end_time = shiftTime(r.end_time, offset);
+      const off = r._session ? sOff : offset;
+      delete r._session;
+      r.timestamp = shiftTime(String(r.timestamp), off);
+      if (typeof r.end_time === 'string') r.end_time = shiftTime(r.end_time, off);
       for (const v of VARIANTS) if (typeof r[v] === 'string') r[v] = JSON.parse(r[v] as string);
       r._ms = msOf(String(r.timestamp));
     }
@@ -150,8 +155,6 @@ export async function install(): Promise<void> {
 
   // Sessions end two minutes ago; rrweb timestamps inside the replay move with them.
   const sessionSource = sessionsSource('demo');
-  const sessRows = snap.sessions ?? [];
-  const sOff = sessRows.length ? Date.now() - Math.max(...sessRows.map((r) => msOf(String(r.timestamp)))) - 120_000 : 0;
   const parts = new Map<string, Map<number, string[]>>();
   for (const r of sessRows) {
     r.timestamp = shiftTime(String(r.timestamp), sOff);
@@ -312,6 +315,13 @@ export async function install(): Promise<void> {
             errors: n(bad), requests: n((r) => r.event_type === 'network'), replay_parts: n((r) => r.kind === 'replay') };
         }).sort((a, b) => String(b.started).localeCompare(String(a.started)));
         return json(200, { sessions, sql: '(offline demo: computed in the browser)' });
+      }
+      const bt = /^\/api\/sessions\/by-trace\/([0-9a-f]{32})$/.exec(path);
+      if (bt) {
+        const hit = sessionEvents.find((r) => r.event_type === 'network' && (r.attributes as Record<string, unknown> | null)?.trace_id === bt[1]);
+        if (!hit) return json(200, { session: null });
+        const rs = sessRows.filter((r) => r.session_id === hit.session_id).map((r) => String(r.timestamp)).sort();
+        return json(200, { session: { sessionId: hit.session_id, at: hit.timestamp, started: rs[0], ended: rs.at(-1), user: hit.user_email ?? hit.user_name ?? null } });
       }
       const sm = /^\/api\/sessions\/([^/]+)$/.exec(path);
       if (sm) {

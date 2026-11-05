@@ -139,6 +139,8 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
     [state.source, state.where, state.language, state.filters, range]);
   const searchKey = JSON.stringify([spec, state.select, state.orderBy, state.groupBy]);
   const [shownKey, setShownKey] = useState<string | null>(null);
+  // ?openTrace=<id> (from a session's network request): open that trace's first span once loaded.
+  const openTrace = useRef(new URLSearchParams(window.location.search).get('openTrace'));
   const loading = shownKey !== searchKey;
 
   const go = (patch: Partial<SearchState>) => {
@@ -159,6 +161,12 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
       if (ac.signal.aborted) return;
       setRows(s.rows);
       setColumns(s.columns);
+      if (openTrace.current) {
+        const ofTrace = s.rows.filter((r) => r.trace_id === openTrace.current);
+        const first = ofTrace.reduce<Row | null>((a, r) => (a === null || String(r.timestamp) < String(a.timestamp) ? r : a), null);
+        if (first) setSelected(first);
+        openTrace.current = null;
+      }
       setElapsed(s.elapsedMs);
       setWarnings(s.warnings ?? []);
       setHist(h);
@@ -257,6 +265,7 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
   const actions = {
     onFilter: (field: string, value: string, mode: 'include' | 'exclude' | 'only') => go({ filters: toggleFilter(state.filters, field, value, mode) }),
     onSearchValue: (field: string, value: string) => go({ where: `${field}:${quoteValue(value)}`, language: 'lucene' as Language }),
+    onNavigate: navigate,
     onAddColumn: (field: string) => {
       const cols = splitSelect(currentSelect);
       if (!cols.includes(field)) go({ select: [...cols, field].join(', ') });
