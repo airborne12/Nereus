@@ -26,6 +26,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): DorisConfig
 
 export type Row = Record<string, unknown>;
 
+const TEXT_TYPES = new Set(['VAR_STRING', 'STRING', 'BLOB', 'JSON']);
+
 export class Doris {
   private pool: mysql.Pool;
 
@@ -36,6 +38,9 @@ export class Doris {
       user: cfg.user,
       password: cfg.password,
       connectionLimit: cfg.connectionLimit,
+      // Doris labels result columns with the 3-byte utf8 charset, which mysql2 decodes as CESU-8 and
+      // so garbles 4-byte characters (emoji, rare CJK). The bytes are UTF-8: decode them as such.
+      typeCast: (field, next) => (TEXT_TYPES.has(field.type) ? field.string('utf8') : next()),
       // DATETIME(6) values stay strings in UTC, exactly as stored.
       dateStrings: true,
       supportBigNumbers: true,

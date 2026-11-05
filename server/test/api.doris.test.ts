@@ -1,6 +1,7 @@
 // End-to-end API checks against a live Doris loaded by bench/otelgen.py. Skipped unless DORIS_TEST=1.
 //   DORIS_TEST=1 DORIS_PORT=9930 DORIS_DB=otel_bench node --test test/api.doris.test.ts
 
+import { IngestKeys } from '../src/sessions/http.ts';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
@@ -29,7 +30,7 @@ before(async () => {
   const store = new AuthStore(meta.pool);
   const admin = await store.setup('admin@example.com', 'Admin', 'adminpass1');
   apiKey = (await store.createApiKey(admin.id, 'tests')).key;
-  const server = createApp({ doris, db, auth: { store, secureCookie: false }, content: new ContentStore(meta.pool) });
+  const server = createApp({ doris, db, auth: { store, secureCookie: false }, content: new ContentStore(meta.pool), ingestKeys: new IngestKeys(meta.pool) });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   close = async () => {
@@ -197,4 +198,14 @@ test('histogram group by: top groups keep their series, the rest add up under (o
   for (const b of all.body.buckets) totals.set(b.g, (totals.get(b.g) ?? 0) + Number(b.n));
   const best = [...totals].sort((a, b) => b[1] - a[1])[0]![0];
   assert.ok(names.has(best), `the most frequent span name ${best} has its own series`);
+});
+
+test('4-byte UTF-8 in a query survives the connection', { skip: !enabled }, async () => {
+  const d = new Doris(configFromEnv());
+  try {
+    const [row] = await d.query("SELECT '😀 ok' AS v") as any[];
+    assert.equal(row.v, '😀 ok');
+  } finally {
+    await d.close();
+  }
 });
