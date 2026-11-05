@@ -1,9 +1,10 @@
 // End-to-end API checks against a live Doris loaded by bench/otelgen.py. Skipped unless DORIS_TEST=1.
-//   DORIS_TEST=1 DORIS_PORT=9730 DORIS_DB=otel_bench node --test test/api.doris.test.ts
+//   DORIS_TEST=1 DORIS_PORT=9930 DORIS_DB=otel_bench node --test test/api.doris.test.ts
 
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
+import { execFileSync } from 'node:child_process';
 import { Doris, configFromEnv } from '../src/db.ts';
 import { ContentStore } from '../src/content/store.ts';
 import { AuthStore } from '../src/auth/store.ts';
@@ -154,4 +155,46 @@ test('facets list top values with counts from a sample, honouring the query', { 
   const lvl = body.facets.find((f: any) => f.field === 'severity_text');
   assert.deepEqual(lvl.values.map((v: any) => v.v), ['ERROR']);
   assert.ok(svc.values.reduce((s: number, v: any) => s + v.n, 0) <= body.sampled);
+});
+
+test('service map: calls between services match a reference join; nodes count entry spans', { skip: !enabled }, async () => {
+  const { status, body } = await get('/api/service-map', { from, to });
+  assert.equal(status, 200);
+  const edge = (s: string, d: string) => body.edges.find((e: any) => e.src === s && e.dst === d);
+  assert.ok(edge('frontend', 'checkout'), 'frontend calls checkout');
+  assert.ok(edge('checkout', 'payment'), 'checkout calls payment');
+  assert.ok(!body.edges.some((e: any) => e.src === e.dst), 'no self edges');
+  assert.ok(!body.edges.some((e: any) => e.dst === 'frontend'), 'nobody calls frontend');
+  const sql = (q: string) => execFileSync('mysql', ['-h', process.env.DORIS_HOST ?? '127.0.0.1', '-P', process.env.DORIS_PORT ?? '9030', '-uroot', '-N', '-B', '-e', q], { encoding: 'utf8' }).trim();
+  const ref = sql(`SELECT count(*) FROM ${db}.otel_traces c JOIN ${db}.otel_traces p ON c.trace_id = p.trace_id AND c.parent_span_id = p.span_id ` +
+    `WHERE c.service_name = 'checkout' AND p.service_name = 'frontend'`);
+  assert.equal(Number(edge('frontend', 'checkout').calls), Number(ref));
+  const fe = body.nodes.find((n: any) => n.service === 'frontend');
+  assert.equal(Number(fe.requests), Number(sql(`SELECT count(*) FROM ${db}.otel_traces WHERE service_name = 'frontend' AND (is_root = 1 OR span_kind = 'SPAN_KIND_SERVER')`)));
+  const filtered = await get('/api/service-map', { from, to, where: 'status:error' });
+  assert.ok(filtered.body.edges.every((e: any) => Number(e.errors) === Number(e.calls)), 'the query filters the calls');
+});
+
+test('heatmap: counts per time bucket and duration band add up to the span count', { skip: !enabled }, async () => {
+  const { status, body } = await get('/api/heatmap', { from, to, where: 'service:frontend' });
+  assert.equal(status, 200);
+  const total = body.cells.reduce((s: number, c: any) => s + Number(c.n), 0);
+  const all = await get('/api/histogram', { source: 'traces', where: 'service:frontend', from, to, buckets: '1' });
+  assert.equal(total, all.body.buckets.reduce((s: number, b: any) => s + Number(b.n), 0));
+  assert.ok(body.cells.every((c: any) => Number.isInteger(Number(c.b)) && Number(c.b) >= 0));
+});
+
+test('histogram group by: top groups keep their series, the rest add up under (other)', { skip: !enabled }, async () => {
+  const all = await get('/api/histogram', { source: 'traces', from, to, buckets: '4', groupBy: 'span_name' });
+  const top = await get('/api/histogram', { source: 'traces', from, to, buckets: '4', groupBy: 'span_name', groups: '3' });
+  assert.equal(top.status, 200, JSON.stringify(top.body));
+  const sum = (b: any[]) => b.reduce((s, x) => s + Number(x.n), 0);
+  assert.equal(sum(top.body.buckets), sum(all.body.buckets), 'nothing is lost');
+  const names = new Set(top.body.buckets.map((b: any) => b.g));
+  assert.ok(names.has('(other)'));
+  assert.ok(names.size <= 4, [...names].join(', '));
+  const totals = new Map<string, number>();
+  for (const b of all.body.buckets) totals.set(b.g, (totals.get(b.g) ?? 0) + Number(b.n));
+  const best = [...totals].sort((a, b) => b[1] - a[1])[0]![0];
+  assert.ok(names.has(best), `the most frequent span name ${best} has its own series`);
 });

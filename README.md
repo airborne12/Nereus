@@ -6,7 +6,7 @@ API service and web UI. "DorisStack" is a working code name.
 
 Design: <https://claude.ai/artifact/RUahRwDXWZPii2gSTZCU67>
 
-Status: **M0 and M1 done, M2 in progress**. Tables, collector configuration, a single-host compose
+Status: **M0 and M1 done, M2 in progress** (remaining: Client sessions, alerts on dashboard tiles). Tables, collector configuration, a single-host compose
 file and ingestion checks (M0); the search compiler, the API, the search page, and users, login
 and API keys with metadata in PostgreSQL (M1). Configurable data sources come next.
 
@@ -64,6 +64,8 @@ Every `/api/*` call except `/api/auth/*` needs a login: the browser's session co
 | `GET /api/webhooks`; `POST`, `DELETE …/<id>`, `POST …/<id>/test` (admins) | alert destinations; URLs are shown to admins only |
 | `GET`/`POST /api/alerts`, `DELETE …/<id>`, `POST …/<id>/silence`, `GET …/<id>/history` | alerts on saved searches |
 | `POST /api/chart {source, display, series, where, language, filters, groupBy, from, to}` | chart data for Chart explorer and tiles |
+| `GET /api/service-map?where=&language=&filters=&from=&to=` | calls between services and per-service requests, errors, p99 |
+| `GET /api/heatmap?where=&language=&filters=&from=&to=&buckets=` | trace durations per time bucket and duration band (Event Deltas) |
 
 Users, sessions and keys: passwords are scrypt hashes, session and API key tokens are 256-bit
 random values stored as SHA-256 hashes, sessions last 7 days, 10 failed logins per address and
@@ -131,6 +133,24 @@ Browser tests (Playwright + Chromium) drive the built page against a live Doris 
   attribute path, a WHERE and a Group by. Save to dashboard adds it as a tile.
 - **Dashboards**: tiles in a 12-column grid (widths 3-12) with one time range, Live (30 s) and Refresh;
   New Tile, Edit, Duplicate, Move, Delete, Open in Chart explorer. Every change is saved.
+
+## Service map, Event Deltas and search tools
+
+- **Service map** joins each span to its parent span (same trace, `parent_span_id = span_id`, parents
+  looked up a minute either side of the window). A parent in another service is one call from that
+  service. Edges show calls, errors, p50/p99; nodes count each service's entry spans (roots and
+  server spans). The WHERE filters the calls. Click a service to search its traces.
+- **Event Deltas** (traces, Analysis Mode): a heatmap of span duration over time, 4 bands per power
+  of ten. Drag a box around outliers; every field's value shares in the selection are compared with
+  all matching spans (the facet sample of each), biggest differences first, with Filter / Exclude.
+- **Group by** splits the timeline by any field or attribute path; the 10 most frequent values keep
+  their own series and the rest add up as `(other)` (`groups=10` on `/api/histogram`).
+- **Denoise** (logs) mines patterns in the newest 2,000 matching events and hides the rows of
+  patterns that make up 5% or more of them.
+- **Download CSV** saves the loaded rows as shown; columns resize from their header edge
+  (double-click restores); the query box offers your last 10 queries per source and language
+  (this browser only); the time picker understands "last 2 hours", "yesterday", "3h ago",
+  "this week", "2026-11-04 10:00 to 12:00".
 
 ## Schema notes
 

@@ -49,3 +49,17 @@ export function minePatterns(
     .map(({ levels, ...p }) => ({ ...p, level: [...levels.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '' }))
     .sort((a, b) => b.count - a.count);
 }
+
+/**
+ * Denoise: the templates that make up at least `minShare` of a sample. Hiding their rows leaves
+ * the unusual events. Needs a sample big enough to tell common from rare.
+ */
+export function noisyTemplates(rows: Record<string, unknown>[], field: string, minShare = 0.05, minSample = 50): Set<string> {
+  if (rows.length < minSample) return new Set();
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const k = template(String(r[field] ?? ''));
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return new Set([...counts].filter(([, n]) => n / rows.length >= minShare).map(([k]) => k));
+}

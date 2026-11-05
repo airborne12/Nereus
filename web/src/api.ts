@@ -119,8 +119,9 @@ export interface Bucket {
   n: string | number;
 }
 
-export function histogram(s: Spec, groupBy: string, signal?: AbortSignal) {
-  return get<{ stepSeconds: number; buckets: Bucket[]; sql: string }>('/api/histogram', { ...specParams(s), groupBy, buckets: 90 }, signal);
+export function histogram(s: Spec, groupBy: string, signal?: AbortSignal, groups?: number) {
+  return get<{ stepSeconds: number; buckets: Bucket[]; sql: string }>('/api/histogram',
+    { ...specParams(s), groupBy, buckets: 90, ...(groups ? { groups } : {}) }, signal);
 }
 
 export interface Facet {
@@ -264,4 +265,16 @@ export async function chart(def: ChartDef, r: Range, signal?: AbortSignal): Prom
     method: 'POST', headers: { 'content-type': 'application/json' }, signal,
     body: JSON.stringify({ ...def, from: iso(r.from), to: iso(r.to) }),
   }));
+}
+
+export interface MapEdge { src: string; dst: string; calls: number | string; errors: number | string; p50: number | string; p99: number | string }
+export interface MapNode { service: string; requests: number | string; errors: number | string; p99: number | string }
+
+export function serviceMap(s: Omit<Spec, 'source'>, signal?: AbortSignal) {
+  return get<{ edges: MapEdge[]; nodes: MapNode[] }>('/api/service-map', specParams({ ...s, source: 'traces' }), signal);
+}
+
+export function heatmap(s: Omit<Spec, 'source'>, signal?: AbortSignal) {
+  return get<{ cells: { t: string; b: number | string; n: number | string }[]; stepSeconds: number }>('/api/heatmap',
+    { ...specParams({ ...s, source: 'traces' }), buckets: 60 }, signal);
 }

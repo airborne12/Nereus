@@ -232,14 +232,26 @@ export function defaultSelect(source: Source): string {
     : 'timestamp, service_name, severity_text, body';
 }
 
-export function searchHistogramSql(source: Source, spec: SearchSpec & { maxBuckets?: number; groupBy?: string }):
+/** Name of the series that gathers the groups past `maxGroups`. */
+export const OTHER_GROUP = '(other)';
+
+export function searchHistogramSql(source: Source, spec: SearchSpec & { maxBuckets?: number; groupBy?: string; maxGroups?: number }):
   { sql: string; stepSeconds: number } {
   const { fromMs, toMs } = timeBounds(source, spec);
   const [stepSeconds, floor] = histogramStep(fromMs, toMs, spec.maxBuckets ?? 120);
   const bucket = floor.replace('%s', source.timestampColumn);
   const group = spec.groupBy ? fieldExpr(source, spec.groupBy) : null;
+  const where = searchWhere(source, spec);
+  if (group && spec.maxGroups) {
+    // The most frequent groups keep their own series; the rest add up under OTHER_GROUP.
+    const sql = `SELECT h.t AS t, if(top.hit IS NULL, ${sqlString(OTHER_GROUP)}, h.g) AS g, sum(h.n) AS n ` +
+      `FROM (SELECT ${bucket} AS t, ${group} AS g, count(*) AS n FROM ${source.table} WHERE ${where} GROUP BY t, g) h ` +
+      `LEFT JOIN (SELECT ${group} AS g, 1 AS hit FROM ${source.table} WHERE ${where} GROUP BY g ORDER BY count(*) DESC LIMIT ${spec.maxGroups}) top ` +
+      `ON h.g <=> top.g GROUP BY 1, 2 ORDER BY 1, 2`;
+    return { sql, stepSeconds };
+  }
   const select = group ? `${bucket} AS t, ${group} AS g, count(*) AS n` : `${bucket} AS t, count(*) AS n`;
-  const sql = `SELECT ${select} FROM ${source.table} WHERE ${searchWhere(source, spec)} ` +
+  const sql = `SELECT ${select} FROM ${source.table} WHERE ${where} ` +
     `GROUP BY t${group ? ', g' : ''} ORDER BY t${group ? ', g' : ''}`;
   return { sql, stepSeconds };
 }
@@ -338,4 +350,43 @@ export function chartSql(source: Source, spec: ChartSpec): { sql: string; stepSe
 /** Matches of a saved search in a window: the number an alert compares with its threshold. */
 export function countSql(source: Source, spec: SearchSpec): string {
   return `SELECT count(*) AS n FROM ${source.table} WHERE ${searchWhere(source, spec)}`;
+}
+
+// ---------------------------------------------------------------- service map, heatmap (Event Deltas)
+
+/**
+ * Calls between services: a child span whose parent span belongs to another service is one call
+ * from the parent's service to the child's. Parents are looked up a minute either side of the
+ * window so calls that cross its edge still join.
+ */
+export function serviceMapSql(traces: Source, spec: SearchSpec): { edges: string; nodes: string } {
+  const { fromMs, toMs } = timeBounds(traces, spec);
+  const lit = (ms: number) => sqlString(new Date(ms).toISOString().replace('T', ' ').replace('Z', ''));
+  const childWhere = searchWhere(traces, spec);
+  const t = traces.table;
+  const edges = `SELECT p.service_name AS src, c.service_name AS dst, count(*) AS calls, ` +
+    `sum(if(c.status_code = 'STATUS_CODE_ERROR', 1, 0)) AS errors, ` +
+    `percentile_approx(c.duration, 0.5) AS p50, percentile_approx(c.duration, 0.99) AS p99 ` +
+    `FROM (SELECT trace_id, parent_span_id, service_name, status_code, duration FROM ${t} WHERE ${childWhere} AND parent_span_id <> '') c ` +
+    `JOIN (SELECT trace_id, span_id, service_name FROM ${t} WHERE timestamp >= ${lit(fromMs - 60_000)} AND timestamp < ${lit(toMs + 60_000)}) p ` +
+    `ON c.trace_id = p.trace_id AND c.parent_span_id = p.span_id ` +
+    `WHERE c.service_name <> p.service_name GROUP BY src, dst ORDER BY calls DESC LIMIT 500`;
+  // A service's requests are its entry spans: roots and server spans.
+  const nodes = `SELECT service_name AS service, count(*) AS requests, ` +
+    `sum(if(status_code = 'STATUS_CODE_ERROR', 1, 0)) AS errors, percentile_approx(duration, 0.99) AS p99 ` +
+    `FROM ${t} WHERE ${childWhere} AND (is_root = 1 OR span_kind = 'SPAN_KIND_SERVER') GROUP BY service ORDER BY requests DESC LIMIT 200`;
+  return { edges, nodes };
+}
+
+/** Duration bands for the heatmap: 4 per power of ten of microseconds. */
+export const HEAT_BANDS_PER_DECADE = 4;
+
+/** Counts per time bucket and duration band, for Event Deltas' heatmap. */
+export function heatmapSql(traces: Source, spec: SearchSpec & { maxBuckets?: number }): { sql: string; stepSeconds: number } {
+  const { fromMs, toMs } = timeBounds(traces, spec);
+  const [stepSeconds, floor] = histogramStep(fromMs, toMs, spec.maxBuckets ?? 60);
+  const bucket = floor.replace('%s', traces.timestampColumn);
+  const sql = `SELECT ${bucket} AS t, floor(log10(greatest(duration, 1)) * ${HEAT_BANDS_PER_DECADE}) AS b, count(*) AS n ` +
+    `FROM ${traces.table} WHERE ${searchWhere(traces, spec)} GROUP BY t, b ORDER BY t, b`;
+  return { sql, stepSeconds };
 }

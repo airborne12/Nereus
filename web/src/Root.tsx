@@ -7,6 +7,7 @@ import { AlertsPage } from './pages/AlertsPage.tsx';
 import { ChartExplorerPage } from './pages/ChartExplorerPage.tsx';
 import { DashboardPage, DashboardsPage } from './pages/DashboardsPage.tsx';
 import { SavedSearchesPage } from './pages/SavedSearchesPage.tsx';
+import { ServiceMapPage } from './pages/ServiceMapPage.tsx';
 import { SearchPage } from './SearchPage.tsx';
 
 type Auth = { state: 'loading' } | { state: 'setup' } | { state: 'login' } | { state: 'in'; user: api.User };
@@ -75,6 +76,7 @@ export function Root() {
   else if (page === 'dashboards' && dashboard !== null) body = <DashboardPage key={dashboard} id={dashboard} go={go} onChanged={loadFavorites} />;
   else if (page === 'dashboards') body = <DashboardsPage go={go} onChanged={loadFavorites} />;
   else if (page === 'settings') body = <SettingsPage me={auth.user} />;
+  else if (page === 'service-map') body = <ServiceMapPage go={go} />;
   else body = <PlannedPage page={page} />;
   return (
     <AppShell page={page} user={auth.user} favorites={favorites} onNavigate={navigate} onOpen={go}

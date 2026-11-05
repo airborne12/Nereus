@@ -9,7 +9,7 @@ test('state round-trips through the URL', () => {
   const s = {
     source: 'traces' as const, where: "service:\"a b\" -x", language: 'sql' as const,
     filters: [{ field: 'k8s.pod.name', values: ['a', 'b'] }, { field: 'service', values: ['c'], exclude: true }],
-    select: 'timestamp, span_name', orderBy: 'duration DESC', window: { from: 1000, to: 5000 }, saved: 12,
+    select: 'timestamp, span_name', orderBy: 'duration DESC', window: { from: 1000, to: 5000 }, saved: 12, groupBy: '', denoise: false,
   };
   assert.deepEqual(parseState(serializeState(s)), s);
   const p = { ...DEFAULT_STATE, window: { preset: '7d' as const } };
@@ -112,4 +112,87 @@ test('replaceField fixes a misspelled field everywhere, and only as a field', ()
   assert.equal(replaceField('levl:ERROR (levl:WARN OR -levl:INFO) levl', 'levl', 'level'),
     'level:ERROR (level:WARN OR -level:INFO) levl');
   assert.equal(replaceField('k8s.pod.nme:a xk8s.pod.nme:b', 'k8s.pod.nme', 'k8s.pod.name'), 'k8s.pod.name:a xk8s.pod.nme:b');
+});
+
+test('service map layout: callers left of callees, depth by longest call chain', async () => {
+  const { layers } = await import('../src/lib/graph.ts');
+  const edges = [
+    { src: 'frontend', dst: 'checkout' }, { src: 'frontend', dst: 'cart' }, { src: 'checkout', dst: 'payment' },
+    { src: 'checkout', dst: 'cart' }, { src: 'frontend', dst: 'catalog' },
+  ];
+  assert.deepEqual(layers(['payment', 'cart', 'frontend', 'checkout', 'catalog'], edges),
+    [['frontend'], ['catalog', 'checkout'], ['cart', 'payment']]);
+  // A cycle does not loop forever.
+  assert.deepEqual(layers(['a', 'b'], [{ src: 'a', dst: 'b' }, { src: 'b', dst: 'a' }]).flat().sort(), ['a', 'b']);
+});
+
+test('event deltas: selection narrows time and duration band; differences rank fields', async () => {
+  const { selectionSpec, compareFacets, bandLow } = await import('../src/lib/deltas.ts');
+  assert.equal(bandLow(16), 10_000);
+  assert.equal(bandLow(17), 17_783);
+  const spec = { source: 'traces' as const, where: 'service:frontend', language: 'lucene' as const, filters: [], range: { from: 0, to: 100 } };
+  assert.deepEqual(selectionSpec(spec, { from: 10, to: 20, bLo: 16, bHi: 17 }),
+    { ...spec, where: '(service:frontend) duration:[10000 TO 31623}', range: { from: 10, to: 20 } });
+  assert.equal(selectionSpec({ ...spec, where: '', language: 'sql' }, { from: 0, to: 1, bLo: 16, bHi: 16 }).where,
+    'duration >= 10000 AND duration < 17783');
+  const sel = { sampled: 10, facets: [{ field: 'http.route', values: [{ v: '/checkout', n: 9 }, { v: '/', n: 1 }] }, { field: 'kind', values: [{ v: 'server', n: 10 }] }] };
+  const bg = { sampled: 100, facets: [{ field: 'http.route', values: [{ v: '/', n: 80 }, { v: '/checkout', n: 20 }] }, { field: 'kind', values: [{ v: 'server', n: 100 }] }] };
+  const d = compareFacets(sel, bg);
+  assert.deepEqual(d.map((x) => x.field), ['http.route'], 'a field with no difference is dropped');
+  assert.deepEqual(d[0]!.values.map((v) => [v.v, v.sel, v.bg]), [['/checkout', 0.9, 0.2], ['/', 0.1, 0.8]]);
+});
+
+test('natural-language time ranges', async () => {
+  const { parseNaturalRange } = await import('../src/lib/nltime.ts');
+  const now = new Date(2026, 10, 5, 15, 30).getTime(); // Thursday 15:30 local
+  const H = 3600_000;
+  assert.deepEqual(parseNaturalRange('last 2 hours', now), { from: now - 2 * H, to: now });
+  assert.deepEqual(parseNaturalRange('Past 30m', now), { from: now - 30 * 60_000, to: now });
+  assert.deepEqual(parseNaturalRange('3h ago', now), { from: now - 3 * H, to: now });
+  assert.deepEqual(parseNaturalRange('since 10 minutes ago', now), { from: now - 10 * 60_000, to: now });
+  assert.deepEqual(parseNaturalRange('last hour', now), { from: now - H, to: now });
+  const midnight = new Date(2026, 10, 5).getTime();
+  assert.deepEqual(parseNaturalRange('today', now), { from: midnight, to: now });
+  assert.deepEqual(parseNaturalRange('yesterday', now), { from: midnight - 24 * H, to: midnight });
+  const monday = new Date(2026, 10, 2).getTime();
+  assert.deepEqual(parseNaturalRange('this week', now), { from: monday, to: now });
+  assert.deepEqual(parseNaturalRange('last week', now), { from: monday - 7 * 24 * H, to: monday });
+  assert.deepEqual(parseNaturalRange('2026-11-04 10:00 to 12:30', now),
+    { from: new Date(2026, 10, 4, 10).getTime(), to: new Date(2026, 10, 4, 12, 30).getTime() });
+  assert.equal(parseNaturalRange('sometime soon', now), null);
+  assert.equal(parseNaturalRange('last 5 parsecs', now), null);
+});
+
+test('csv: header from labels, RFC 4180 quoting, objects as JSON', async () => {
+  const { toCsv } = await import('../src/lib/csv.ts');
+  assert.equal(toCsv([{ key: 'a', label: 'a' }, { key: 'b', label: 'round(d, 1)' }], [{ a: 'x,"y"', b: 1 }, { a: null, b: { k: 1 } }]),
+    'a,"round(d, 1)"\r\n"x,""y""",1\r\n,"{""k"":1}"\r\n');
+});
+
+test('query history: newest first, no duplicates, capped', async () => {
+  const { pushHistory } = await import('../src/lib/history.ts');
+  assert.deepEqual(pushHistory(['b', 'a'], ' a '), ['a', 'b']);
+  assert.deepEqual(pushHistory(['a'], '  '), ['a']);
+  assert.deepEqual(pushHistory(['3', '2', '1'], '4', 3), ['4', '3', '2']);
+});
+
+test('denoise: templates of at least 5% of a big enough sample', async () => {
+  const { noisyTemplates, template } = await import('../src/lib/patterns.ts');
+  const rows = [
+    ...Array.from({ length: 90 }, (_, i) => ({ body: `GET /health took ${i}ms` })),
+    ...Array.from({ length: 8 }, (_, i) => ({ body: `cart ${i} updated` })),
+    { body: 'payment declined for order 17' }, { body: 'disk full' },
+  ];
+  const noisy = noisyTemplates(rows, 'body');
+  assert.ok(noisy.has(template('GET /health took 3ms')));
+  assert.ok(noisy.has(template('cart 1 updated')));
+  assert.ok(!noisy.has(template('disk full')));
+  assert.equal(noisyTemplates(rows.slice(0, 10), 'body').size, 0, 'too small a sample hides nothing');
+});
+
+test('state: groupBy and denoise round-trip through the URL', async () => {
+  const { parseState, serializeState, DEFAULT_STATE } = await import('../src/lib/state.ts');
+  const s = { ...DEFAULT_STATE, groupBy: 'service_name', denoise: true };
+  assert.deepEqual(parseState(serializeState(s)), s);
+  assert.deepEqual(parseState(serializeState(DEFAULT_STATE)), DEFAULT_STATE);
 });

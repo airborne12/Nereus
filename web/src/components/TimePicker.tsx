@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { parseNaturalRange } from '../lib/nltime.ts';
 import { PRESETS, type Preset, type TimeWindow, presetLabel } from '../lib/state.ts';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -29,6 +30,7 @@ export function TimePicker({ window: w, range, onChange }: Props) {
   const [around, setAround] = useState(fmt(range.to));
   const [span, setSpan] = useState(900e3);
   const [error, setError] = useState<string | null>(null);
+  const [phrase, setPhrase] = useState('');
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -85,6 +87,20 @@ export function TimePicker({ window: w, range, onChange }: Props) {
             ))}
           </ul>
           <div className="tp-custom">
+            <label>Search time
+              <input id="tp-phrase" value={phrase} placeholder="last 2 hours, yesterday, 3h ago" autoFocus
+                onChange={(e) => setPhrase(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  const r = parseNaturalRange(phrase, Date.now());
+                  if (!r) return setError('Try "last 2 hours", "yesterday", "3h ago" or "2026-11-04 10:00 to 12:00"');
+                  setError(null);
+                  setPhrase('');
+                  onChange(r);
+                  setOpen(false);
+                }} />
+            </label>
             <div className="segmented" role="tablist">
               <button type="button" role="tab" aria-selected={mode === 'range'} onClick={() => setMode('range')}>Time range</button>
               <button type="button" role="tab" aria-selected={mode === 'around'} onClick={() => setMode('around')}>Around a time</button>

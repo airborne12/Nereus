@@ -3,7 +3,7 @@ import type * as api from '../api.ts';
 import type { Filter, SourceName } from '../lib/state.ts';
 import { Icon } from './Icon.tsx';
 
-export type AnalysisTab = 'results' | 'patterns';
+export type AnalysisTab = 'results' | 'patterns' | 'deltas';
 
 interface Props {
   source: SourceName;
@@ -98,6 +98,9 @@ export function FilterPanel(p: Props) {
         <button type="button" role="tab" aria-selected={p.tab === 'results'} onClick={() => p.onTab('results')}>Results Table</button>
         {p.source === 'logs' && (
           <button type="button" role="tab" aria-selected={p.tab === 'patterns'} onClick={() => p.onTab('patterns')}>Event Patterns</button>
+        )}
+        {p.source === 'traces' && (
+          <button type="button" role="tab" aria-selected={p.tab === 'deltas'} onClick={() => p.onTab('deltas')}>Event Deltas</button>
         )}
       </div>
       <div className="filters-title">

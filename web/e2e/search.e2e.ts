@@ -2,7 +2,7 @@
 // PostgreSQL metadata database. Starts the API service in-process (serving web/dist), drives
 // headless Chromium from first-run setup through search, the side panel, settings and logout.
 //
-//   npm run build && DORIS_PORT=9730 DORIS_DB=otel_bench SHOTS=/tmp/shots npm run e2e
+//   npm run build && DORIS_PORT=9930 DORIS_DB=otel_bench SHOTS=/tmp/shots npm run e2e
 
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
@@ -272,7 +272,7 @@ test('errors and unknown fields are explained', async () => {
 
 test('planned pages say so; going back to Search keeps the query', async () => {
   const nav = page.getByRole('navigation', { name: 'Main' });
-  await nav.getByRole('button', { name: 'Service map' }).click();
+  await nav.getByRole('button', { name: 'Client sessions' }).click();
   assert.match(await page.locator('.planned').innerText(), /Not built yet/);
   await nav.getByRole('button', { name: 'Search', exact: true }).click();
   await settled();
@@ -412,6 +412,103 @@ test('dashboards: add, edit, duplicate and delete tiles; changes persist', async
   assert.deepEqual(await page.locator('.tile .tile-head strong').allInnerTexts(), ['p99 latency', 'Logs by service']);
   await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Dashboards', exact: true }).click();
   assert.match(await page.locator('table.list tbody').innerText(), /Checkout health\s+2/);
+});
+
+test('service map: calls between services; a service opens its traces', async () => {
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: /^Service map/ }).click();
+  await page.getByRole('button', { name: 'Time Range' }).click();
+  await page.getByRole('button', { name: 'Last 7 days' }).click();
+  await page.locator('[data-edge="frontend->checkout"]').waitFor({ timeout: 60_000 });
+  assert.ok(await page.locator('[data-edge="checkout->payment"]').count());
+  assert.equal(await page.locator('[data-edge$="->frontend"]').count(), 0, 'nothing calls the frontend');
+  const stats = (await page.locator('[data-service="frontend"] .map-stats').textContent())!;
+  assert.match(stats, /req · [\d.]+% err · p99 /);
+  await shot('11-service-map');
+  await page.getByRole('button', { name: 'checkout: open its traces' }).click();
+  await settled();
+  const p = new URLSearchParams(new URL(page.url()).search);
+  assert.equal(p.get('source'), 'traces');
+  assert.deepEqual(JSON.parse(p.get('filters')!), [{ field: 'service_name', values: ['checkout'] }]);
+});
+
+test('event deltas: select slow spans on the heatmap and compare their attributes', async () => {
+  await open('source=traces&t=7d');
+  await page.getByRole('tab', { name: 'Event Deltas' }).click();
+  const heat = page.getByRole('img', { name: 'Duration heatmap' });
+  await heat.locator('rect').first().waitFor({ timeout: 60_000 });
+  await page.getByText('Select an area on the chart above').waitFor();
+  const box = (await heat.boundingBox())!;
+  // Upper third of the chart, the whole time span: the slowest spans.
+  await page.mouse.move(box.x + 70, box.y + 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + 50, { steps: 4 });
+  await page.mouse.move(box.x + box.width - 2, box.y + 70, { steps: 4 });
+  await page.mouse.up();
+  await page.locator('.delta-card').first().waitFor({ timeout: 60_000 });
+  assert.ok(await page.locator('.delta-card').count() > 0);
+  await shot('12-event-deltas');
+  const card = page.locator('.delta-card').first();
+  const field = await card.locator('strong').innerText();
+  const value = await card.locator('.delta-row .dv').first().innerText();
+  await card.locator('.delta-row').first().hover();
+  await card.locator('.delta-row').first().getByRole('button', { name: 'Filter', exact: true }).click();
+  await page.waitForFunction(([f, v]) => (new URLSearchParams(location.search).get('filters') ?? '').includes(JSON.stringify(f)) && (new URLSearchParams(location.search).get('filters') ?? '').includes(JSON.stringify(v === '(empty)' ? '' : v)), [field, value]);
+});
+
+test('search extras: group by, denoise, CSV, column resize, query history, natural-language time', async () => {
+  await open('source=traces&t=7d');
+  await page.getByLabel('Group by').fill('service_name');
+  await page.getByLabel('Group by').press('Enter');
+  await page.waitForFunction(() => new URLSearchParams(location.search).get('groupBy') === 'service_name');
+  await settled();
+  const legend = await page.locator('.histogram .legend').innerText();
+  assert.match(legend, /frontend/);
+  assert.match(legend, /checkout/);
+
+  await open('source=logs&t=7d');
+  const before = await rows().count();
+  await page.getByRole('button', { name: 'Denoise' }).click();
+  await page.locator('.denoise-note', { hasText: /hidden/ }).waitFor({ timeout: 60_000 });
+  const note = await page.locator('.denoise-note').innerText();
+  const hidden = Number(/, ([\d,]+) of/.exec(note)![1]!.replace(/,/g, ''));
+  assert.equal(await rows().count(), before - hidden, note);
+  await page.getByRole('button', { name: 'Denoise' }).click();
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download CSV' }).click();
+  const file = await (await download).path();
+  const { readFileSync } = await import('node:fs');
+  const lines = readFileSync(file, 'utf8').trimEnd().split('\r\n');
+  assert.equal(lines[0], 'timestamp,service_name,severity_text,body');
+  assert.equal(lines.length, (await rows().count()) + 1);
+
+  const th = page.locator('table.results thead th').nth(1);
+  const w0 = (await th.boundingBox())!.width;
+  const handle = (await page.getByRole('separator', { name: 'Resize column service_name' }).boundingBox())!;
+  await page.mouse.move(handle.x + 3, handle.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + 103, handle.y + 5, { steps: 5 });
+  await page.mouse.up();
+  const w1 = (await th.boundingBox())!.width;
+  assert.ok(Math.abs(w1 - w0 - 100) < 4, `width ${w0} -> ${w1}`);
+
+  await run('level:warn');
+  await run('');
+  await where().click();
+  const recent = page.locator('.suggestions li', { has: page.getByText('level:warn', { exact: true }) });
+  await recent.waitFor();
+  await recent.click();
+  assert.equal(await where().inputValue(), 'level:warn');
+  await where().press('Escape');
+
+  await page.getByRole('button', { name: 'Time Range' }).click();
+  await page.locator('#tp-phrase').fill('last 2 hours');
+  await page.locator('#tp-phrase').press('Enter');
+  await page.waitForFunction(() => {
+    const p = new URLSearchParams(location.search);
+    return Number(p.get('to')) - Number(p.get('from')) === 2 * 3600_000;
+  });
+  await shot('13-search-extras');
 });
 
 test('a phone-width screen has no horizontal scroll', async () => {

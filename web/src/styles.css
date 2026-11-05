@@ -390,3 +390,45 @@ body.demo #root { flex: 1; min-height: 0; }
 .tile-menu { position: absolute; top: 32px; right: 8px; bottom: auto; left: auto; width: 190px; }
 .menu button:disabled { opacity: 0.4; cursor: default; }
 @media (max-width: 900px) { .tile { grid-column: span 12 !important; } }
+
+/* ---------------------------------------------------------------- search extras */
+.groupby label { display: flex; align-items: center; gap: 6px; }
+.groupby input { width: 130px; background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 3px 6px; font-size: 12px; }
+.btn.on { border-color: var(--accent); color: var(--accent); }
+.denoise-note { padding: 4px 12px; border-bottom: 1px solid var(--border); }
+.th-resize { position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: col-resize; }
+.th-resize:hover, .th-resize:active { background: var(--accent); opacity: .6; }
+#tp-phrase { width: 100%; }
+
+/* ---------------------------------------------------------------- event deltas */
+.deltas { padding-bottom: 16px; }
+.heatmap { padding: 8px 12px 0; }
+.heatmap svg { user-select: none; cursor: crosshair; display: block; }
+.deltas-head { display: flex; gap: 14px; align-items: center; padding: 6px 12px; flex-wrap: wrap; }
+.delta-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; padding: 8px 12px; }
+.delta-card { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--panel); min-width: 0; }
+.delta-card > strong { display: block; font-size: 12px; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.delta-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 11.5px; padding: 2px 0; position: relative; }
+.delta-row .dv { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.delta-row .bars { display: flex; flex-direction: column; gap: 2px; }
+.delta-row .bars i { display: block; height: 5px; border-radius: 2px; min-width: 1px; }
+.delta-row .b-sel { background: var(--accent); }
+.delta-row .b-bg { background: var(--text-3); }
+.delta-row .fv-actions { display: none; position: absolute; right: 0; background: var(--panel-2); gap: 4px; }
+.delta-row:hover .fv-actions { display: flex; }
+.delta-row .fv-actions button { font-size: 11px; background: none; border: 1px solid var(--border); color: var(--text); border-radius: 3px; cursor: pointer; padding: 0 5px; }
+
+/* ---------------------------------------------------------------- service map */
+.map-where { min-width: 260px; }
+.map-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); margin: 12px 0; }
+.map-node { cursor: pointer; }
+.map-node rect { fill: var(--panel-2); stroke: var(--border); stroke-width: 1.2; }
+.map-node:hover rect { stroke: var(--accent); }
+.map-node.warn rect { stroke: var(--lvl-warn); }
+.map-node.bad rect { stroke: var(--lvl-error); stroke-width: 2; }
+.map-name { fill: var(--text); font-size: 13px; font-weight: 600; }
+.map-stats { fill: var(--text-2); font-size: 11px; }
+.map-edge path { stroke: var(--text-3); opacity: .7; }
+.map-edge.has-errors path { stroke: var(--lvl-error); }
+.map-edge.active path { opacity: 1; stroke: var(--accent); }
+.map-edge-label { fill: var(--text-2); font-size: 10.5px; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }

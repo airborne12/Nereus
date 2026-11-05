@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from './api.ts';
+import { DeltasView } from './components/DeltasView.tsx';
 import { FilterPanel, type AnalysisTab } from './components/FilterPanel.tsx';
 import { Histogram } from './components/Histogram.tsx';
 import { Icon } from './components/Icon.tsx';
@@ -9,7 +10,10 @@ import { ResultsTable } from './components/ResultsTable.tsx';
 import { RowSidePanel } from './components/RowSidePanel.tsx';
 import { SaveSearchModal, SavedSearchBar, type SearchFields } from './components/SavedSearchBar.tsx';
 import { TimePicker } from './components/TimePicker.tsx';
+import { toCsv } from './lib/csv.ts';
 import { quoteValue, replaceField } from './lib/filters.ts';
+import { loadHistory, rememberQuery } from './lib/history.ts';
+import { noisyTemplates, template } from './lib/patterns.ts';
 import { splitSelect } from './lib/select.ts';
 import type { Row } from './lib/rows.ts';
 import {
@@ -18,6 +22,8 @@ import {
 } from './lib/state.ts';
 
 const PAGE = 200;
+const DENOISE_SAMPLE = 2000;
+const MAX_GROUPS = 10;
 const LIVE_INTERVALS = [1, 2, 4, 10, 30];
 
 const LOG_SERIES = [
@@ -65,6 +71,20 @@ function FilterPills({ filters, onChange }: { filters: Filter[]; onChange: (f: F
           <button type="button" className="link" onClick={() => setConfirm(false)}>No</button></span>
       ) : <button type="button" className="link small" onClick={() => setConfirm(true)}>Clear all</button>}
     </div>
+  );
+}
+
+/** Field the timeline is split by; empty means the source's default. */
+function GroupByInput({ value, placeholder, onChange }: { value: string; placeholder: string; onChange: (v: string) => void }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  return (
+    <form className="groupby" onSubmit={(e) => { e.preventDefault(); onChange(text.trim()); }}>
+      <label><span className="muted small">Group by</span>
+        <input aria-label="Group by" className="mono" value={text} placeholder={placeholder} onChange={(e) => setText(e.target.value)}
+          onBlur={() => text.trim() !== value && onChange(text.trim())} />
+      </label>
+    </form>
   );
 }
 
@@ -117,7 +137,7 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
 
   const spec: api.Spec = useMemo(() => ({ source: state.source, where: state.where, language: state.language, filters: state.filters, range }),
     [state.source, state.where, state.language, state.filters, range]);
-  const searchKey = JSON.stringify([spec, state.select, state.orderBy]);
+  const searchKey = JSON.stringify([spec, state.select, state.orderBy, state.groupBy]);
   const [shownKey, setShownKey] = useState<string | null>(null);
   const loading = shownKey !== searchKey;
 
@@ -131,10 +151,10 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
   useEffect(() => {
     const ac = new AbortController();
     setError(null);
-    const groupBy = state.source === 'logs' ? 'severity_text' : 'status_code';
     Promise.all([
       api.search(spec, { select: state.select, orderBy: state.orderBy, limit: PAGE }, ac.signal),
-      api.histogram(spec, groupBy, ac.signal),
+      api.histogram(spec, state.groupBy || (state.source === 'logs' ? 'severity_text' : 'status_code'), ac.signal,
+        state.groupBy ? MAX_GROUPS : undefined),
     ]).then(([s, h]) => {
       if (ac.signal.aborted) return;
       setRows(s.rows);
@@ -163,6 +183,23 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
     return () => ac.abort();
   }, [spec]);
 
+  // Denoise: hide rows whose pattern is common in a sample of the newest matching events.
+  const denoising = state.denoise && state.source === 'logs';
+  const [noisy, setNoisy] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!denoising) return setNoisy(null);
+    const ac = new AbortController();
+    setNoisy(null);
+    api.search(spec, { select: 'timestamp, body', limit: DENOISE_SAMPLE }, ac.signal)
+      .then((r) => !ac.signal.aborted && setNoisy(noisyTemplates(r.rows, 'body')), () => !ac.signal.aborted && setNoisy(new Set()));
+    return () => ac.abort();
+  }, [spec, denoising]);
+  const shownRows = useMemo(() => (noisy && noisy.size ? rows.filter((r) => !noisy.has(template(String(r.body ?? '')))) : rows), [rows, noisy]);
+
+  // Query history: every query that ran, per source and language.
+  useEffect(() => rememberQuery(state.source, state.language, state.where), [state.source, state.language, state.where]);
+  const history = useMemo(() => loadHistory(state.source, draft.language), [state.source, state.where, draft.language]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Live tail: move the window forward on an interval until the user scrolls, zooms or opens a row.
   useEffect(() => {
     if (!live || paused) return;
@@ -179,14 +216,14 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
         e.preventDefault();
         whereBox.current?.querySelector('input')?.focus();
       } else if (selected && (e.key === 'j' || e.key === 'k' || e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-        const i = rows.indexOf(selected);
-        const next = rows[i + (e.key === 'j' || e.key === 'ArrowDown' ? 1 : -1)];
+        const i = shownRows.indexOf(selected);
+        const next = shownRows[i + (e.key === 'j' || e.key === 'ArrowDown' ? 1 : -1)];
         if (next) setSelected(next);
       }
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [rows, selected]);
+  }, [shownRows, selected]);
 
   async function loadMore() {
     setLoadingMore(true);
@@ -201,6 +238,21 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
   }
 
   const total = hist.buckets.reduce((s, b) => s + Number(b.n), 0);
+  const series = useMemo(() => {
+    if (!state.groupBy) return state.source === 'logs' ? LOG_SERIES : TRACE_SERIES;
+    const sums = new Map<string, number>();
+    for (const b of hist.buckets) sums.set(b.g ?? '', (sums.get(b.g ?? '') ?? 0) + Number(b.n));
+    // Biggest at the bottom; "(other)" last, in grey.
+    const names = [...sums].filter(([g]) => g !== '(other)').sort((a, b) => b[1] - a[1]).map(([g]) => g);
+    return [...names.map((g, i) => ({ name: g, label: g || '(empty)', color: `var(--series-${(i % 8) + 1})` })),
+      ...(sums.has('(other)') ? [{ name: '(other)', color: 'var(--text-3)' }] : [])];
+  }, [hist.buckets, state.groupBy, state.source]);
+  const downloadCsv = () => {
+    const url = URL.createObjectURL(new Blob([toCsv(columns, shownRows)], { type: 'text/csv' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: `${state.source}-${new Date(range.from).toISOString().slice(0, 19)}.csv` });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   const currentSelect = state.select || DEFAULT_SELECT[state.source];
   const actions = {
     onFilter: (field: string, value: string, mode: 'include' | 'exclude' | 'only') => go({ filters: toggleFilter(state.filters, field, value, mode) }),
@@ -230,7 +282,7 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
       <form className="search-head" onSubmit={(e) => { e.preventDefault(); run(); }}>
         <div className="row">
           <select className="source" aria-label="Source" value={state.source}
-            onChange={(e) => go({ source: e.target.value as SourceName, where: '', filters: [], select: '', orderBy: '' })}>
+            onChange={(e) => go({ source: e.target.value as SourceName, where: '', filters: [], select: '', orderBy: '', groupBy: '' })}>
             <option value="logs">Logs</option>
             <option value="traces">Traces</option>
           </select>
@@ -255,6 +307,7 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
             </select>
             <QueryInput source={state.source} value={draft.where} range={range} language={draft.language}
               onChange={(where) => setDraft((d) => ({ ...d, where }))}
+              history={history}
               onSubmit={(where) => go({ where, language: draft.language, select: draft.select, orderBy: draft.orderBy })} />
           </div>
           <TimePicker window={state.window} range={range} onChange={(w) => go({ window: w })} />
@@ -287,6 +340,12 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
             {live && paused && <button type="button" className="btn small" onClick={() => setPaused(false)}><Icon name="bolt" size={12} /> Resume Live Tail</button>}
             {live && !paused && <span className="live-on"><span className="live-dot" /> Live</span>}
             {elapsed !== null && <span className="muted small">Elapsed Time: {elapsed} ms</span>}
+            <GroupByInput value={state.groupBy} placeholder={state.source === 'logs' ? 'severity_text' : 'status_code'} onChange={(groupBy) => go({ groupBy })} />
+            {state.source === 'logs' && (
+              <button type="button" className={`btn small${state.denoise ? ' on' : ''}`} aria-pressed={state.denoise}
+                title="Hide the most common log patterns" onClick={() => go({ denoise: !state.denoise })}>Denoise</button>
+            )}
+            <button type="button" className="icon-btn" title="Download CSV" aria-label="Download CSV" disabled={shownRows.length === 0} onClick={downloadCsv}><Icon name="download" size={14} /></button>
             <button type="button" className={`icon-btn${wrap ? ' on' : ''}`} title={wrap ? 'Disable Wrap Lines' : 'Enable Wrap Lines'} aria-pressed={wrap} onClick={() => setWrap(!wrap)}><Icon name="wrap" size={14} /></button>
             <button type="button" className="icon-btn" title="Show Generated SQL" aria-label="Show Generated SQL" onClick={() => setShowSql(true)}><Icon name="code" size={14} /></button>
           </div>
@@ -298,12 +357,21 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
             </div>
           ))}
           <Histogram buckets={hist.buckets} stepSeconds={hist.stepSeconds} range={range}
-            series={state.source === 'logs' ? LOG_SERIES : TRACE_SERIES} onSelect={(r) => go({ window: r })} />
+            series={series} onSelect={(r) => go({ window: r })} />
+          {denoising && (
+            <div className="denoise-note small muted" role="status">
+              {noisy === null ? 'Denoise: finding common patterns…'
+                : !columns.some((c) => c.key === 'body') ? 'Denoise needs the body column in SELECT.'
+                : `Denoise: ${noisy.size} common pattern${noisy.size === 1 ? '' : 's'} hidden, ${(rows.length - shownRows.length).toLocaleString()} of ${rows.length.toLocaleString()} loaded rows.`}
+            </div>
+          )}
           {tab === 'patterns' && state.source === 'logs' ? (
             <PatternsView spec={spec} total={total} onOpen={setSelected} />
+          ) : tab === 'deltas' && state.source === 'traces' ? (
+            <DeltasView spec={spec} onFilter={(f, v, mode) => actions.onFilter(f, v, mode)} />
           ) : (
-            <ResultsTable columns={columns} rows={rows} selected={selected ? rows.indexOf(selected) : null} wrap={wrap}
-              loadingMore={loadingMore} done={done} onSelect={(i) => setSelected(rows[i]!)}
+            <ResultsTable columns={columns} rows={shownRows} selected={selected ? shownRows.indexOf(selected) : null} wrap={wrap}
+              loadingMore={loadingMore} done={done} onSelect={(i) => setSelected(shownRows[i]!)}
               onRemoveColumn={(label) => go({ select: splitSelect(currentSelect).filter((c) => c !== label).join(', ') || DEFAULT_SELECT[state.source] })}
               onNearEnd={loadMore} onScrollTop={(top) => top > 40 && live && setPaused(true)} />
           )}

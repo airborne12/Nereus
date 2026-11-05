@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type * as api from '../api.ts';
 import type { Row } from '../lib/rows.ts';
 import { isError } from '../lib/rows.ts';
@@ -69,6 +70,21 @@ interface Props {
 /** Result rows; the columns follow SELECT. Scrolling near the end loads the next page. */
 export function ResultsTable(p: Props) {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone.split('/').at(-1);
+  const [widths, setWidths] = useState<Record<string, number>>({});
+  // Drag a header's right edge to resize the column; double-click it to restore the default.
+  const startResize = (key: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = (e.currentTarget as HTMLElement).parentElement!;
+    const x0 = e.clientX, w0 = th.getBoundingClientRect().width;
+    const move = (m: MouseEvent) => setWidths((w) => ({ ...w, [key]: Math.max(48, Math.round(w0 + m.clientX - x0)) }));
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  };
   return (
     <div className={`table-wrap${p.wrap ? ' wrap' : ''}`} onScroll={(e) => {
       const el = e.currentTarget;
@@ -80,10 +96,13 @@ export function ResultsTable(p: Props) {
           <thead>
             <tr>
               {p.columns.map((c) => (
-                <th key={c.key} className={COL_CLASS[c.key] ?? ''}>
+                <th key={c.key} className={COL_CLASS[c.key] ?? ''} style={widths[c.key] ? { width: widths[c.key] } : undefined}>
                   <span className="th">{c.key === 'timestamp' ? `timestamp (${tz})` : c.label}</span>
                   <button type="button" className="th-remove" title="Remove column" aria-label={`Remove column ${c.label}`}
                     onClick={() => p.onRemoveColumn(c.label)}><Icon name="close" size={10} /></button>
+                  <span className="th-resize" role="separator" aria-orientation="vertical" aria-label={`Resize column ${c.label}`}
+                    onMouseDown={(e) => startResize(c.key, e)}
+                    onDoubleClick={() => setWidths(({ [c.key]: _, ...w }) => w)} />
                 </th>
               ))}
             </tr>

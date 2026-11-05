@@ -1,7 +1,7 @@
 // Runs compiled queries on a live Doris loaded by bench/otelgen.py and compares each row count
 // with a hand-written reference SQL. Skipped unless DORIS_TEST=1.
 //
-//   DORIS_TEST=1 DORIS_PORT=9730 DORIS_DB=otel_bench node --test test/search.doris.test.ts
+//   DORIS_TEST=1 DORIS_PORT=9930 DORIS_DB=otel_bench node --test test/search.doris.test.ts
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

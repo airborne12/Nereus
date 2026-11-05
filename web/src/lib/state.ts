@@ -40,10 +40,14 @@ export interface SearchState {
   window: TimeWindow;
   /** The saved search this view was opened from (or saved as). */
   saved: number | null;
+  /** Histogram series field; empty: level for logs, status for traces. */
+  groupBy: string;
+  /** Hide rows of the most common log patterns. */
+  denoise: boolean;
 }
 
 export const DEFAULT_STATE: SearchState = {
-  source: 'logs', where: '', language: 'lucene', filters: [], select: '', orderBy: '', window: { preset: 'live' }, saved: null,
+  source: 'logs', where: '', language: 'lucene', filters: [], select: '', orderBy: '', window: { preset: 'live' }, saved: null, groupBy: '', denoise: false,
 };
 
 export const DEFAULT_SELECT: Record<SourceName, string> = {
@@ -84,6 +88,8 @@ export function parseState(search: string): SearchState {
     orderBy: p.get('orderBy') ?? '',
     window,
     saved: /^\d+$/.test(p.get('saved') ?? '') ? Number(p.get('saved')) : null,
+    groupBy: p.get('groupBy') ?? '',
+    denoise: p.get('denoise') === '1',
   };
 }
 
@@ -96,6 +102,8 @@ export function serializeState(s: SearchState): string {
   if (s.select) p.set('select', s.select);
   if (s.orderBy) p.set('orderBy', s.orderBy);
   if (s.saved !== null) p.set('saved', String(s.saved));
+  if (s.groupBy) p.set('groupBy', s.groupBy);
+  if (s.denoise) p.set('denoise', '1');
   if ('preset' in s.window) p.set('t', s.window.preset);
   else {
     p.set('from', String(Math.round(s.window.from)));

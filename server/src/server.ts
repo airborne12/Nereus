@@ -8,9 +8,11 @@
 //   GET|POST /api/users, POST /api/users/<id>/disabled        (admins)
 //   saved searches, dashboards, webhooks, alerts: see content/http.ts
 //   POST /api/chart {source, display, series, where, language, filters, groupBy, from, to}   chart data
+//   GET /api/service-map?where=&language=&filters=&from=&to=     calls between services
+//   GET /api/heatmap?where=&language=&filters=&from=&to=&buckets= trace durations over time
 //   GET /api/search?source=logs|traces&where=&language=lucene|sql&filters=<json>&select=&orderBy=
 //                  &from=&to=&limit=&offset=      (q= is the same as where= with lucene)
-//   GET /api/histogram?source=&where=&language=&filters=&from=&to=&buckets=&groupBy=
+//   GET /api/histogram?source=&where=&language=&filters=&from=&to=&buckets=&groupBy=&groups=
 //   GET /api/facets?source=&where=&language=&filters=&from=&to=&fields=a,b   filter panel values
 //   GET /api/trace/<trace id>?from=&to=
 //   GET /api/fields?source=                  search bar fields (cached for a minute)
@@ -27,7 +29,7 @@ import { contentRoutes } from './content/http.ts';
 import { ContentStore } from './content/store.ts';
 import { readJson } from './auth/http.ts';
 import {
-  type ChartSpec, chartSql, defaultFacetFields, facetsSql, fieldsFromDescribe, type Filter, searchHistogramSql, searchRowsSql, type SearchSpec,
+  type ChartSpec, chartSql, defaultFacetFields, facetsSql, heatmapSql, serviceMapSql, fieldsFromDescribe, type Filter, searchHistogramSql, searchRowsSql, type SearchSpec,
   traceSql, valuesSql, type Field,
 } from './query/build.ts';
 import { CompileError, unknownFields } from './query/compile.ts';
@@ -193,7 +195,7 @@ export function createApp({ doris, db, auth, content, fetchImpl, webDir }: AppOp
     if (url.pathname === '/api/histogram') {
       const source = sourceParam(url);
       const { sql, stepSeconds } = searchHistogramSql(source, {
-        ...searchSpec(url), maxBuckets: intParam(url, 'buckets'), groupBy: param(url, 'groupBy', false),
+        ...searchSpec(url), maxBuckets: intParam(url, 'buckets'), groupBy: param(url, 'groupBy', false), maxGroups: intParam(url, 'groups'),
       });
       const rows = await doris.query(sql);
       return send(res, 200, { stepSeconds, buckets: rows, sql });
@@ -219,6 +221,15 @@ export function createApp({ doris, db, auth, content, fetchImpl, webDir }: AppOp
         from: param(url, 'from')!, to: param(url, 'to')!, limit: intParam(url, 'limit'),
       });
       return send(res, 200, { values: await doris.query(sql) });
+    }
+    if (url.pathname === '/api/service-map') {
+      const { edges, nodes } = serviceMapSql(sources.traces!, searchSpec(url));
+      const [e, n] = await Promise.all([doris.query(edges), doris.query(nodes)]);
+      return send(res, 200, { edges: e, nodes: n, sql: { edges, nodes } });
+    }
+    if (url.pathname === '/api/heatmap') {
+      const { sql, stepSeconds } = heatmapSql(sources.traces!, { ...searchSpec(url), maxBuckets: intParam(url, 'buckets') });
+      return send(res, 200, { cells: await doris.query(sql), stepSeconds, sql });
     }
     const trace = /^\/api\/trace\/([^/]+)$/.exec(url.pathname);
     if (trace) {

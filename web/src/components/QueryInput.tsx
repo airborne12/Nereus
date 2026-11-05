@@ -11,6 +11,8 @@ interface Props {
   language?: 'lucene' | 'sql';
   onChange?: (q: string) => void;
   onSubmit: (q: string) => void;
+  /** Recent queries, offered while the box is empty. */
+  history?: string[];
 }
 
 interface Suggestion {
@@ -20,7 +22,7 @@ interface Suggestion {
 }
 
 /** Search bar with field-name and value completion (Tab / Enter to accept, Esc to close). */
-export function QueryInput({ source, value, range, language = 'lucene', onChange, onSubmit }: Props) {
+export function QueryInput({ source, value, range, language = 'lucene', history = [], onChange, onSubmit }: Props) {
   const [text, setText] = useState(value);
   const [cursor, setCursor] = useState(value.length);
   const [fields, setFields] = useState<{ name: string; type: string }[]>([]);
@@ -61,6 +63,7 @@ export function QueryInput({ source, value, range, language = 'lucene', onChange
   }, [open, fieldKnown, tok.field, source, range.from, range.to]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const suggestions: Suggestion[] = useMemo(() => {
+    if (text.trim() === '') return history.map((q) => ({ label: q, detail: 'recent', insert: q }));
     if (tok.field === null) {
       if (tok.value.length === 0) return [];
       const lower = tok.value.toLowerCase();
@@ -74,9 +77,11 @@ export function QueryInput({ source, value, range, language = 'lucene', onChange
     return valueHints
       .filter((h) => String(h.v).toLowerCase().includes(lower))
       .map((h) => ({ label: String(h.v), detail: Number(h.n).toLocaleString(), insert: `${tok.field}:${quoteValue(String(h.v))} ` }));
-  }, [tok.field, tok.value, fields, valueHints]);
+  }, [text, history, tok.field, tok.value, fields, valueHints]);
 
-  useEffect(() => setActive(0), [suggestions.length, tok.start]);
+  // Recent queries are offered, not preselected: Enter on an empty box still runs it.
+  const recent = text.trim() === '';
+  useEffect(() => setActive(recent ? -1 : 0), [suggestions.length, tok.start, recent]);
 
   function accept(s: Suggestion) {
     const next = text.slice(0, tok.start) + s.insert + text.slice(tok.end);
@@ -87,7 +92,7 @@ export function QueryInput({ source, value, range, language = 'lucene', onChange
     if (!s.insert.endsWith(':')) setOpen(false);
   }
 
-  const showList = open && language === 'lucene' && suggestions.length > 0;
+  const showList = open && (language === 'lucene' || recent) && suggestions.length > 0;
   return (
     <div className="query">
       <input
@@ -104,14 +109,15 @@ export function QueryInput({ source, value, range, language = 'lucene', onChange
           setOpen(true);
         }}
         onSelect={(e) => setCursor(e.currentTarget.selectionStart ?? 0)}
+        onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onKeyDown={(e) => {
           if (showList && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
             e.preventDefault();
-            setActive((a) => (a + (e.key === 'ArrowDown' ? 1 : suggestions.length - 1)) % suggestions.length);
+            setActive((a) => (Math.max(a, e.key === 'ArrowDown' ? -1 : 0) + (e.key === 'ArrowDown' ? 1 : suggestions.length - 1)) % suggestions.length);
           } else if (showList && e.key === 'Tab') {
             e.preventDefault();
-            accept(suggestions[active]!);
+            accept(suggestions[Math.max(active, 0)]!);
           } else if (e.key === 'Enter') {
             if (showList && suggestions[active] && tok.value !== suggestions[active].label) {
               e.preventDefault();

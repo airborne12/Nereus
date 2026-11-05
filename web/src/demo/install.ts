@@ -2,7 +2,7 @@
 // (demo-data.json), shifted so the newest row is "now". Built with `npm run build:demo`.
 
 import {
-  defaultFacetFields, facetsSql, histogramStep, searchHistogramSql, searchRowsSql, selectColumns, type Filter, type SearchSpec,
+  defaultFacetFields, facetsSql, heatmapSql, HEAT_BANDS_PER_DECADE, histogramStep, OTHER_GROUP, searchHistogramSql, serviceMapSql, searchRowsSql, selectColumns, type Filter, type SearchSpec,
 } from '../../../server/src/query/build.ts';
 import { unknownFields } from '../../../server/src/query/compile.ts';
 import { logsSource, metricsSource, tracesSource, type Source } from '../../../server/src/query/source.ts';
@@ -206,7 +206,21 @@ export async function install(): Promise<void> {
             const key = `${t}|${group ? fieldValue(source, r, group) ?? '' : ''}`;
             counts.set(key, (counts.get(key) ?? 0) + 1);
           }
-          const buckets = [...counts.entries()].map(([k, n]) => {
+          // groups=N: the N most frequent groups keep their series, the rest add up as OTHER_GROUP.
+          const maxGroups = Number(p.get('groups') ?? 0);
+          let keep: Set<string> | null = null;
+          if (group && maxGroups) {
+            const per = new Map<string, number>();
+            for (const [k, n] of counts) per.set(k.split('|')[1]!, (per.get(k.split('|')[1]!) ?? 0) + n);
+            keep = new Set([...per].sort((a, b) => b[1] - a[1]).slice(0, maxGroups).map(([g]) => g));
+          }
+          const merged = new Map<string, number>();
+          for (const [k, n] of counts) {
+            const [t, g] = k.split('|');
+            const key = `${t}|${keep && !keep.has(g!) ? OTHER_GROUP : g}`;
+            merged.set(key, (merged.get(key) ?? 0) + n);
+          }
+          const buckets = [...merged.entries()].map(([k, n]) => {
             const [t, g] = k.split('|');
             return { t: new Date(Number(t)).toISOString().replace('T', ' ').replace('Z', ''), ...(group ? { g } : {}), n };
           });
@@ -255,6 +269,55 @@ export async function install(): Promise<void> {
       }
       const dis = /^\/api\/users\/(\d+)\/disabled$/.exec(path);
       if (dis) { const u = users.find((x) => x.id === Number(dis[1])); if (u) u.disabled = Boolean((body as { disabled: boolean }).disabled); return json(200, { user: u }); }
+      if (path === '/api/service-map' || path === '/api/heatmap') {
+        const traces = sources.traces!;
+        const spec = specOf(p);
+        if (spec.language === 'sql') throw new Error('The offline demo runs Lucene queries only; SQL mode needs a Doris cluster.');
+        const rows = inWindow(p, data.traces!).filter(matcher(traces, spec));
+        if (path === '/api/heatmap') {
+          const { sql, stepSeconds } = heatmapSql(traces, { ...spec, maxBuckets: Number(p.get('buckets') ?? 60) });
+          const counts = new Map<string, number>();
+          for (const r of rows) {
+            const t = Math.floor((r._ms as number) / (stepSeconds * 1000)) * stepSeconds * 1000;
+            const b = Math.floor(Math.log10(Math.max(Number(r.duration), 1)) * HEAT_BANDS_PER_DECADE);
+            counts.set(`${t}|${b}`, (counts.get(`${t}|${b}`) ?? 0) + 1);
+          }
+          const cells = [...counts].map(([k, n]) => {
+            const [t, b] = k.split('|');
+            return { t: new Date(Number(t)).toISOString().replace('T', ' ').replace('Z', ''), b: Number(b), n };
+          });
+          return json(200, { cells, stepSeconds, sql });
+        }
+        const { edges: edgesSql, nodes: nodesSql } = serviceMapSql(traces, spec);
+        const bySpan = new Map(data.traces!.map((r) => [`${r.trace_id}|${r.span_id}`, r]));
+        const pct = (xs: number[], q: number) => xs.sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(q * xs.length))] ?? 0;
+        const edges = new Map<string, { src: string; dst: string; calls: number; errors: number; d: number[] }>();
+        for (const c of rows) {
+          if (!c.parent_span_id) continue;
+          const parent = bySpan.get(`${c.trace_id}|${c.parent_span_id}`);
+          if (!parent || parent.service_name === c.service_name) continue;
+          const k = `${parent.service_name}|${c.service_name}`;
+          const e = edges.get(k) ?? { src: String(parent.service_name), dst: String(c.service_name), calls: 0, errors: 0, d: [] };
+          e.calls++;
+          if (c.status_code === 'STATUS_CODE_ERROR') e.errors++;
+          e.d.push(Number(c.duration));
+          edges.set(k, e);
+        }
+        const nodes = new Map<string, { service: string; requests: number; errors: number; d: number[] }>();
+        for (const r of rows) {
+          if (!(Number(r.is_root) === 1 || r.span_kind === 'SPAN_KIND_SERVER')) continue;
+          const n = nodes.get(String(r.service_name)) ?? { service: String(r.service_name), requests: 0, errors: 0, d: [] };
+          n.requests++;
+          if (r.status_code === 'STATUS_CODE_ERROR') n.errors++;
+          n.d.push(Number(r.duration));
+          nodes.set(n.service, n);
+        }
+        return json(200, {
+          edges: [...edges.values()].sort((a, b) => b.calls - a.calls).map(({ d, ...e }) => ({ ...e, p50: pct(d, 0.5), p99: pct(d, 0.99) })),
+          nodes: [...nodes.values()].sort((a, b) => b.requests - a.requests).map(({ d, ...n }) => ({ ...n, p99: pct(d, 0.99) })),
+          sql: { edges: edgesSql, nodes: nodesSql },
+        });
+      }
       const c = contentApi(method, path, p, (body ?? {}) as Record<string, unknown>);
       if (c) return json(c.status, c.body);
       return json(404, { error: 'not found' });
