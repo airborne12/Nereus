@@ -66,9 +66,9 @@ test('histogram step keeps the bucket count under the limit; groups by any field
 
 test('facets: top values of many fields from one sample', () => {
   assert.equal(facetsSql(logs, { ...range, where: '' }, ['service_name', 'k8s.pod.name']),
-    'SELECT count(*) AS __sampled, topn(service_name, 10) AS f0, topn(coalesce(CAST(log_attributes[\'k8s.pod.name\'] AS STRING), ' +
-    `CAST(resource_attributes['k8s.pod.name'] AS STRING)), 10) AS f1 FROM (SELECT * FROM otel.otel_logs WHERE ${TIME} ` +
-    'ORDER BY timestamp DESC LIMIT 20000) s');
+    'SELECT count(*) AS __sampled, topn(f0, 10) AS f0, topn(f1, 10) AS f1 FROM (SELECT service_name AS f0, ' +
+    "coalesce(CAST(log_attributes['k8s.pod.name'] AS STRING), CAST(resource_attributes['k8s.pod.name'] AS STRING)) AS f1 " +
+    `FROM otel.otel_logs WHERE ${TIME} ORDER BY timestamp DESC LIMIT 20000) s`);
   assert.deepEqual(defaultFacetFields(logs, [
     { name: 'body', type: 'text' }, { name: 'trace_id', type: 'varchar(64)' }, { name: 'service_name', type: 'varchar(256)' },
     { name: 'level', type: 'varchar(32)' }, { name: 'k8s.pod.name', type: 'text' }, { name: 'thread.id', type: 'bigint' },

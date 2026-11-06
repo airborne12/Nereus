@@ -204,6 +204,12 @@ Privacy and security:
 - Replays render the recorded DOM in rrweb's iframe sandbox without `allow-scripts`, so recorded
   scripts do not run. The viewer's browser does load the recorded page's images and styles.
 
+## Scale
+
+On 103M logs and 69M spans (7 days, one BE with 32 cores) the UI's queries take a median of 31 ms
+and at most 2.3 s (the 7-day service map); search, timelines and facets stay under 260 ms at every
+range. Setup, all numbers and how to reproduce: [bench/SCALE.md](bench/SCALE.md).
+
 ## Schema notes
 
 - Column names and types follow the `doris` exporter's JSON (`exporter_logs.go`,

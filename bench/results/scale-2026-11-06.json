@@ -1,0 +1,734 @@
+[
+  {
+    "name": "logs all | rows | 15m",
+    "first": 49,
+    "median": 24,
+    "rows": 200
+  },
+  {
+    "name": "logs all | histogram | 15m",
+    "first": 24,
+    "median": 22,
+    "rows": 359
+  },
+  {
+    "name": "logs all | facets | 15m",
+    "first": 82,
+    "median": 79,
+    "rows": 1
+  },
+  {
+    "name": "logs level:error service:checkout | rows | 15m",
+    "first": 41,
+    "median": 30,
+    "rows": 93
+  },
+  {
+    "name": "logs level:error service:checkout | histogram | 15m",
+    "first": 19,
+    "median": 20,
+    "rows": 18
+  },
+  {
+    "name": "logs level:error service:checkout | facets | 15m",
+    "first": 24,
+    "median": 22,
+    "rows": 1
+  },
+  {
+    "name": "logs text \"slow query\" | rows | 15m",
+    "first": 29,
+    "median": 27,
+    "rows": 200
+  },
+  {
+    "name": "logs text \"slow query\" | histogram | 15m",
+    "first": 19,
+    "median": 20,
+    "rows": 91
+  },
+  {
+    "name": "logs text \"slow query\" | facets | 15m",
+    "first": 41,
+    "median": 40,
+    "rows": 1
+  },
+  {
+    "name": "logs attribute | rows | 15m",
+    "first": 22,
+    "median": 23,
+    "rows": 200
+  },
+  {
+    "name": "logs attribute | histogram | 15m",
+    "first": 20,
+    "median": 20,
+    "rows": 273
+  },
+  {
+    "name": "logs attribute | facets | 15m",
+    "first": 29,
+    "median": 28,
+    "rows": 1
+  },
+  {
+    "name": "traces all | rows | 15m",
+    "first": 49,
+    "median": 28,
+    "rows": 200
+  },
+  {
+    "name": "traces all | histogram | 15m",
+    "first": 21,
+    "median": 19,
+    "rows": 181
+  },
+  {
+    "name": "traces all | facets | 15m",
+    "first": 91,
+    "median": 89,
+    "rows": 1
+  },
+  {
+    "name": "traces duration:>50ms | rows | 15m",
+    "first": 54,
+    "median": 45,
+    "rows": 160
+  },
+  {
+    "name": "traces duration:>50ms | histogram | 15m",
+    "first": 18,
+    "median": 18,
+    "rows": 17
+  },
+  {
+    "name": "traces duration:>50ms | facets | 15m",
+    "first": 28,
+    "median": 28,
+    "rows": 1
+  },
+  {
+    "name": "traces status:error service:payment | rows | 15m",
+    "first": 35,
+    "median": 32,
+    "rows": 70
+  },
+  {
+    "name": "traces status:error service:payment | histogram | 15m",
+    "first": 20,
+    "median": 18,
+    "rows": 15
+  },
+  {
+    "name": "traces status:error service:payment | facets | 15m",
+    "first": 25,
+    "median": 25,
+    "rows": 1
+  },
+  {
+    "name": "logs | group by service (top 10) | 15m",
+    "first": 32,
+    "median": 31,
+    "rows": 545
+  },
+  {
+    "name": "traces | order by duration desc | 15m",
+    "first": 32,
+    "median": 32,
+    "rows": 200
+  },
+  {
+    "name": "values service_name | 15m",
+    "first": 21,
+    "median": 17,
+    "rows": 6
+  },
+  {
+    "name": "patterns sample 2000 | 15m",
+    "first": 92,
+    "median": 85,
+    "rows": 2000
+  },
+  {
+    "name": "service map edges | 15m",
+    "first": 110,
+    "median": 101,
+    "rows": 7
+  },
+  {
+    "name": "service map nodes | 15m",
+    "first": 28,
+    "median": 30,
+    "rows": 6
+  },
+  {
+    "name": "heatmap | 15m",
+    "first": 24,
+    "median": 19,
+    "rows": 327
+  },
+  {
+    "name": "chart p99 by service | 15m",
+    "first": 23,
+    "median": 23,
+    "rows": 186
+  },
+  {
+    "name": "chart count by level table | 15m",
+    "first": 17,
+    "median": 16,
+    "rows": 4
+  },
+  {
+    "name": "logs all | rows | 1h",
+    "first": 25,
+    "median": 26,
+    "rows": 200
+  },
+  {
+    "name": "logs all | histogram | 1h",
+    "first": 20,
+    "median": 20,
+    "rows": 244
+  },
+  {
+    "name": "logs all | facets | 1h",
+    "first": 105,
+    "median": 95,
+    "rows": 1
+  },
+  {
+    "name": "logs level:error service:checkout | rows | 1h",
+    "first": 30,
+    "median": 27,
+    "rows": 200
+  },
+  {
+    "name": "logs level:error service:checkout | histogram | 1h",
+    "first": 18,
+    "median": 20,
+    "rows": 49
+  },
+  {
+    "name": "logs level:error service:checkout | facets | 1h",
+    "first": 27,
+    "median": 28,
+    "rows": 1
+  },
+  {
+    "name": "logs text \"slow query\" | rows | 1h",
+    "first": 29,
+    "median": 29,
+    "rows": 200
+  },
+  {
+    "name": "logs text \"slow query\" | histogram | 1h",
+    "first": 23,
+    "median": 21,
+    "rows": 61
+  },
+  {
+    "name": "logs text \"slow query\" | facets | 1h",
+    "first": 76,
+    "median": 73,
+    "rows": 1
+  },
+  {
+    "name": "logs attribute | rows | 1h",
+    "first": 28,
+    "median": 28,
+    "rows": 200
+  },
+  {
+    "name": "logs attribute | histogram | 1h",
+    "first": 19,
+    "median": 18,
+    "rows": 208
+  },
+  {
+    "name": "logs attribute | facets | 1h",
+    "first": 37,
+    "median": 43,
+    "rows": 1
+  },
+  {
+    "name": "traces all | rows | 1h",
+    "first": 30,
+    "median": 28,
+    "rows": 200
+  },
+  {
+    "name": "traces all | histogram | 1h",
+    "first": 21,
+    "median": 20,
+    "rows": 122
+  },
+  {
+    "name": "traces all | facets | 1h",
+    "first": 154,
+    "median": 153,
+    "rows": 1
+  },
+  {
+    "name": "traces duration:>50ms | rows | 1h",
+    "first": 40,
+    "median": 34,
+    "rows": 200
+  },
+  {
+    "name": "traces duration:>50ms | histogram | 1h",
+    "first": 23,
+    "median": 22,
+    "rows": 49
+  },
+  {
+    "name": "traces duration:>50ms | facets | 1h",
+    "first": 29,
+    "median": 33,
+    "rows": 1
+  },
+  {
+    "name": "traces status:error service:payment | rows | 1h",
+    "first": 69,
+    "median": 52,
+    "rows": 200
+  },
+  {
+    "name": "traces status:error service:payment | histogram | 1h",
+    "first": 22,
+    "median": 25,
+    "rows": 40
+  },
+  {
+    "name": "traces status:error service:payment | facets | 1h",
+    "first": 31,
+    "median": 31,
+    "rows": 1
+  },
+  {
+    "name": "logs | group by service (top 10) | 1h",
+    "first": 32,
+    "median": 30,
+    "rows": 366
+  },
+  {
+    "name": "traces | order by duration desc | 1h",
+    "first": 131,
+    "median": 97,
+    "rows": 200
+  },
+  {
+    "name": "values service_name | 1h",
+    "first": 18,
+    "median": 22,
+    "rows": 6
+  },
+  {
+    "name": "patterns sample 2000 | 1h",
+    "first": 117,
+    "median": 116,
+    "rows": 2000
+  },
+  {
+    "name": "service map edges | 1h",
+    "first": 152,
+    "median": 141,
+    "rows": 7
+  },
+  {
+    "name": "service map nodes | 1h",
+    "first": 44,
+    "median": 44,
+    "rows": 6
+  },
+  {
+    "name": "heatmap | 1h",
+    "first": 25,
+    "median": 27,
+    "rows": 681
+  },
+  {
+    "name": "chart p99 by service | 1h",
+    "first": 33,
+    "median": 29,
+    "rows": 366
+  },
+  {
+    "name": "chart count by level table | 1h",
+    "first": 22,
+    "median": 20,
+    "rows": 4
+  },
+  {
+    "name": "logs all | rows | 24h",
+    "first": 33,
+    "median": 32,
+    "rows": 200
+  },
+  {
+    "name": "logs all | histogram | 24h",
+    "first": 67,
+    "median": 69,
+    "rows": 196
+  },
+  {
+    "name": "logs all | facets | 24h",
+    "first": 123,
+    "median": 116,
+    "rows": 1
+  },
+  {
+    "name": "logs level:error service:checkout | rows | 24h",
+    "first": 36,
+    "median": 30,
+    "rows": 200
+  },
+  {
+    "name": "logs level:error service:checkout | histogram | 24h",
+    "first": 19,
+    "median": 20,
+    "rows": 49
+  },
+  {
+    "name": "logs level:error service:checkout | facets | 24h",
+    "first": 40,
+    "median": 30,
+    "rows": 1
+  },
+  {
+    "name": "logs text \"slow query\" | rows | 24h",
+    "first": 31,
+    "median": 29,
+    "rows": 200
+  },
+  {
+    "name": "logs text \"slow query\" | histogram | 24h",
+    "first": 31,
+    "median": 29,
+    "rows": 49
+  },
+  {
+    "name": "logs text \"slow query\" | facets | 24h",
+    "first": 137,
+    "median": 114,
+    "rows": 1
+  },
+  {
+    "name": "logs attribute | rows | 24h",
+    "first": 24,
+    "median": 24,
+    "rows": 200
+  },
+  {
+    "name": "logs attribute | histogram | 24h",
+    "first": 23,
+    "median": 22,
+    "rows": 196
+  },
+  {
+    "name": "logs attribute | facets | 24h",
+    "first": 72,
+    "median": 74,
+    "rows": 1
+  },
+  {
+    "name": "traces all | rows | 24h",
+    "first": 39,
+    "median": 33,
+    "rows": 200
+  },
+  {
+    "name": "traces all | histogram | 24h",
+    "first": 43,
+    "median": 46,
+    "rows": 98
+  },
+  {
+    "name": "traces all | facets | 24h",
+    "first": 138,
+    "median": 142,
+    "rows": 1
+  },
+  {
+    "name": "traces duration:>50ms | rows | 24h",
+    "first": 34,
+    "median": 29,
+    "rows": 200
+  },
+  {
+    "name": "traces duration:>50ms | histogram | 24h",
+    "first": 17,
+    "median": 17,
+    "rows": 97
+  },
+  {
+    "name": "traces duration:>50ms | facets | 24h",
+    "first": 70,
+    "median": 42,
+    "rows": 1
+  },
+  {
+    "name": "traces status:error service:payment | rows | 24h",
+    "first": 45,
+    "median": 42,
+    "rows": 200
+  },
+  {
+    "name": "traces status:error service:payment | histogram | 24h",
+    "first": 19,
+    "median": 18,
+    "rows": 49
+  },
+  {
+    "name": "traces status:error service:payment | facets | 24h",
+    "first": 30,
+    "median": 31,
+    "rows": 1
+  },
+  {
+    "name": "logs | group by service (top 10) | 24h",
+    "first": 77,
+    "median": 70,
+    "rows": 294
+  },
+  {
+    "name": "traces | order by duration desc | 24h",
+    "first": 256,
+    "median": 126,
+    "rows": 200
+  },
+  {
+    "name": "values service_name | 24h",
+    "first": 51,
+    "median": 46,
+    "rows": 6
+  },
+  {
+    "name": "patterns sample 2000 | 24h",
+    "first": 98,
+    "median": 95,
+    "rows": 2000
+  },
+  {
+    "name": "service map edges | 24h",
+    "first": 532,
+    "median": 467,
+    "rows": 7
+  },
+  {
+    "name": "service map nodes | 24h",
+    "first": 191,
+    "median": 184,
+    "rows": 6
+  },
+  {
+    "name": "heatmap | 24h",
+    "first": 50,
+    "median": 49,
+    "rows": 624
+  },
+  {
+    "name": "chart p99 by service | 24h",
+    "first": 133,
+    "median": 134,
+    "rows": 294
+  },
+  {
+    "name": "chart count by level table | 24h",
+    "first": 50,
+    "median": 47,
+    "rows": 4
+  },
+  {
+    "name": "logs all | rows | 7d",
+    "first": 35,
+    "median": 30,
+    "rows": 200
+  },
+  {
+    "name": "logs all | histogram | 7d",
+    "first": 173,
+    "median": 202,
+    "rows": 228
+  },
+  {
+    "name": "logs all | facets | 7d",
+    "first": 215,
+    "median": 209,
+    "rows": 1
+  },
+  {
+    "name": "logs level:error service:checkout | rows | 7d",
+    "first": 31,
+    "median": 28,
+    "rows": 200
+  },
+  {
+    "name": "logs level:error service:checkout | histogram | 7d",
+    "first": 20,
+    "median": 19,
+    "rows": 57
+  },
+  {
+    "name": "logs level:error service:checkout | facets | 7d",
+    "first": 77,
+    "median": 58,
+    "rows": 1
+  },
+  {
+    "name": "logs text \"slow query\" | rows | 7d",
+    "first": 31,
+    "median": 30,
+    "rows": 200
+  },
+  {
+    "name": "logs text \"slow query\" | histogram | 7d",
+    "first": 60,
+    "median": 57,
+    "rows": 57
+  },
+  {
+    "name": "logs text \"slow query\" | facets | 7d",
+    "first": 106,
+    "median": 114,
+    "rows": 1
+  },
+  {
+    "name": "logs attribute | rows | 7d",
+    "first": 29,
+    "median": 25,
+    "rows": 200
+  },
+  {
+    "name": "logs attribute | histogram | 7d",
+    "first": 30,
+    "median": 31,
+    "rows": 228
+  },
+  {
+    "name": "logs attribute | facets | 7d",
+    "first": 80,
+    "median": 77,
+    "rows": 1
+  },
+  {
+    "name": "traces all | rows | 7d",
+    "first": 35,
+    "median": 36,
+    "rows": 200
+  },
+  {
+    "name": "traces all | histogram | 7d",
+    "first": 119,
+    "median": 125,
+    "rows": 114
+  },
+  {
+    "name": "traces all | facets | 7d",
+    "first": 253,
+    "median": 249,
+    "rows": 1
+  },
+  {
+    "name": "traces duration:>50ms | rows | 7d",
+    "first": 37,
+    "median": 32,
+    "rows": 200
+  },
+  {
+    "name": "traces duration:>50ms | histogram | 7d",
+    "first": 19,
+    "median": 19,
+    "rows": 114
+  },
+  {
+    "name": "traces duration:>50ms | facets | 7d",
+    "first": 212,
+    "median": 71,
+    "rows": 1
+  },
+  {
+    "name": "traces status:error service:payment | rows | 7d",
+    "first": 56,
+    "median": 38,
+    "rows": 200
+  },
+  {
+    "name": "traces status:error service:payment | histogram | 7d",
+    "first": 19,
+    "median": 19,
+    "rows": 57
+  },
+  {
+    "name": "traces status:error service:payment | facets | 7d",
+    "first": 48,
+    "median": 50,
+    "rows": 1
+  },
+  {
+    "name": "logs | group by service (top 10) | 7d",
+    "first": 224,
+    "median": 180,
+    "rows": 342
+  },
+  {
+    "name": "traces | order by duration desc | 7d",
+    "first": 575,
+    "median": 567,
+    "rows": 200
+  },
+  {
+    "name": "values service_name | 7d",
+    "first": 176,
+    "median": 154,
+    "rows": 6
+  },
+  {
+    "name": "patterns sample 2000 | 7d",
+    "first": 108,
+    "median": 104,
+    "rows": 2000
+  },
+  {
+    "name": "service map edges | 7d",
+    "first": 2422,
+    "median": 2313,
+    "rows": 7
+  },
+  {
+    "name": "service map nodes | 7d",
+    "first": 489,
+    "median": 486,
+    "rows": 6
+  },
+  {
+    "name": "heatmap | 7d",
+    "first": 132,
+    "median": 129,
+    "rows": 741
+  },
+  {
+    "name": "chart p99 by service | 7d",
+    "first": 657,
+    "median": 720,
+    "rows": 342
+  },
+  {
+    "name": "chart count by level table | 7d",
+    "first": 255,
+    "median": 174,
+    "rows": 4
+  },
+  {
+    "name": "trace waterfall | ±1d",
+    "first": 18,
+    "median": 16,
+    "rows": 1
+  },
+  {
+    "name": "logs of a trace | ±1d",
+    "first": 18,
+    "median": 16,
+    "rows": 2
+  }
+]
