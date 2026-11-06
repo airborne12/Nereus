@@ -158,6 +158,23 @@ test('facets list top values with counts from a sample, honouring the query', { 
   assert.ok(svc.values.reduce((s: number, v: any) => s + v.n, 0) <= body.sampled);
 });
 
+test('facets: a filtered field keeps its other values; other filters still apply', { skip: !enabled }, async () => {
+  const filters = JSON.stringify([{ field: 'service_name', values: ['payment'] }, { field: 'severity_text', values: ['ERROR'] }]);
+  const { status, body } = await get('/api/facets', { source: 'logs', from, to, filters });
+  assert.equal(status, 200);
+  const svc = body.facets.find((f: any) => f.field === 'service_name');
+  const lvl = body.facets.find((f: any) => f.field === 'severity_text');
+  const pod = body.facets.find((f: any) => f.field === 'k8s.pod.name');
+  assert.ok(svc.values.length > 1 && svc.values.some((v: any) => v.v === 'cart'), 'other services stay listed');
+  assert.ok(svc.values.every((v: any) => v.n > 0));
+  assert.ok(lvl.values.length > 1, 'other levels stay listed');
+  // service_name ignores its own filter but keeps level:ERROR; the pods follow both filters.
+  const errorsOnly = await get('/api/facets', { source: 'logs', from, to, filters: JSON.stringify([{ field: 'severity_text', values: ['ERROR'] }]) });
+  assert.deepEqual(svc.values, errorsOnly.body.facets.find((f: any) => f.field === 'service_name').values);
+  assert.ok(pod.values.every((v: any) => /^payment-/.test(v.v)), JSON.stringify(pod.values));
+  assert.ok(svc.sampled >= pod.sampled, 'each facet reports its own sample');
+});
+
 test('service map: calls between services match a reference join; nodes count entry spans', { skip: !enabled }, async () => {
   const { status, body } = await get('/api/service-map', { from, to });
   assert.equal(status, 200);

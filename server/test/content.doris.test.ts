@@ -152,7 +152,7 @@ test('alerts fire on entering ALERT, resolve on leaving it, and keep a history',
 });
 
 test('charts: time series by group, table and number', { skip }, async () => {
-  const [{ t }] = await doris.query(`SELECT max(timestamp) AS t FROM ${db}.otel_traces`) as any[];
+  const [{ t }] = await doris.query(`SELECT max(timestamp) AS t FROM ${db}.otel_traces WHERE service_name = 'frontend'`) as any[];
   const to = new Date(Date.parse(`${String(t).replace(' ', 'T')}Z`) + 1000).toISOString();
   const from = new Date(Date.parse(to) - 3 * 3600_000).toISOString();
   const line = await call('POST', '/api/chart', member, { source: 'traces', display: 'line', series: [{ agg: 'count' }, { agg: 'p99', field: 'duration' }], groupBy: 'service', from, to });

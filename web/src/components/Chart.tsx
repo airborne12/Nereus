@@ -15,20 +15,27 @@ export function formatValue(v: unknown): string {
   return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 3 });
 }
 
+/** What a result's rows look like: rows of another shape cannot be drawn as this chart. */
+const shapeOf = (def: api.ChartDef | null) => JSON.stringify(def && [def.display, def.groupBy ?? '', def.series]);
+
 export function useChart(def: api.ChartDef | null, range: api.Range) {
-  const [state, setState] = useState<{ data: api.ChartResult | null; error: string | null; loading: boolean }>({ data: null, error: null, loading: false });
+  const [state, setState] = useState<{ data: api.ChartResult | null; shape: string; error: string | null; loading: boolean }>(
+    { data: null, shape: '', error: null, loading: false });
   const key = JSON.stringify([def, range.from, range.to]);
   useEffect(() => {
     if (!def) return;
     const ac = new AbortController();
+    const shape = shapeOf(def);
     setState((s) => ({ ...s, loading: true, error: null }));
     api.chart(def, range, ac.signal).then(
-      (data) => !ac.signal.aborted && setState({ data, error: null, loading: false }),
-      (e) => !ac.signal.aborted && setState({ data: null, error: String(e.message ?? e), loading: false }),
+      (data) => !ac.signal.aborted && setState({ data, shape, error: null, loading: false }),
+      (e) => !ac.signal.aborted && setState({ data: null, shape, error: String(e.message ?? e), loading: false }),
     );
     return () => ac.abort();
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  return state;
+  // While a new result loads, the previous one stays up (no flicker on refresh) only if it has the
+  // same shape; a line result shown as a table would list every group once per time bucket.
+  return state.shape === shapeOf(def) ? state : { ...state, data: null };
 }
 
 interface Line {

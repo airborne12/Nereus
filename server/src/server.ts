@@ -214,13 +214,31 @@ export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, 
       const source = sourceParam(url);
       const asked = param(url, 'fields', false)?.split(',').filter(Boolean);
       const names = asked ?? defaultFacetFields(source, await fields(source)).slice(0, 40);
-      const sql = facetsSql(source, searchSpec(url), names);
-      const [row] = await doris.query(sql);
-      const facets = names.map((field, i) => {
-        const top = row?.[`f${i}`] ? (JSON.parse(String(row[`f${i}`])) as Record<string, number>) : {};
-        return { field, values: Object.entries(top).map(([v, n]) => ({ v, n: Number(n) })) };
+      const spec = searchSpec(url);
+      // A field with a filter lists its values without its own filter, so more of them can be
+      // picked (values of one field are ORed); every other filter still applies. Unfiltered
+      // fields share one query with all filters.
+      const filtered = names.filter((n) => (spec.filters ?? []).some((f) => f.field === n));
+      const groups = [
+        { fields: names.filter((n) => !filtered.includes(n)), spec },
+        ...filtered.map((n) => ({ fields: [n], spec: { ...spec, filters: (spec.filters ?? []).filter((f) => f.field !== n) } })),
+      ].filter((g) => g.fields.length > 0);
+      const results = await Promise.all(groups.map(async (g) => {
+        const sql = facetsSql(source, g.spec, g.fields);
+        return { g, sql, row: (await doris.query(sql))[0] };
+      }));
+      const byField = new Map<string, { field: string; sampled: number; values: { v: string; n: number }[] }>();
+      for (const { g, row } of results) {
+        g.fields.forEach((field, i) => {
+          const top = row?.[`f${i}`] ? (JSON.parse(String(row[`f${i}`])) as Record<string, number>) : {};
+          byField.set(field, { field, sampled: Number(row?.__sampled ?? 0), values: Object.entries(top).map(([v, n]) => ({ v, n: Number(n) })) });
+        });
+      }
+      const base = results.find((r) => r.g.spec === spec);
+      return send(res, 200, {
+        sampled: base ? Number(base.row?.__sampled ?? 0) : (byField.get(names[0]!)?.sampled ?? 0),
+        facets: names.map((n) => byField.get(n)!), sql: results.map((r) => r.sql).join(';\n'),
       });
-      return send(res, 200, { sampled: Number(row?.__sampled ?? 0), facets, sql });
     }
     if (url.pathname === '/api/fields') {
       return send(res, 200, { fields: await fields(sourceParam(url)) });

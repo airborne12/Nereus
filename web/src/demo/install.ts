@@ -257,13 +257,18 @@ export async function install(): Promise<void> {
         if (path === '/api/facets') {
           const names = p.get('fields')?.split(',').filter(Boolean) ?? defaultFacetFields(source, snap.fields[source.name]!).slice(0, 40);
           const sample = rows.slice(0, 20_000);
+          // As the server: a filtered field is counted without its own filter.
           const facets = names.map((field) => {
+            const own = (spec.filters ?? []).some((f) => f.field === field);
+            const pool = own
+              ? inWindow(p, data[source.name]!).filter(matcher(source, { ...spec, filters: spec.filters!.filter((f) => f.field !== field) })).slice(0, 20_000)
+              : sample;
             const counts = new Map<string, number>();
-            for (const r of sample) {
+            for (const r of pool) {
               const v = fieldValue(source, r, field);
               if (v !== null) counts.set(v, (counts.get(v) ?? 0) + 1);
             }
-            return { field, values: [...counts.entries()].sort((x, y) => y[1] - x[1]).slice(0, 10).map(([v, n]) => ({ v, n })) };
+            return { field, sampled: pool.length, values: [...counts.entries()].sort((x, y) => y[1] - x[1]).slice(0, 10).map(([v, n]) => ({ v, n })) };
           });
           return json(200, { sampled: sample.length, facets, sql: facetsSql(source, spec, names) });
         }

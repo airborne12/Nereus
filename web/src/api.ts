@@ -126,6 +126,8 @@ export function histogram(s: Spec, groupBy: string, signal?: AbortSignal, groups
 
 export interface Facet {
   field: string;
+  /** Rows this facet was counted in: a filtered field is counted without its own filter. */
+  sampled?: number;
   values: { v: string; n: number }[];
 }
 

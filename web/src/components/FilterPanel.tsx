@@ -51,7 +51,8 @@ function FacetGroup({ facet, filter, sampled, open, onOpen, onToggle, onClear }:
           {visible.map((x) => {
             const included = Boolean(filter && !filter.exclude && filter.values.includes(x.v));
             const excluded = Boolean(filter?.exclude && filter.values.includes(x.v));
-            const pct = sampled ? Math.round((x.n / sampled) * 100) : 0;
+            const base = facet.sampled ?? sampled;
+            const pct = base ? Math.round((x.n / base) * 100) : 0;
             return (
               <div key={x.v} className={`facet-value${excluded ? ' excluded' : ''}`}>
                 <label>

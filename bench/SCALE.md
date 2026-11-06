@@ -83,6 +83,21 @@ events Event Patterns and Denoise mine.
   the (bucket, group) counts with a second top-N pass over the table; groups are now ranked with
   window functions over the counts. 7 days: 1,569 -> 180 ms; 24 hours: 209 -> 70 ms; same rows.
 
+## Bugs the faster backend exposed
+
+The browser tests had passed against the slow ASAN backend because answers arrived late; with
+the release backend two real bugs showed:
+
+- **A ticked filter value hid the field's other values.** Facets were counted with every filter,
+  the field's own included, so after ticking `service_name = payment` only `payment` was left to
+  tick. A filtered field is now counted without its own filter (its values are ORed), every other
+  filter still applies, and each facet reports its own sample size (one extra facet query per
+  filtered field).
+- **A chart could briefly draw another chart's rows.** While a new result loaded, the previous
+  one stayed on screen; after switching a grouped time series to a table, every level was listed
+  once per time bucket. The previous result now stays only when it has the same shape (display,
+  series, group by), so refreshing a dashboard still does not flicker.
+
 ## Not changed
 
 - **Service map, 7 days: 2.3 s.** It joins child spans to their parent spans (69M x 49M rows).
