@@ -18,7 +18,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "mysql2": "^3.11.5",
+    "mysql2": "^3.24.6",
     "pg": "^8.13.1"
   }
 }
