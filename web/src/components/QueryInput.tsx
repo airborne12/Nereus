@@ -30,6 +30,12 @@ export function QueryInput({ source, value, range, language = 'lucene', history 
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);
+  // The list closes a moment after the box loses focus (so a click on a suggestion still lands);
+  // focusing again within that moment must cancel the close, or the list shuts as it opens.
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (blurTimer.current) clearTimeout(blurTimer.current);
+  }, []);
 
   useEffect(() => setText(value), [value]);
   const update = (t: string) => {
@@ -109,8 +115,11 @@ export function QueryInput({ source, value, range, language = 'lucene', history 
           setOpen(true);
         }}
         onSelect={(e) => setCursor(e.currentTarget.selectionStart ?? 0)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        onFocus={() => {
+          if (blurTimer.current) clearTimeout(blurTimer.current);
+          setOpen(true);
+        }}
+        onBlur={() => { blurTimer.current = setTimeout(() => setOpen(false), 120); }}
         onKeyDown={(e) => {
           if (showList && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
             e.preventDefault();
