@@ -1,4 +1,4 @@
-// DorisStack API service: search, histogram, traces, fields; users, sessions and API keys.
+// Nereus API service: search, histogram, traces, fields; users, sessions and API keys.
 //
 // Every /api/* path except /api/auth/* needs a session cookie or `Authorization: Bearer <key>`.
 //
@@ -59,7 +59,7 @@ export interface AppOptions {
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.txt': 'text/plain; charset=utf-8',
 };
 
 /** Serve a file of the built UI; unknown paths get index.html so client routes reload. */
@@ -294,6 +294,6 @@ if (import.meta.main) {
   const db = process.env.DORIS_DB ?? 'otel';
   new AlertRunner({ store: content, doris, sources: sourcesFor(db), baseUrl: process.env.PUBLIC_URL ?? null }).start();
   createApp({ doris, db, auth, content, ingestKeys: new IngestKeys(meta), webDir }).listen(port, () => {
-    console.log(`dorisstack server listening on :${port}`);
+    console.log(`nereus server listening on :${port}`);
   });
 }

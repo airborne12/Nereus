@@ -1,6 +1,6 @@
 <!doctype html>
-<!-- A small shop that uses the DorisStack browser SDK. Open it as
-     shop.html?ds=<DorisStack address>&key=<ingestion key>[&user=<email>]; the e2e test and
+<!-- A small shop that uses the Nereus browser SDK. Open it as
+     shop.html?ds=<Nereus address>&key=<ingestion key>[&user=<email>]; the e2e test and
      web/demo/record-sessions.ts record sessions on it. -->
 <html lang="en">
 <head>
@@ -46,11 +46,11 @@
     history.replaceState({}, '', location.pathname);
     const p = new Map(Object.entries(cfg));
     const s = document.createElement('script');
-    s.src = `${p.get('ds')}/sdk/dorisstack-rum.js`;
+    s.src = `${p.get('ds')}/sdk/nereus-rum.js`;
     s.onload = () => {
-      DorisStackRUM.init({ url: p.get('ds'), apiKey: p.get('key'), service: 'acme-shop' });
+      NereusRUM.init({ url: p.get('ds'), apiKey: p.get('key'), service: 'acme-shop' });
       const email = p.get('user') || 'ada@example.com';
-      DorisStackRUM.setUser({ id: `u-${email.length * 97}`, email, name: email.split('@')[0] });
+      NereusRUM.setUser({ id: `u-${email.length * 97}`, email, name: email.split('@')[0] });
       window.dsReady = true;
     };
     document.head.appendChild(s);

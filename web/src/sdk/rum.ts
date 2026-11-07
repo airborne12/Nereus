@@ -1,21 +1,21 @@
-// DorisStack browser SDK: records sessions (rrweb) with their clicks, page views, errors, console
-// errors and network requests, and sends them to DorisStack with an ingestion key.
+// Nereus browser SDK: records sessions (rrweb) with their clicks, page views, errors, console
+// errors and network requests, and sends them to Nereus with an ingestion key.
 //
-//   <script src="https://dorisstack.example.com/sdk/dorisstack-rum.js"></script>
+//   <script src="https://nereus.example.com/sdk/nereus-rum.js"></script>
 //   <script>
-//     DorisStackRUM.init({ url: 'https://dorisstack.example.com', apiKey: 'dsi_…', service: 'shop-web' });
-//     DorisStackRUM.setUser({ id: 'u42', email: 'ada@example.com', name: 'Ada' });
+//     NereusRUM.init({ url: 'https://nereus.example.com', apiKey: 'nereus_ingest_…', service: 'shop-web' });
+//     NereusRUM.setUser({ id: 'u42', email: 'ada@example.com', name: 'Ada' });
 //   </script>
 //
 // Privacy: every input's value is masked by default (maskAllInputs), request and response bodies
 // are never recorded, clicked form fields are described without their text, and elements with
-// the class `ds-block` are not recorded at all (`ds-mask` masks their text).
+// the class `nereus-block` are not recorded at all (`nereus-mask` masks their text).
 
 import { record } from 'rrweb';
 import { Batch, describeElement, newSessionId, newTraceparent, parseTraceparent, type SdkEvent, type SessionState, shouldPropagate, touchSession } from './core.ts';
 
 export interface InitOptions {
-  /** Address of DorisStack. */
+  /** Address of Nereus. */
   url: string;
   /** An ingestion key (Team settings → Ingestion keys), not an API key. */
   apiKey: string;
@@ -39,7 +39,7 @@ export interface InitOptions {
   flushIntervalMs?: number;
 }
 
-const STORE = 'dorisstack.rum';
+const STORE = 'nereus.rum';
 let opts: Required<InitOptions> | null = null;
 let state: SessionState | null = null;
 const batch = new Batch();
@@ -197,7 +197,7 @@ function instrumentConsole(): void {
 
 export function init(o: InitOptions): void {
   if (opts) return;
-  if (!o.apiKey?.startsWith('dsi_')) throw new Error('DorisStackRUM: apiKey must be an ingestion key (dsi_…)');
+  if (!o.apiKey?.startsWith('nereus_ingest_')) throw new Error('NereusRUM: apiKey must be an ingestion key (nereus_ingest_…)');
   opts = { service: '', maskAllInputs: true, maskAllText: false, recordReplay: true, recordNetwork: true, recordConsole: true, tracePropagationTargets: [], flushIntervalMs: 5000, ...o };
   state = load();
   session();
@@ -209,8 +209,8 @@ export function init(o: InitOptions): void {
         if (batch.size > 1_000_000) void flush();
       },
       maskAllInputs: opts.maskAllInputs,
-      maskTextSelector: opts.maskAllText ? '*' : '.ds-mask',
-      blockClass: 'ds-block',
+      maskTextSelector: opts.maskAllText ? '*' : '.nereus-mask',
+      blockClass: 'nereus-block',
       // A fresh full snapshot every 5 minutes keeps any part of a long session replayable.
       checkoutEveryNms: 5 * 60_000,
       sampling: { mousemove: 50, scroll: 150, input: 'last' },
@@ -219,7 +219,7 @@ export function init(o: InitOptions): void {
   addEventListener('click', (e) => {
     const el = (e.target as Element | null)?.closest?.('a, button, [role=button], input, select, textarea, label, [onclick]') ?? (e.target as Element | null);
     // Text typed into rich-text editors, and masked or blocked parts of the page, stay out.
-    const hide = opts!.maskAllText || Boolean(el?.closest?.('[contenteditable]:not([contenteditable="false"]), .ds-mask, .ds-block'));
+    const hide = opts!.maskAllText || Boolean(el?.closest?.('[contenteditable]:not([contenteditable="false"]), .nereus-mask, .nereus-block'));
     if (el) event({ type: 'click', message: describeElement(el as unknown as Parameters<typeof describeElement>[0], hide) });
   }, { capture: true });
   addEventListener('error', (e) => event({ type: 'error', message: e.message || String(e.error), attributes: { source: e.filename, line: e.lineno, column: e.colno, stack: e.error?.stack?.slice(0, 4000) } }));

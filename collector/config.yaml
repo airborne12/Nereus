@@ -1,4 +1,4 @@
-# OpenTelemetry Collector for DorisStack.
+# OpenTelemetry Collector for Nereus.
 # Runs the upstream contrib distribution (it ships the `doris` exporter).
 # Tables are created by schema/apply.sh, so the exporter runs with create_schema: false.
 #

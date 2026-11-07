@@ -16,7 +16,7 @@ const ITEMS: { page: Page; label: string; icon: IconName; beta?: boolean }[] = [
 
 function readCollapsed(): boolean {
   try {
-    return localStorage.getItem('ds.navCollapsed') === '1';
+    return localStorage.getItem('nereus.navCollapsed') === '1';
   } catch {
     return false;
   }
@@ -44,7 +44,7 @@ export function AppShell({ page, user, favorites, onNavigate, onOpen, onLogout, 
   const [showFav, setShowFav] = useState<Record<string, boolean>>({ saved: true, dashboards: true });
   useEffect(() => {
     try {
-      localStorage.setItem('ds.navCollapsed', collapsed ? '1' : '0');
+      localStorage.setItem('nereus.navCollapsed', collapsed ? '1' : '0');
     } catch { /* private mode */ }
   }, [collapsed]);
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -53,8 +53,8 @@ export function AppShell({ page, user, favorites, onNavigate, onOpen, onLogout, 
     <div className={`shell${collapsed ? ' nav-collapsed' : ''}`}>
       <nav className="nav" aria-label="Main">
         <div className="nav-head">
-          <button type="button" className="logo" onClick={() => onNavigate('search')} aria-label="DorisStack home">
-            <span className="logo-mark">◆</span>{!collapsed && <span className="logo-text">DorisStack</span>}
+          <button type="button" className="logo" onClick={() => onNavigate('search')} aria-label="Nereus home">
+            <span className="logo-mark">◆</span>{!collapsed && <span className="logo-text">Nereus</span>}
           </button>
           {!collapsed && <span className="tz" title={`Showing time in ${tz}`}>{tz.split('/').at(-1)}</span>}
         </div>

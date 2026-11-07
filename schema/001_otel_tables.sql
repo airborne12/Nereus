@@ -1,4 +1,4 @@
--- DorisStack telemetry tables.
+-- Nereus telemetry tables.
 --
 -- Column names and types match the JSON lines that the OpenTelemetry Collector
 -- `dorisexporter` sends through Stream Load (exporter_logs.go / exporter_traces.go /

@@ -5,7 +5,7 @@ import pg from 'pg';
 
 export function metaPoolFromEnv(env: NodeJS.ProcessEnv = process.env): pg.Pool {
   const url = env.META_DATABASE_URL;
-  if (!url) throw new Error('META_DATABASE_URL is not set (e.g. postgres://user:pass@127.0.0.1:5432/dorisstack)');
+  if (!url) throw new Error('META_DATABASE_URL is not set (e.g. postgres://user:pass@127.0.0.1:5432/nereus)');
   return new pg.Pool({ connectionString: url, max: Number(env.META_POOL_SIZE ?? 10) });
 }
 

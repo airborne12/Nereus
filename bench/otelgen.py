@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic OpenTelemetry data for DorisStack, written the way `dorisexporter` writes it.
+"""Synthetic OpenTelemetry data for Nereus, written the way `dorisexporter` writes it.
 
 Each record is the JSON line the exporter would send (same field names, time format
 "YYYY-MM-DD HH:MM:SS.ffffff", trace duration in microseconds, is_root flag; span_kind and
@@ -193,7 +193,7 @@ def stream_load(host, port, auth, db, table, rows, group_commit):
     if group_commit:
         headers["group_commit"] = group_commit
     else:
-        headers["label"] = f"dorisstack_{db}_{table}_{uuid.uuid4()}"
+        headers["label"] = f"nereus_{db}_{table}_{uuid.uuid4()}"
     conn = http.client.HTTPConnection(host, port, timeout=120)
     conn.request("PUT", f"/api/{db}/{table}/_stream_load", body=body, headers=headers)
     resp = conn.getresponse()

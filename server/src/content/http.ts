@@ -76,7 +76,7 @@ export function contentRoutes(store: ContentStore, send: Send, fetchImpl: typeof
       admin(user);
       await readJson(req);
       try {
-        await postWebhook(await store.webhookUrl(Number(x[1])), { text: '[TEST] DorisStack webhook test', state: 'TEST' }, fetchImpl);
+        await postWebhook(await store.webhookUrl(Number(x[1])), { text: '[TEST] Nereus webhook test', state: 'TEST' }, fetchImpl);
       } catch (e) {
         if (e instanceof AuthError) throw e;
         throw new AuthError(502, `the webhook did not accept the test message: ${(e as Error).message}`);

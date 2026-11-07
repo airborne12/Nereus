@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create the DorisStack tables.
+# Create the Nereus tables.
 # Usage: schema/apply.sh [-h host] [-P port] [-u user] [-p password] [-d db] [-r retention_days] [-n replication_num]
 set -euo pipefail
 

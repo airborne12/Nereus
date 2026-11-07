@@ -19,7 +19,7 @@ import { parseTime } from '../query/build.ts';
 import { RateLimiter } from './limit.ts';
 import { sessionForTraceSql, sessionRowsSql, sessionsListSql } from './query.ts';
 
-export const INGEST_KEY_PREFIX = 'dsi';
+export const INGEST_KEY_PREFIX = 'nereus_ingest';
 // A full snapshot of a heavy page can be several MB; the SDK batches everything else under 1.5 MB.
 const MAX_INGEST_BODY = 10 * 1024 * 1024;
 
@@ -47,7 +47,7 @@ export class IngestKeys {
     if (clean.length === 0 || clean.length > 100) throw new AuthError(400, 'name must have 1 to 100 characters');
     const key = newToken(INGEST_KEY_PREFIX);
     const r = await this.db.query('INSERT INTO ingest_keys (name, prefix, key_hash, created_by) VALUES ($1, $2, $3, $4) RETURNING id',
-      [clean, key.slice(0, 12), tokenHash(key), userId]);
+      [clean, key.slice(0, INGEST_KEY_PREFIX.length + 5), tokenHash(key), userId]);
     return { key, id: Number(r.rows[0].id) };
   }
 

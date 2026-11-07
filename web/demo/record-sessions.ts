@@ -50,7 +50,7 @@ async function visit(user: string, steps: (p: Page) => Promise<void>): Promise<s
   await p.waitForFunction(() => (window as any).dsReady === true);
   await steps(p);
   await p.waitForTimeout(400);
-  const id = await p.evaluate(async () => { await (window as any).DorisStackRUM.flush(); return (window as any).DorisStackRUM.sessionId(); });
+  const id = await p.evaluate(async () => { await (window as any).NereusRUM.flush(); return (window as any).NereusRUM.sessionId(); });
   await ctx.close();
   return id;
 }

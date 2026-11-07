@@ -1,4 +1,4 @@
-# DorisStack at scale: 103M logs, 69M spans
+# Nereus at scale: 103M logs, 69M spans
 
 Every query the UI sends, built by the server's own SQL builders (`server/bench/ui-queries.ts`), on
 7 days of data: **103,193,950 log rows and 68,982,800 spans** (13.5 GB in Doris), measured on

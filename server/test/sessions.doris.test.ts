@@ -64,7 +64,7 @@ test('ingestion keys: admins only, write-only, revocable; CORS for any page', { 
   const made = await call('POST', '/api/ingest-keys', admin, { name: 'shop' });
   assert.equal(made.status, 201);
   const key = made.body.key as string;
-  assert.match(key, /^dsi_/);
+  assert.match(key, /^nereus_ingest_/);
   assert.equal((await call('GET', '/api/ingest-keys', admin)).body.keys[0].name, 'shop');
   assert.equal((await call('GET', '/api/fields?source=logs', key)).status, 401, 'an ingestion key reads nothing');
   assert.equal((await call('GET', '/api/sessions?from=2026-01-01T00:00:00Z&to=2026-01-02T00:00:00Z', key)).status, 401);
@@ -141,7 +141,7 @@ test('ingestion is rate limited per client address and per key, with Retry-After
   assert.deepEqual(byKey.sort(), [200, 200, 200, 429]);
   // Per address: 5 attempts, even with a wrong key (checked before the key).
   const statuses: number[] = [];
-  for (let i = 0; i < 6; i++) statuses.push((await post('dsi_wrong', '10.9.9.9')).status);
+  for (let i = 0; i < 6; i++) statuses.push((await post('nereus_ingest_wrong', '10.9.9.9')).status);
   assert.deepEqual(statuses, [401, 401, 401, 401, 401, 429]);
   const r = await post(key, '10.9.9.9');
   assert.equal(r.status, 429);

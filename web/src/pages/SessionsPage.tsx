@@ -96,9 +96,9 @@ export function SessionsPage({ go }: { go: (url: string) => void }) {
       {items && items.length === 0 && (
         <div className="empty">
           No sessions in this time range. Add the browser SDK to your site:
-          <pre className="sql">{`<script src="${window.location.origin}/sdk/dorisstack-rum.js"></script>
+          <pre className="sql">{`<script src="${window.location.origin}/sdk/nereus-rum.js"></script>
 <script>
-  DorisStackRUM.init({ url: '${window.location.origin}', apiKey: 'dsi_…', service: 'my-site' });
+  NereusRUM.init({ url: '${window.location.origin}', apiKey: 'nereus_ingest_…', service: 'my-site' });
 </script>`}</pre>
           An admin creates the ingestion key under Team settings.
         </div>

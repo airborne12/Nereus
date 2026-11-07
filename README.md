@@ -1,14 +1,17 @@
-# DorisStack
+# Nereus
 
-An open-source observability stack (logs, traces, metrics in one place) on Apache Doris:
-OpenTelemetry Collector for ingestion, Doris for storage and search, and a self-built
-API service and web UI. "DorisStack" is a working code name.
+Observability on [Apache Doris](https://doris.apache.org): logs, traces, metrics and browser
+sessions in one place. The OpenTelemetry Collector writes into Doris; Nereus is the API service and
+web UI on top: search in Lucene or SQL with live tail, event patterns and event deltas, a service
+map, saved searches, charts, dashboards and alerts, and session replay linked to backend traces. Its
+layout and interactions follow ClickStack (HyperDX).
 
-Design: <https://claude.ai/artifact/RUahRwDXWZPii2gSTZCU67>
+In Greek myth Nereus is the Old Man of the Sea, husband of Doris. He knows everything, and whoever
+holds on to him gets the truth out of him: what observability is for.
 
-Status: **M0 and M1 done, M2 done**: every ClickStack page is built. Tables, collector configuration, a single-host compose
-file and ingestion checks (M0); the search compiler, the API, the search page, and users, login
-and API keys with metadata in PostgreSQL (M1). Configurable data sources come next.
+Status: the ClickStack feature set is built and measured at 103M logs / 69M spans
+([bench/SCALE.md](bench/SCALE.md)). Not yet: data sources configured in the UI (the tables are
+the ones in `schema/`), and metrics other than gauges in Chart explorer.
 
 ## Layout
 
@@ -31,7 +34,7 @@ and API keys with metadata in PostgreSQL (M1). Configurable data sources come ne
 ```bash
 cd server && npm install
 DORIS_HOST=<fe> DORIS_PORT=9030 DORIS_DB=otel PORT=8090 \
-  META_DATABASE_URL=postgres://user:pass@<pg>:5432/dorisstack node src/server.ts
+  META_DATABASE_URL=postgres://user:pass@<pg>:5432/nereus node src/server.ts
 curl -G localhost:8090/api/search --data-urlencode source=logs \
   --data-urlencode 'q=level:ERROR "timeout after" k8s.pod.name:checkout-*' \
   --data-urlencode from=2026-11-04T00:00:00Z --data-urlencode to=2026-11-05T00:00:00Z
@@ -74,9 +77,11 @@ Every `/api/*` call except `/api/auth/*` needs a login: the browser's session co
 Users, sessions and keys: passwords are scrypt hashes, session and API key tokens are 256-bit
 random values stored as SHA-256 hashes, sessions last 7 days, 10 failed logins per address and
 email in 5 minutes are throttled, and disabling a user ends their sessions and stops their keys.
-`language=sql`, `select` and `orderBy` are the user's own SQL, run as given (one statement; `;` is
-refused), as in ClickStack. **Give the API service a Doris account that can only read the telemetry
-database**: then such SQL can do no more than read telemetry, which every signed-in user may do anyway.
+`language=sql`, `select` and `orderBy` are the user's own SQL, as in ClickStack. Each is checked
+before use (`sqlFragment`): one expression over the source's columns, with no subquery (so no table
+functions such as `http()` or `s3()`, which reach other hosts), no `INTO OUTFILE`, no `LIMIT`, no
+comments and no backslashes. Run the service as a Doris user that can only read the telemetry
+database (see [Security](#security)): every signed-in user may read all telemetry, and nothing else.
 
 State-changing requests must be JSON or DELETE, which a browser only sends cross-site after a CORS
 preflight this server never answers; the cookie is HttpOnly and SameSite=Lax.
@@ -160,16 +165,16 @@ Browser tests (Playwright + Chromium) drive the built page against a live Doris 
 
 ## Client sessions
 
-The browser SDK (`web/src/sdk`, served as `/sdk/dorisstack-rum.js`, 61 kB gzipped) records a
+The browser SDK (`web/src/sdk`, served as `/sdk/nereus-rum.js`, 61 kB gzipped) records a
 session with [rrweb](https://github.com/rrweb-io/rrweb) and its clicks, page views, errors,
 console errors and network requests (method, URL, status, duration):
 
 ```html
-<script src="https://dorisstack.example.com/sdk/dorisstack-rum.js"></script>
+<script src="https://nereus.example.com/sdk/nereus-rum.js"></script>
 <script>
-  DorisStackRUM.init({ url: 'https://dorisstack.example.com', apiKey: 'dsi_…', service: 'shop-web' });
-  DorisStackRUM.setUser({ id: 'u42', email: 'ada@example.com', name: 'Ada' });
-  // DorisStackRUM.track('checkout', { total: 42 }) adds a custom event
+  NereusRUM.init({ url: 'https://nereus.example.com', apiKey: 'nereus_ingest_…', service: 'shop-web' });
+  NereusRUM.setUser({ id: 'u42', email: 'ada@example.com', name: 'Ada' });
+  // NereusRUM.track('checkout', { total: 42 }) adds a custom event
 </script>
 ```
 
@@ -190,16 +195,18 @@ request.
 Privacy and security:
 
 - Every input value is masked by default (`maskAllInputs`); `maskAllText: true` masks all text,
-  class `ds-mask` masks an element's text and `ds-block` leaves it out. Request and response
+  class `nereus-mask` masks an element's text and `nereus-block` leaves it out. Request and response
   bodies are never recorded; a clicked form field is described without its text.
-- Ingestion keys (`dsi_…`, Team settings, admins) are meant to sit in public pages: they only
+- Ingestion keys (`nereus_ingest_…`, Team settings, admins) are meant to sit in public pages: they only
   write session data and are refused by every other endpoint (own table and prefix). Anyone with
   the key can send data, as with ClickStack; revoke a leaked key. The endpoint answers CORS for any
   origin without credentials, takes up to 10 MB a request and rejects events more than a day from
   the server clock. It is rate limited per client address (`INGEST_RATE_PER_CLIENT`, 5/s, burst
   30; checked before the key, so guessing keys costs no database lookups) and per key
   (`INGEST_RATE_PER_KEY`, 100/s, burst 400: a site's visitors share one key), answering 429 with
-  `Retry-After`; set `TRUST_PROXY=1` behind a proxy to use `X-Forwarded-For`. Key lookups are
+  `Retry-After`. Behind proxies, set `TRUST_PROXY` to their number (usually `1`): the client is then
+  the `X-Forwarded-For` entry they added, counted from the right; entries a client writes itself
+  are ignored. Key lookups are
   cached for 10 s, so a revoked key stops working within 10 s.
 - Replays render the recorded DOM in rrweb's iframe sandbox without `allow-scripts`, so recorded
   scripts do not run. The viewer's browser does load the recorded page's images and styles.
@@ -256,3 +263,48 @@ throughput is far below a release build and only shows the pipeline works.
 3. **Every `search()` field needs an inverted index**, or the query fails. The compiler
    sends only indexed fields to `search()` and the rest to SQL.
 4. No `count_if` / `sum_if`; the compiler writes `sum(if(cond, 1, 0))`.
+
+## Security
+
+Deployment checklist:
+
+- **A Doris user for the service that can only read telemetry.** The service also writes session
+  rows. The server test suite passes with exactly these privileges:
+
+  ```sql
+  CREATE USER 'nereus'@'%' IDENTIFIED BY '<password>';
+  GRANT SELECT_PRIV ON otel.* TO 'nereus'@'%';
+  GRANT LOAD_PRIV ON otel.otel_sessions TO 'nereus'@'%';
+  -- Optional second layer: refuse table functions that reach other hosts, and exports.
+  CREATE SQL_BLOCK_RULE nereus_no_external PROPERTIES (
+    'sql' = '(?i)\\b(http|s3|hdfs|local)\\s*\\(|\\binto\\s+outfile\\b', 'global' = 'false', 'enable' = 'true');
+  SET PROPERTY FOR 'nereus' 'sql_block_rules' = 'nereus_no_external';
+  ```
+
+  Then start the service with `DORIS_USER=nereus DORIS_PASSWORD=...`. The block rule looks at the
+  SQL text, so a search for the literal words `http(` or `into outfile` is refused as well. Give the
+  collector its own Doris user with `LOAD_PRIV` on `otel.*`.
+- **HTTPS** in front of the service, with `COOKIE_SECURE=1`; `TRUST_PROXY` as above; `PUBLIC_URL`
+  for the links in alert messages.
+- **Webhooks** are added by admins only and members never see their URLs: they are the one place
+  the service sends requests to an address someone typed.
+- **Ingestion keys** are public by design (they sit in web pages) and can only write session rows;
+  see [Client sessions](#client-sessions) for the limits.
+
+Report vulnerabilities privately through GitHub's security advisories for this repository.
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE). The built UI (`third-party-licenses.txt`) and the
+browser SDK (its header comment) carry the licenses of the open-source packages bundled into them.
+
+## Acknowledgements
+
+- [ClickStack / HyperDX](https://github.com/hyperdxio/hyperdx) (MIT): Nereus follows its layout,
+  features and interactions; the code here is our own.
+- [rrweb](https://github.com/rrweb-io/rrweb) (MIT) records and replays browser sessions.
+- [OpenTelemetry](https://opentelemetry.io) and its Collector's Doris exporter carry the data in.
+
+Apache Doris, Doris and the Doris logo are trademarks of the Apache Software Foundation. Nereus is
+an independent project, not affiliated with or endorsed by the ASF. ClickStack, HyperDX and
+ClickHouse are trademarks of ClickHouse, Inc.

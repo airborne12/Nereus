@@ -323,7 +323,7 @@ test('admin adds a webhook; an alert on the saved search fires and is listed', a
   await page.getByRole('cell', { name: '#oncall', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Send test' }).click();
   await page.getByRole('status').filter({ hasText: 'Test message sent' }).waitFor();
-  assert.equal(received.at(-1)!.text, '[TEST] DorisStack webhook test');
+  assert.equal(received.at(-1)!.text, '[TEST] Nereus webhook test');
 
   await page.getByRole('list', { name: 'Favorite saved searches' }).getByRole('button', { name: 'Payment errors' }).click();
   await page.locator('.saved-bar').getByRole('button', { name: /Alerts/ }).click();
@@ -548,9 +548,9 @@ test('client sessions: the SDK on another site records a session that replays, m
   await page.getByLabel('Ingestion key name').fill('acme shop');
   await page.getByRole('button', { name: 'Create ingestion key' }).click();
   const key = await page.getByTestId('new-ingest-key').innerText();
-  assert.match(key, /^dsi_/);
+  assert.match(key, /^nereus_ingest_/);
 
-  // The shop runs on its own origin and loads the SDK from DorisStack.
+  // The shop runs on its own origin and loads the SDK from Nereus.
   const { readFileSync } = await import('node:fs');
   const html = readFileSync(new URL('../sdk-example/shop.html', import.meta.url), 'utf8');
   // The shop's backend is "instrumented": it continues the browser's traceparent in a server span.
@@ -585,7 +585,7 @@ test('client sessions: the SDK on another site records a session that replays, m
   await sp.click('#checkout');
   await sp.locator('#message', { hasText: 'Payment failed (503)' }).waitFor();
   await sp.waitForTimeout(300);
-  const sid = await sp.evaluate(async () => { await (window as any).DorisStackRUM.flush(); return (window as any).DorisStackRUM.sessionId(); });
+  const sid = await sp.evaluate(async () => { await (window as any).NereusRUM.flush(); return (window as any).NereusRUM.sessionId(); });
   await visitor.close();
   await new Promise<void>((r) => shopServer.close(() => r()));
 

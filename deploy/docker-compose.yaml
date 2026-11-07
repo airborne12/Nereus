@@ -1,15 +1,15 @@
-# DorisStack single-host stack: Doris FE + BE, schema init, OTel Collector, PostgreSQL for
-# metadata, the DorisStack API + UI, and telemetrygen as a demo traffic source.
+# Nereus single-host stack: Doris FE + BE, schema init, OTel Collector, PostgreSQL for
+# metadata, the Nereus API + UI, and telemetrygen as a demo traffic source.
 #
 #   cd deploy && docker compose up -d
 #   UI: http://localhost:8090 (first visit creates the admin account)
 #   OTLP: grpc localhost:4317, http localhost:4318; Doris MySQL: localhost:9030
 #
 # DORIS_VERSION must be a release with search() (4.x); see README.
-name: dorisstack
+name: nereus
 
 networks:
-  dorisstack:
+  nereus:
     ipam:
       config:
         - subnet: 172.30.80.0/24
@@ -27,7 +27,7 @@ services:
     volumes:
       - fe-meta:/opt/apache-doris/fe/doris-meta
     networks:
-      dorisstack:
+      nereus:
         ipv4_address: 172.30.80.2
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8030/api/bootstrap | grep -q '\"code\":0'"]
@@ -46,7 +46,7 @@ services:
       doris-fe:
         condition: service_healthy
     networks:
-      dorisstack:
+      nereus:
         ipv4_address: 172.30.80.3
 
   schema-init:
@@ -67,7 +67,7 @@ services:
     environment:
       RETENTION_DAYS: ${RETENTION_DAYS:-30}
     networks:
-      dorisstack:
+      nereus:
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:${OTELCOL_VERSION:-0.164.0}
@@ -83,24 +83,24 @@ services:
       schema-init:
         condition: service_completed_successfully
     networks:
-      dorisstack:
+      nereus:
 
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: dorisstack
-      POSTGRES_PASSWORD: ${META_PASSWORD:-dorisstack}
-      POSTGRES_DB: dorisstack
+      POSTGRES_USER: nereus
+      POSTGRES_PASSWORD: ${META_PASSWORD:-nereus}
+      POSTGRES_DB: nereus
     volumes:
       - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dorisstack"]
+      test: ["CMD-SHELL", "pg_isready -U nereus"]
       interval: 5s
       retries: 30
     networks:
-      dorisstack:
+      nereus:
 
-  dorisstack:
+  nereus:
     build:
       context: ..
       dockerfile: Dockerfile
@@ -108,9 +108,16 @@ services:
       DORIS_HOST: 172.30.80.2
       DORIS_PORT: "9030"
       DORIS_DB: otel
-      META_DATABASE_URL: postgres://dorisstack:${META_PASSWORD:-dorisstack}@postgres:5432/dorisstack
+      META_DATABASE_URL: postgres://nereus:${META_PASSWORD:-nereus}@postgres:5432/nereus
       # Set to 1 behind HTTPS.
       COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      # Address of the UI, for the links in alert messages.
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8090}
+      # Number of trusted proxies in front of the service (0: none), for per-client ingestion limits.
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      # Production: a Doris user that can only read telemetry (README, Security).
+      # DORIS_USER: nereus
+      # DORIS_PASSWORD: ${NEREUS_DORIS_PASSWORD}
     ports:
       - "8090:8090"
     depends_on:
@@ -119,7 +126,7 @@ services:
       schema-init:
         condition: service_completed_successfully
     networks:
-      dorisstack:
+      nereus:
 
   # Demo traffic. Remove when real applications send OTLP.
   telemetrygen:
@@ -129,7 +136,7 @@ services:
     depends_on:
       - otel-collector
     networks:
-      dorisstack:
+      nereus:
 
 volumes:
   fe-meta:

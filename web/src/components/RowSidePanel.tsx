@@ -285,7 +285,7 @@ interface Props {
 
 function readWidth(): number {
   try {
-    return Number(localStorage.getItem('ds.panelWidth')) || 80;
+    return Number(localStorage.getItem('nereus.panelWidth')) || 80;
   } catch {
     return 80;
   }
@@ -308,7 +308,7 @@ export function RowSidePanel({ source, row, actions, onClose, onOpenRow }: Props
   }, [onClose]);
   useEffect(() => {
     try {
-      localStorage.setItem('ds.panelWidth', String(width));
+      localStorage.setItem('nereus.panelWidth', String(width));
     } catch { /* private mode */ }
   }, [width]);
 

@@ -31,7 +31,7 @@ export function LoginPage({ mode, onDone }: Props) {
   return (
     <div className="login">
       <form className="login-card" onSubmit={submit}>
-        <h1>DorisStack</h1>
+        <h1>Nereus</h1>
         <p className="muted">
           {mode === 'setup' ? 'Create the first account. It becomes the administrator.' : 'Sign in to search your logs and traces.'}
         </p>

@@ -159,7 +159,7 @@ export class AuthStore {
     const key = newToken(API_KEY_PREFIX);
     const r = await this.db.query(
       'INSERT INTO api_keys (user_id, name, prefix, key_hash) VALUES ($1, $2, $3, $4) RETURNING *',
-      [userId, clean, key.slice(0, 12), tokenHash(key)]);
+      [userId, clean, key.slice(0, API_KEY_PREFIX.length + 5), tokenHash(key)]);
     return { key, apiKey: toApiKey(r.rows[0]) };
   }
 

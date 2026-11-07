@@ -4,7 +4,7 @@ import { IngestKeys } from '../src/sessions/http.ts';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
-import { hashPassword, newToken, tokenHash, verifyPassword } from '../src/auth/secrets.ts';
+import { API_KEY_PREFIX, hashPassword, newToken, tokenHash, verifyPassword } from '../src/auth/secrets.ts';
 import { ContentStore } from '../src/content/store.ts';
 import { AuthStore } from '../src/auth/store.ts';
 import { Doris, configFromEnv } from '../src/db.ts';
@@ -22,10 +22,10 @@ test('passwords hash with a salt and verify', async () => {
 });
 
 test('tokens are 256-bit and hash to 32 bytes', () => {
-  const t = newToken('dsk');
-  assert.match(t, /^dsk_[\w-]{43}$/);
+  const t = newToken('nereus_api');
+  assert.match(t, /^nereus_api_[\w-]{43}$/);
   assert.equal(tokenHash(t).length, 32);
-  assert.notEqual(newToken('dsk'), t);
+  assert.notEqual(newToken('nereus_api'), t);
 });
 
 let base = '';
@@ -73,7 +73,7 @@ test('setup creates the first admin once and logs them in', { skip }, async () =
   const first = await call('POST', '/api/auth/setup', { body: { email: 'admin@example.com', name: 'Ada', password: 'adminpass1' } });
   assert.equal(first.status, 201);
   assert.equal(first.body.user.role, 'admin');
-  assert.match(first.cookie!, /^ds_session=dss_/);
+  assert.match(first.cookie!, /^nereus_session=nereus_session_/);
   adminCookie = first.cookie;
   const again = await call('POST', '/api/auth/setup', { body: { email: 'b@example.com', password: 'adminpass2' } });
   assert.equal(again.status, 409);
@@ -110,8 +110,8 @@ test('malformed or escaping static paths are refused', { skip }, async () => {
 test('data endpoints need a login', { skip }, async () => {
   const r = await call('GET', '/api/search?source=logs&q=&from=2026-01-01T00:00:00Z&to=2026-01-02T00:00:00Z');
   assert.equal(r.status, 401);
-  assert.equal((await call('GET', '/api/keys', { cookie: 'ds_session=dss_forged' })).status, 401);
-  assert.equal((await call('GET', '/api/keys', { bearer: 'dsk_forged' })).status, 401);
+  assert.equal((await call('GET', '/api/keys', { cookie: 'nereus_session=nereus_session_forged' })).status, 401);
+  assert.equal((await call('GET', '/api/keys', { bearer: 'nereus_api_forged' })).status, 401);
   assert.equal((await call('GET', '/api/keys', { bearer: 'not a key' })).status, 401);
 });
 
@@ -128,7 +128,7 @@ test('login: wrong password, case-insensitive email, logout ends the session', {
   assert.equal(ok.status, 200);
   assert.equal((await call('GET', '/api/keys', { cookie: ok.cookie })).status, 200);
   const out = await call('POST', '/api/auth/logout', { cookie: ok.cookie, body: {} });
-  assert.match(out.cookie!, /^ds_session=$/);
+  assert.match(out.cookie!, /^nereus_session=$/);
   assert.equal((await call('GET', '/api/keys', { cookie: ok.cookie })).status, 401);
 });
 
@@ -143,8 +143,8 @@ test('API keys: shown once, work as bearer tokens, revocation stops them', { ski
   const created = await call('POST', '/api/keys', { cookie: adminCookie, body: { name: 'ci' } });
   assert.equal(created.status, 201);
   const key = created.body.key as string;
-  assert.match(key, /^dsk_/);
-  assert.equal(created.body.apiKey.prefix, key.slice(0, 12));
+  assert.match(key, /^nereus_api_/);
+  assert.equal(created.body.apiKey.prefix, key.slice(0, API_KEY_PREFIX.length + 5), 'the type and four characters, to recognise a key');
   const list = await call('GET', '/api/keys', { bearer: key });
   assert.equal(list.status, 200);
   assert.equal(list.body.keys.length, 1);

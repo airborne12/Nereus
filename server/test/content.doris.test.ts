@@ -102,7 +102,7 @@ test('webhooks: admins only; members see names, not URLs; test message', { skip 
   assert.equal((await call('GET', '/api/webhooks', admin)).body.items[0].url, `${hookUrl}/hook`);
   assert.deepEqual(Object.keys((await call('GET', '/api/webhooks', member)).body.items[0]).sort(), ['createdAt', 'id', 'name']);
   assert.equal((await call('POST', `/api/webhooks/${hookId}/test`, admin, {})).status, 200);
-  assert.equal(received.at(-1).text, '[TEST] DorisStack webhook test');
+  assert.equal(received.at(-1).text, '[TEST] Nereus webhook test');
   const failing = await call('POST', '/api/webhooks', admin, { name: 'broken', url: `${hookUrl}/fail` });
   assert.equal((await call('POST', `/api/webhooks/${failing.body.id}/test`, admin, {})).status, 502);
 });
@@ -120,7 +120,7 @@ test('alerts fire on entering ALERT, resolve on leaving it, and keep a history',
   const end = Date.parse(`${String(t).replace(' ', 'T')}Z`) + 1000;
   const [{ n }] = await doris.query(`SELECT count(*) AS n FROM ${db}.otel_logs WHERE timestamp >= '${new Date(end - 3600_000).toISOString().replace('T', ' ').replace('Z', '')}' AND service_name = 'payment' AND severity_text IN ('ERROR', 'WARN')`) as any[];
   assert.ok(Number(n) > 5, 'the data has enough payment errors and warnings');
-  const runner = new AlertRunner({ store: content, doris, sources: sourcesFor(db), baseUrl: 'https://ds.example.com', now: () => end });
+  const runner = new AlertRunner({ store: content, doris, sources: sourcesFor(db), baseUrl: 'https://nereus.example.com', now: () => end });
   const before = received.length;
   assert.equal(await runner.tick(), 1);
   let alert = (await call('GET', `/api/alerts?savedSearchId=${searchId}`)).body.items[0];
@@ -130,7 +130,7 @@ test('alerts fire on entering ALERT, resolve on leaving it, and keep a history',
   const msg = received.at(-1);
   assert.equal(msg.state, 'ALERT');
   assert.match(msg.text, /^\[ALERT\] "Payment errors": \d+ matches in the last 1h \(alert when above 5\)$/);
-  assert.equal(msg.link, `https://ds.example.com/search?saved=${searchId}`);
+  assert.equal(msg.link, `https://nereus.example.com/search?saved=${searchId}`);
   assert.equal(await runner.tick(), 0, 'not due again within its interval');
   assert.equal((await call('GET', '/api/saved-searches')).body.items[0].alertState, 'ALERT');
 
@@ -215,7 +215,7 @@ test('tile alerts: a grouped p99 fires for the worst group; removing the tile re
 
   // Only the two tile alerts are due: the saved-search alert of the earlier test was just checked.
   await content['db'].query('UPDATE alerts SET last_checked_at = now() WHERE dashboard_id IS NULL');
-  const runner = new AlertRunner({ store: content, doris, sources: sourcesFor(db), baseUrl: 'https://ds.example.com', now: () => end });
+  const runner = new AlertRunner({ store: content, doris, sources: sourcesFor(db), baseUrl: 'https://nereus.example.com', now: () => end });
   const before = received.length;
   assert.equal(await runner.tick(), 2);
   const items = (await call('GET', `/api/alerts?dashboardId=${dash.id}`)).body.items;
@@ -228,7 +228,7 @@ test('tile alerts: a grouped p99 fires for the worst group; removing the tile re
   assert.equal(msgs.length, 2);
   const m1 = msgs.find((m: any) => m.tile.id === lt.id);
   assert.match(m1.text, new RegExp(`^\\[ALERT\\] "Latency / p99 by service": p99\\(duration\\) = [\\d.]+ for ${worst.s} in the last 1h \\(alert when above `));
-  assert.equal(m1.link, `https://ds.example.com/dashboards/${dash.id}`);
+  assert.equal(m1.link, `https://nereus.example.com/dashboards/${dash.id}`);
   assert.equal(m1.tile.group, worst.s);
   assert.equal((await call('GET', `/api/alerts/${a1.body.id}/history`)).body.items[0].group, worst.s);
 

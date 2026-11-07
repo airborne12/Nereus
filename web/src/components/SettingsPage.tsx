@@ -211,9 +211,9 @@ function IngestKeys() {
       {created && (
         <div className="key-shown" role="status">
           <span className="small">Copy it now; it is shown once:</span> <code data-testid="new-ingest-key">{created}</code>
-          <pre className="sql">{`<script src="${window.location.origin}/sdk/dorisstack-rum.js"></script>
+          <pre className="sql">{`<script src="${window.location.origin}/sdk/nereus-rum.js"></script>
 <script>
-  DorisStackRUM.init({ url: '${window.location.origin}', apiKey: '${created}', service: 'my-site' });
+  NereusRUM.init({ url: '${window.location.origin}', apiKey: '${created}', service: 'my-site' });
 </script>`}</pre>
         </div>
       )}

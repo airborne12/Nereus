@@ -9,7 +9,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AuthError, type AuthStore, type Role, type User } from './store.ts';
 
-export const SESSION_COOKIE = 'ds_session';
+export const SESSION_COOKIE = 'nereus_session';
 const SESSION_MAX_AGE_S = 7 * 86400;
 const MAX_BODY = 64 * 1024;
 

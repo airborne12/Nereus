@@ -31,10 +31,10 @@ export async function verifyPassword(password: string, stored: string): Promise<
 /** A hash compared against when the user does not exist, so both paths cost the same. */
 export const DUMMY_PASSWORD_HASH = await hashPassword(randomBytes(16).toString('hex'));
 
-export const SESSION_PREFIX = 'dss';
-export const API_KEY_PREFIX = 'dsk';
+export const SESSION_PREFIX = 'nereus_session';
+export const API_KEY_PREFIX = 'nereus_api';
 
-/** A random token like "dsk_<43 base64url chars>" (256 bits). */
+/** A random token like "nereus_api_<43 base64url chars>" (256 bits). */
 export function newToken(prefix: string): string {
   return `${prefix}_${randomBytes(32).toString('base64url')}`;
 }

@@ -8,7 +8,7 @@ export function pushHistory(list: string[], q: string, max = HISTORY_MAX): strin
   return [t, ...list.filter((x) => x !== t)].slice(0, max);
 }
 
-const key = (source: string, language: string) => `dorisstack.history.${source}.${language}`;
+const key = (source: string, language: string) => `nereus.history.${source}.${language}`;
 
 export function loadHistory(source: string, language: string): string[] {
   try {

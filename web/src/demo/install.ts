@@ -286,7 +286,7 @@ export async function install(): Promise<void> {
       if (path === '/api/keys' && method === 'GET') return json(200, { keys });
       if (path === '/api/keys' && method === 'POST') {
         const bytes = crypto.getRandomValues(new Uint8Array(32));
-        const key = `dsk_${btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
+        const key = `nereus_api_${btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
         const apiKey = { id: keys.length + 1, name: String((body as { name?: string }).name), prefix: key.slice(0, 12),
           createdAt: new Date().toISOString(), lastUsedAt: null, revoked: false };
         keys.unshift(apiKey);
