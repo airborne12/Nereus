@@ -178,8 +178,8 @@ button, input, select { font: inherit; color: inherit; }
 .hint { margin: 8px 2px 0; }
 
 .results-area { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
-.stats { display: flex; align-items: center; gap: 8px; padding: 4px 10px; min-height: 34px; border-bottom: 1px solid var(--border); }
-.count { font-variant-numeric: tabular-nums; }
+.stats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 10px; min-height: 34px; border-bottom: 1px solid var(--border); }
+.count { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .live-on { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); font-weight: 600; font-size: 11.5px; }
 
 .histogram { padding: 6px 10px 0; user-select: none; }
@@ -295,7 +295,8 @@ button, input, select { font: inherit; color: inherit; }
 }
 @media (max-width: 720px) {
   .nav { width: 50px; }
-  .nav .nav-item span, .nav .logo-text, .nav .tz, .nav .user-name, .nav-item .badge { display: none; }
+  .nav .nav-item > span:not(.avatar), .nav .logo-text, .nav .tz, .nav .user-name, .nav-item .badge { display: none; }
+  .nav .nav-favs, .nav .fav-toggle { display: none; }
   .search-head .row { flex-wrap: wrap; }
   .search-head .sql-field.grow { display: none; }
   .where { flex-basis: 100%; order: 10; }

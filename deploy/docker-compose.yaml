@@ -5,7 +5,7 @@
 #   UI: http://localhost:8090 (first visit creates the admin account)
 #   OTLP: grpc localhost:4317, http localhost:4318; Doris MySQL: localhost:9030
 #
-# DORIS_VERSION must be a release with search() (4.x); see README.
+# DORIS_VERSION must support search() and partition.retention_count; see README.
 name: nereus
 
 networks:
@@ -13,10 +13,12 @@ networks:
     ipam:
       config:
         - subnet: 172.30.80.0/24
+          # Keep dynamic addresses separate from the FE and BE addresses.
+          ip_range: 172.30.80.128/25
 
 services:
   doris-fe:
-    image: apache/doris:fe-${DORIS_VERSION:-4.0.1}
+    image: apache/doris:fe-${DORIS_VERSION:-4.1.5}
     hostname: doris-fe
     environment:
       FE_SERVERS: fe1:172.30.80.2:9010
@@ -35,7 +37,7 @@ services:
       retries: 30
 
   doris-be:
-    image: apache/doris:be-${DORIS_VERSION:-4.0.1}
+    image: apache/doris:be-${DORIS_VERSION:-4.1.5}
     hostname: doris-be
     environment:
       FE_SERVERS: fe1:172.30.80.2:9010

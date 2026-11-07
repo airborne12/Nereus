@@ -62,8 +62,8 @@ export function AppShell({ page, user, favorites, onNavigate, onOpen, onLogout, 
           {ITEMS.map((it) => (
             <li key={it.page}>
               <div className="nav-row">
-                <button type="button" className={`nav-item${page === it.page ? ' active' : ''}`} title={collapsed ? it.label : undefined}
-                  aria-current={page === it.page ? 'page' : undefined} onClick={() => onNavigate(it.page)}>
+                <button type="button" className={`nav-item${page === it.page ? ' active' : ''}`} title={it.label}
+                  aria-label={it.label} aria-current={page === it.page ? 'page' : undefined} onClick={() => onNavigate(it.page)}>
                   <Icon name={it.icon} />
                   {!collapsed && <span>{it.label}</span>}
                   {!collapsed && it.beta && <span className="badge">Beta</span>}
@@ -93,12 +93,12 @@ export function AppShell({ page, user, favorites, onNavigate, onOpen, onLogout, 
           ))}
         </ul>
         <div className="nav-foot">
-          <button type="button" className={`nav-item${page === 'settings' ? ' active' : ''}`} title={collapsed ? 'Team settings' : undefined}
-            onClick={() => onNavigate('settings')}>
+          <button type="button" className={`nav-item${page === 'settings' ? ' active' : ''}`} title="Team settings"
+            aria-label="Team settings" onClick={() => onNavigate('settings')}>
             <Icon name="settings" />{!collapsed && <span>Team settings</span>}
           </button>
           <div className="user-menu-wrap">
-            <button type="button" className="nav-item user" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+            <button type="button" className="nav-item user" aria-label="User menu" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
               <span className="avatar">{(user.name || user.email).slice(0, 1).toUpperCase()}</span>
               {!collapsed && <span className="user-name"><strong>{user.name || user.email}</strong><small>{user.email}</small></span>}
             </button>

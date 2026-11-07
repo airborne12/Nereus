@@ -29,6 +29,9 @@ the ones in `schema/`), and metrics other than gauges in Chart explorer.
 | `Dockerfile` | API service and built web UI in one image |
 | `web/` | Search page (React + Vite): query bar with completion, histogram, results, details, trace waterfall |
 
+The Compose stack defaults to Doris **4.1.5**. If you override `DORIS_VERSION`, use a release
+that supports both `search()` and the schema's `partition.retention_count` property.
+
 ## API service
 
 ```bash
@@ -123,6 +126,7 @@ cd ../server && DORIS_HOST=<fe> DORIS_PORT=9030 META_DATABASE_URL=... node src/s
 
 Browser tests (Playwright + Chromium) drive the built page against a live Doris and PostgreSQL:
 `npm run build && DORIS_PORT=9030 DORIS_DB=otel_bench npm run e2e`.
+The tests select their browser time zones explicitly and cover UTC, Asia/Shanghai, and phone layouts.
 
 ## Saved searches, alerts, charts and dashboards
 

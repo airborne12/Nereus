@@ -50,7 +50,7 @@ before(async () => {
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   browser = await chromium.launch();
-  page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  page = await browser.newPage({ viewport: { width: 1440, height: 900 }, timezoneId: 'UTC' });
   page.on('pageerror', (e) => console.error('page error:', e.message));
   if (shots) mkdirSync(shots, { recursive: true });
   stop = async () => {
@@ -107,6 +107,23 @@ test('results, histogram and the filter panel load together', async () => {
   await panel.getByRole('region', { name: 'service_name' }).waitFor();
   assert.deepEqual((await panel.locator('.facet-title span').allInnerTexts()).slice(0, 2), ['service_name', 'severity_text']);
   await shot('1-search');
+});
+
+test('search renders timestamps in an explicitly configured Shanghai timezone', async () => {
+  const context = await browser.newContext({ timezoneId: 'Asia/Shanghai', storageState: await page.context().storageState() });
+  try {
+    const p = await context.newPage();
+    const response = p.waitForResponse((r) => new URL(r.url()).pathname === '/api/search' && r.status() === 200);
+    await p.goto(`${base}/search?source=logs&t=7d`);
+    const result = await (await response).json();
+    await p.locator('.count', { hasText: /results$/ }).waitFor();
+    assert.equal(await p.locator('table.results thead .th').first().innerText(), 'timestamp (Shanghai)');
+    const timestamp = new Date(`${String(result.rows[0].timestamp).replace(' ', 'T')}Z`);
+    const localTime = timestamp.toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour12: false });
+    assert.ok((await p.locator('table.results tbody tr').first().locator('td').first().innerText()).includes(localTime));
+  } finally {
+    await context.close();
+  }
 });
 
 test('Lucene with completion, then the same search in SQL gives the same count', async () => {
@@ -654,16 +671,40 @@ test('client sessions: the SDK on another site records a session that replays, m
   await shot('17-back-to-session');
 });
 
-test('a phone-width screen has no horizontal scroll', async () => {
-  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: await page.context().storageState() });
-  const p = await phone.newPage();
-  await p.goto(`${base}/search?source=logs&t=7d`);
-  await p.locator('.count', { hasText: /results$/ }).waitFor();
-  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 0);
-  const input = (await p.getByLabel('Search query').boundingBox())!;
-  assert.ok(input.width > 200, `query box ${input.width}px`);
-  if (shots) await p.screenshot({ path: `${shots}/6-phone.png` });
-  await phone.close();
+test('phone search keeps navigation and result actions accessible', async () => {
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: 'Asia/Shanghai', storageState: await page.context().storageState() });
+  try {
+    const p = await phone.newPage();
+    await p.goto(`${base}/search?source=logs&t=7d`);
+    await p.locator('.count', { hasText: /results$/ }).waitFor();
+    for (const width of [390, 320]) {
+      await p.setViewportSize({ width, height: 844 });
+      assert.equal(await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 0);
+      const input = (await p.getByLabel('Search query').boundingBox())!;
+      assert.ok(input.width > width / 2, `query box ${input.width}px at ${width}px`);
+      const nav = p.getByRole('navigation', { name: 'Main' });
+      for (const name of ['Search', 'Saved searches', 'Chart explorer', 'Alerts', 'Client sessions', 'Service map', 'Dashboards', 'Team settings']) {
+        assert.equal(await nav.getByRole('button', { name, exact: true }).count(), 1, `${name} has an accessible name at ${width}px`);
+      }
+      for (const name of ['Denoise', 'Download CSV', 'Enable Wrap Lines', 'Show Generated SQL']) {
+        const box = await p.getByRole('button', { name, exact: true }).boundingBox();
+        assert.ok(box && box.x >= 0 && box.x + box.width <= width && box.y >= 0 && box.y + box.height <= 844,
+          `${name} fits the ${width}px viewport: ${JSON.stringify(box)}`);
+      }
+      if (shots) await p.screenshot({ path: `${shots}/6-phone-${width}.png` });
+    }
+    await p.getByRole('button', { name: 'Show Generated SQL' }).click();
+    await p.getByRole('dialog', { name: 'Generated SQL' }).getByRole('button', { name: 'Close' }).click();
+    const downloaded = p.waitForEvent('download');
+    await p.getByRole('button', { name: 'Download CSV' }).click();
+    assert.match((await downloaded).suggestedFilename(), /\.csv$/);
+    await p.getByRole('button', { name: 'Enable Wrap Lines' }).click();
+    await p.getByRole('button', { name: 'Disable Wrap Lines' }).waitFor();
+    await p.getByRole('button', { name: 'Denoise' }).click();
+    await p.locator('.denoise-note', { hasText: /hidden/ }).waitFor();
+  } finally {
+    await phone.close();
+  }
 });
 
 test('team settings: an API key works as a bearer token; users; logout', async () => {
