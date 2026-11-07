@@ -74,3 +74,12 @@ test('rate limiter: burst, then the refill rate; buckets are independent', async
   for (let i = 0; i < 5; i++) assert.equal(l.take('a').ok, true);
   assert.equal(l.take('a').ok, false, 'never more than the burst');
 });
+
+test('client address: right-most entries come from trusted proxies; what the client sent is ignored', async () => {
+  const { clientAddress } = await import('../src/sessions/http.ts');
+  assert.equal(clientAddress('1.1.1.1', '10.0.0.9', 0), '10.0.0.9', 'no proxy: the socket');
+  assert.equal(clientAddress('spoofed, 203.0.113.7', '10.0.0.9', 1), '203.0.113.7', 'one proxy: its entry, the right-most');
+  assert.equal(clientAddress('spoofed, 203.0.113.7, 198.51.100.1', '10.0.0.9', 2), '203.0.113.7', 'two proxies');
+  assert.equal(clientAddress(undefined, '10.0.0.9', 1), '10.0.0.9', 'no header: the socket');
+  assert.equal(clientAddress('203.0.113.7', '10.0.0.9', 2), '10.0.0.9', 'fewer entries than proxies: the socket');
+});

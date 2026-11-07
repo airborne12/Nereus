@@ -125,8 +125,61 @@ export interface SearchSpec extends TimeRange {
   filters?: Filter[];
 }
 
+/**
+ * Words that would make a fragment more than an expression over the rows being read: a subquery
+ * (and with it table functions such as http() or s3(), which reach other hosts), an export
+ * (INTO OUTFILE), another statement, or a different LIMIT. Members may read all telemetry; they
+ * may not make Doris read or write anywhere else.
+ */
+const FORBIDDEN_SQL_WORDS = new Set([
+  'SELECT', 'FROM', 'INTO', 'OUTFILE', 'UNION', 'INTERSECT', 'EXCEPT', 'MINUS', 'WITH', 'JOIN', 'LIMIT', 'OFFSET',
+  'INSERT', 'UPDATE', 'DELETE', 'REPLACE', 'DROP', 'ALTER', 'CREATE', 'TRUNCATE', 'GRANT', 'REVOKE', 'SET', 'CALL',
+  'EXPLAIN', 'SHOW', 'LOAD', 'EXPORT', 'BACKUP', 'RESTORE', 'KILL', 'USE', 'LOCK', 'UNLOCK', 'EXECUTE', 'PREPARE',
+]);
+
+/**
+ * A SQL expression typed by a user (SQL mode WHERE, SELECT expressions, ORDER BY), checked before
+ * it is spliced into a query: string literals and quoted identifiers are skipped, then comments,
+ * statement separators, unbalanced parentheses and FORBIDDEN_SQL_WORDS are refused. Backslashes are
+ * refused too, so this scan and Doris' lexer (escapes in '...', none in raw R'...') always agree on
+ * where a literal ends.
+ */
 export function sqlFragment(s: string, what: string): string {
-  if (s.includes(';')) throw new CompileError(`${what} must be a single SQL expression (no ';')`);
+  const fail = (why: string): never => {
+    throw new CompileError(`${what}: ${why}`);
+  };
+  if (s.includes('\\')) fail('backslashes are not supported');
+  let depth = 0;
+  for (let i = 0; i < s.length;) {
+    const c = s[i]!;
+    if (c === "'" || c === '"' || c === '`') {
+      // A quoted string or identifier; a doubled quote stands for the quote itself.
+      let j = i + 1;
+      for (; j < s.length; j++) {
+        if (s[j] === c) {
+          if (s[j + 1] === c) j++;
+          else break;
+        }
+      }
+      if (j >= s.length) fail(`unterminated ${c === '`' ? 'identifier' : 'string'}`);
+      i = j + 1;
+      continue;
+    }
+    if (c === ';') fail("one expression only (no ';')");
+    if ((c === '-' && s[i + 1] === '-') || c === '#' || (c === '/' && s[i + 1] === '*')) fail('comments are not supported');
+    if (c === '(') depth++;
+    if (c === ')' && --depth < 0) fail('unbalanced parentheses');
+    if (/[A-Za-z_]/.test(c)) {
+      let j = i + 1;
+      while (j < s.length && /[A-Za-z0-9_]/.test(s[j]!)) j++;
+      const word = s.slice(i, j);
+      if (FORBIDDEN_SQL_WORDS.has(word.toUpperCase())) fail(`'${word}' is not allowed; write an expression over this source's columns`);
+      i = j;
+      continue;
+    }
+    i++;
+  }
+  if (depth !== 0) fail('unbalanced parentheses');
   return s.trim();
 }
 

@@ -27,13 +27,16 @@ export interface ElementLike {
   type?: string;
 }
 
-/** `button#buy.primary "Buy now"`; never the value or text of a form field. */
-export function describeElement(el: ElementLike): string {
+/**
+ * `button#buy.primary "Buy now"`; never the value or text of a form field. `hideText` (the element
+ * is inside an editable region or a masked or blocked one) leaves out the text and label entirely.
+ */
+export function describeElement(el: ElementLike, hideText = false): string {
   const tag = el.tagName.toLowerCase();
   const id = el.id ? `#${el.id}` : '';
   const cls = typeof el.className === 'string' && el.className.trim() ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : '';
   const field = tag === 'input' || tag === 'textarea' || tag === 'select' || el.getAttribute?.('contenteditable') === 'true';
-  const label = el.getAttribute?.('aria-label') ?? (field ? null : (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60));
+  const label = hideText ? null : el.getAttribute?.('aria-label') ?? (field ? null : (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60));
   return `${tag}${id}${cls}${label ? ` "${label}"` : ''}`;
 }
 

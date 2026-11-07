@@ -1,7 +1,7 @@
 // SQL for the Sessions pages: sessions with any event matching the search, and one session's rows.
 
 import { escape } from 'mysql2';
-import { type SearchSpec, searchWhere } from '../query/build.ts';
+import { parseTime, type SearchSpec, searchWhere } from '../query/build.ts';
 import type { Source } from '../query/source.ts';
 
 const lit = (ms: number) => escape(new Date(ms).toISOString().replace('T', ' ').replace('Z', ''));
@@ -11,7 +11,8 @@ const lit = (ms: number) => escape(new Date(ms).toISOString().replace('T', ' ').
  * counts from its first to its last row in the range; its user is the last one set.
  */
 export function sessionsListSql(source: Source, spec: SearchSpec, limit = 200): string {
-  const from = Date.parse(spec.from), to = Date.parse(spec.to);
+  // parseTime as searchWhere uses it, so the outer range and the inner search agree (UTC).
+  const from = parseTime(spec.from), to = parseTime(spec.to);
   const t = source.table;
   const range = `timestamp >= ${lit(from)} AND timestamp < ${lit(to)}`;
   return `SELECT session_id, min(timestamp) AS started, max(timestamp) AS ended, max(service_name) AS service, ` +

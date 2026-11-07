@@ -91,6 +91,12 @@ test('concurrent setups create exactly one admin', { skip }, async () => {
   await meta.drop();
 });
 
+test('a malformed cookie from another app does not break the API', { skip }, async () => {
+  const res = await fetch(`${base}/api/auth/status`, { headers: { cookie: 'other=%E0%A4%A; theme=dark' } });
+  assert.equal(res.status, 200);
+  assert.equal((await fetch(`${base}/api/fields?source=logs`, { headers: { cookie: 'other=%' } })).status, 401);
+});
+
 test('malformed or escaping static paths are refused', { skip }, async () => {
   assert.equal((await fetch(`${base}/%E0%A4%A`)).status, 400);
   // Encoded ../ collapses inside the UI directory: the answer is the app, never a file outside it.

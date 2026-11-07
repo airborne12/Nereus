@@ -15,6 +15,7 @@ import type { Doris } from '../db.ts';
 import type { SearchSpec } from '../query/build.ts';
 import type { Source } from '../query/source.ts';
 import { IngestError, insertSql, SESSION_ID, sessionRows } from './ingest.ts';
+import { parseTime } from '../query/build.ts';
 import { RateLimiter } from './limit.ts';
 import { sessionForTraceSql, sessionRowsSql, sessionsListSql } from './query.ts';
 
@@ -111,14 +112,27 @@ export interface IngestLimits {
   perKey: RateLimiter;
   /** Per client address. */
   perClient: RateLimiter;
-  /** Take the client address from X-Forwarded-For (behind a proxy you trust). */
-  trustProxy: boolean;
+  /**
+   * Trusted proxies in front of the server (0: none). Each appends the address it saw to
+   * X-Forwarded-For, so the client is the entry this many places from the right; entries further
+   * left are whatever the client sent and are never used.
+   */
+  proxyHops: number;
 }
 
-/** INGEST_RATE_PER_KEY (100/s) and INGEST_RATE_PER_CLIENT (5/s), bursts 4x and 6x; TRUST_PROXY=1. */
+/** The address a request's per-client limit is counted against. */
+export function clientAddress(xff: string | undefined, socketAddress: string | undefined, proxyHops: number): string {
+  const entries = (xff ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  if (proxyHops > 0 && entries.length >= proxyHops) return entries[entries.length - proxyHops]!;
+  return socketAddress ?? 'unknown';
+}
+
+/** INGEST_RATE_PER_KEY (100/s) and INGEST_RATE_PER_CLIENT (5/s), bursts 4x and 6x; TRUST_PROXY (trusted proxy hops). */
 export function limitsFromEnv(env = process.env): IngestLimits {
   const perKey = Number(env.INGEST_RATE_PER_KEY ?? 100), perClient = Number(env.INGEST_RATE_PER_CLIENT ?? 5);
-  return { perKey: new RateLimiter(perKey, perKey * 4), perClient: new RateLimiter(perClient, perClient * 6), trustProxy: env.TRUST_PROXY === '1' };
+  const hops = Number(env.TRUST_PROXY ?? 0);
+  if (!Number.isInteger(hops) || hops < 0) throw new Error('TRUST_PROXY must be the number of trusted proxies (0, 1, 2, ...)');
+  return { perKey: new RateLimiter(perKey, perKey * 4), perClient: new RateLimiter(perClient, perClient * 6), proxyHops: hops };
 }
 
 export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Source; send: Send; now?: () => number; limits?: IngestLimits }) {
@@ -139,8 +153,8 @@ export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Sourc
       const h = req.headers.authorization ?? '';
       const token = /^Bearer\s+(\S+)$/i.exec(h)?.[1] ?? new URL(req.url ?? '/', 'http://x').searchParams.get('key') ?? '';
       // The client's bucket first, so a script trying keys cannot make every attempt a database lookup.
-      const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',')[0]!.trim();
-      const client = (limits.trustProxy && fwd) || req.socket.remoteAddress || 'unknown';
+      const fwd = req.headers['x-forwarded-for'];
+      const client = clientAddress(Array.isArray(fwd) ? fwd.join(',') : fwd, req.socket.remoteAddress, limits.proxyHops);
       const c = limits.perClient.take(client);
       if (!c.ok) return limited(res, c, 'from this address');
       if (!(await keys.verify(token))) return send(res, 401, { error: 'a valid ingestion key is required' }, CORS);
@@ -165,8 +179,8 @@ export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Sourc
       return true;
     }
     if ((m = /^\/api\/sessions\/by-trace\/([0-9a-f]{32})$/.exec(path)) && req.method === 'GET') {
-      const from = Date.parse(url.searchParams.get('from') ?? ''), to = Date.parse(url.searchParams.get('to') ?? '');
-      if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) throw new AuthError(400, 'from and to are required');
+      const from = parseTime(url.searchParams.get('from') ?? ''), to = parseTime(url.searchParams.get('to') ?? '');
+      if (to <= from) throw new AuthError(400, 'to must be after from');
       const [row] = (await doris.query(sessionForTraceSql(source, m[1]!, from, to))) as Record<string, string>[];
       if (!row) {
         send(res, 200, { session: null });
@@ -178,19 +192,21 @@ export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Sourc
     if ((m = /^\/api\/sessions\/([^/]+)$/.exec(path)) && req.method === 'GET') {
       const id = decodeURIComponent(m[1]!);
       if (!SESSION_ID.test(id)) throw new AuthError(400, 'bad session id');
-      const from = Date.parse(url.searchParams.get('from') ?? ''), to = Date.parse(url.searchParams.get('to') ?? '');
-      if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) throw new AuthError(400, 'from and to are required');
+      const from = parseTime(url.searchParams.get('from') ?? ''), to = parseTime(url.searchParams.get('to') ?? '');
+      if (to <= from) throw new AuthError(400, 'to must be after from');
       const rows = (await doris.query(sessionRowsSql(source, id, from, to))) as Record<string, unknown>[];
       if (rows.length === 0) throw new AuthError(404, 'no such session in this time range');
-      // Replay parts joined per chunk, in seq order. The JSON is passed through, not re-parsed.
-      const chunks = new Map<number, string[]>();
+      // Replay parts joined per chunk (seq and time: the parts of one chunk share both), in order.
+      // seq comes from the browser, so a chunk that does not join into valid JSON is left out
+      // rather than breaking the whole response; valid chunks are passed through as they are.
+      const chunks = new Map<string, { seq: number; t: string; parts: string[] }>();
       const events: Record<string, unknown>[] = [];
       for (const r of rows) {
         if (r.kind === 'replay') {
-          const seq = Number(r.seq);
-          const parts = chunks.get(seq) ?? [];
-          parts[Number(r.part)] = String(r.payload);
-          chunks.set(seq, parts);
+          const k = `${Number(r.seq)}|${String(r.timestamp)}`;
+          const c = chunks.get(k) ?? { seq: Number(r.seq), t: String(r.timestamp), parts: [] };
+          c.parts[Number(r.part)] = String(r.payload);
+          chunks.set(k, c);
         } else {
           events.push({ t: r.timestamp, type: r.event_type, url: r.url, message: r.message,
             attributes: r.attributes === null || r.attributes === undefined ? null : typeof r.attributes === 'string' ? JSON.parse(r.attributes) : r.attributes });
@@ -199,7 +215,13 @@ export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Sourc
       const last = rows.at(-1)!;
       const info = { sessionId: id, service: last.service_name, user: { id: last.user_id, email: last.user_email, name: last.user_name },
         userAgent: last.user_agent, started: rows[0]!.timestamp, ended: last.timestamp };
-      const replay = [...chunks.entries()].sort((a, b) => a[0] - b[0]).map(([, parts]) => parts.join(''));
+      const replay = [...chunks.values()].sort((a, b) => a.seq - b.seq || a.t.localeCompare(b.t)).map((c) => c.parts.join('')).filter((json) => {
+        try {
+          return Array.isArray(JSON.parse(json));
+        } catch {
+          return false;
+        }
+      });
       const body = `{"session":${JSON.stringify(info)},"events":${JSON.stringify(events)},"replay":[${replay.join(',')}]}`;
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'content-length': Buffer.byteLength(body) });
       res.end(body);

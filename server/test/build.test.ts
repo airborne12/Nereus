@@ -23,7 +23,7 @@ test('where: time bounds, Lucene or SQL, and filters kept apart from the text', 
     { field: 'k8s.pod.name', values: ['cart-1'], exclude: true },
   ] }), `${TIME} AND service_name IN ('cart', 'o\\'k') AND NOT coalesce(coalesce(CAST(log_attributes['k8s.pod.name'] AS STRING), ` +
     "CAST(resource_attributes['k8s.pod.name'] AS STRING)) IN ('cart-1'), false)");
-  assert.throws(() => searchWhere(logs, { ...range, where: '1=1; DROP TABLE x', language: 'sql' }), /single SQL expression/);
+  assert.throws(() => searchWhere(logs, { ...range, where: '1=1; DROP TABLE x', language: 'sql' }), /one expression only/);
   assert.throws(() => searchWhere(logs, { ...range, where: '', filters: [{ field: 'service', values: [] }] }), CompileError);
 });
 
@@ -92,4 +92,37 @@ test('values and fields', () => {
     { Field: 'resource_attributes.k8s.pod.name', Type: 'text' }, { Field: 'log_attributes.thread.id', Type: 'bigint' },
   ]);
   assert.deepEqual(fields.map((f) => f.name), ['body', 'k8s.pod.name', 'level', 'message', 'msg', 'severity', 'severity_text', 'thread.id']);
+});
+
+test('SQL fragments: expressions pass; subqueries, table functions, exports, comments and escapes are refused', async () => {
+  const { sqlFragment } = await import('../src/query/build.ts');
+  for (const ok of [
+    "severity_text = 'ERROR' AND body LIKE '%select from union%'",
+    'duration > 1000 AND lower(service_name) IN (\'cart\', "payment")',
+    "log_attributes['k8s.pod.name'] = 'it''s'",
+    'round(duration / 1000, 1)',
+    'duration DESC, timestamp ASC',
+    "CASE WHEN status_code = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END",
+    'cast(span_attributes[\'http.status_code\'] AS INT) >= 500',
+    'date_trunc(timestamp, \'hour\')',
+    '`service_name` = \'x\'',
+  ]) assert.equal(sqlFragment(` ${ok} `, 'WHERE'), ok, ok);
+  const refused: [string, RegExp][] = [
+    ['1 = 1; DROP TABLE t', /one expression/],
+    ['(SELECT body FROM http("uri" = "http://169.254.169.254/latest/meta-data/"))', /'SELECT' is not allowed/],
+    ['timestamp LIMIT 100000000 INTO OUTFILE "s3://bucket/x" FORMAT AS csv', /'LIMIT' is not allowed/],
+    ['timestamp INTO OUTFILE "s3://bucket/x"', /'INTO' is not allowed/],
+    ['duration -- rest of the query', /comments/],
+    ['duration /* hint */', /comments/],
+    ['duration # note', /comments/],
+    ["R'\\' UNION SELECT 1 -- '", /backslashes/],
+    ["body = 'unterminated", /unterminated string/],
+    ['1 = 1) OR (1 = 1', /unbalanced/],
+    ['((1 = 1)', /unbalanced/],
+    ['1 IN (select 1)', /'select' is not allowed/],
+    ['exists (with x as (values 1) table x)', /'with' is not allowed/],
+  ];
+  for (const [bad, re] of refused) assert.throws(() => sqlFragment(bad, 'WHERE'), re, bad);
+  // Literal text is never inspected, quoted identifiers neither.
+  assert.equal(sqlFragment("body = 'a; -- /* # SELECT FROM'", 'WHERE'), "body = 'a; -- /* # SELECT FROM'");
 });

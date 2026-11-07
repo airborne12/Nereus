@@ -125,7 +125,7 @@ test('Lucene with completion, then the same search in SQL gives the same count',
   assert.match(page.url(), /lang=sql/);
   assert.equal(await total(), lucene);
   await run('severity_text = ; nope');
-  assert.match(await page.getByRole('alert').innerText(), /single SQL expression/);
+  assert.match(await page.getByRole('alert').innerText(), /one expression only/);
   await page.getByLabel('Query language').selectOption('lucene');
   await run('');
 });

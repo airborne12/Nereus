@@ -218,7 +218,9 @@ export function init(o: InitOptions): void {
   }
   addEventListener('click', (e) => {
     const el = (e.target as Element | null)?.closest?.('a, button, [role=button], input, select, textarea, label, [onclick]') ?? (e.target as Element | null);
-    if (el) event({ type: 'click', message: describeElement(el as unknown as Parameters<typeof describeElement>[0]) });
+    // Text typed into rich-text editors, and masked or blocked parts of the page, stay out.
+    const hide = opts!.maskAllText || Boolean(el?.closest?.('[contenteditable]:not([contenteditable="false"]), .ds-mask, .ds-block'));
+    if (el) event({ type: 'click', message: describeElement(el as unknown as Parameters<typeof describeElement>[0], hide) });
   }, { capture: true });
   addEventListener('error', (e) => event({ type: 'error', message: e.message || String(e.error), attributes: { source: e.filename, line: e.lineno, column: e.colno, stack: e.error?.stack?.slice(0, 4000) } }));
   addEventListener('unhandledrejection', (e) => event({ type: 'error', message: `Unhandled rejection: ${e.reason instanceof Error ? e.reason.message : String(e.reason)}`, attributes: { stack: e.reason?.stack?.slice(0, 4000) } }));

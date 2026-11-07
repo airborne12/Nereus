@@ -39,7 +39,7 @@ before(async () => {
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   // A second server with small limits, to see them answer 429.
   const small = createApp({ doris, db, auth: { store: auth, secureCookie: false }, content: new ContentStore(meta.pool), ingestKeys: new IngestKeys(meta.pool),
-    ingestLimits: { perKey: new RateLimiter(0.001, 3), perClient: new RateLimiter(0.001, 5), trustProxy: true } });
+    ingestLimits: { perKey: new RateLimiter(0.001, 3), perClient: new RateLimiter(0.001, 5), proxyHops: 1 } });
   await new Promise<void>((r) => small.listen(0, '127.0.0.1', r));
   tight = `http://127.0.0.1:${(small.address() as AddressInfo).port}`;
   close = async () => {
@@ -145,6 +145,8 @@ test('ingestion is rate limited per client address and per key, with Retry-After
   assert.deepEqual(statuses, [401, 401, 401, 401, 401, 429]);
   const r = await post(key, '10.9.9.9');
   assert.equal(r.status, 429);
+  // Rotating what the client itself writes into X-Forwarded-For does not help: the proxy's entry counts.
+  for (let i = 0; i < 3; i++) assert.equal((await post(key, `198.51.100.${i}, 10.9.9.9`)).status, 429);
   assert.ok(Number(r.headers.get('retry-after')) >= 1);
   assert.equal(r.headers.get('access-control-allow-origin'), '*', 'the page can read the 429');
 });
@@ -172,4 +174,23 @@ test('a trace started by a request in a session finds that session', { skip }, a
   const miss = await call('GET', `/api/sessions/by-trace/${'f'.repeat(32)}?from=${from}&to=${to}`, member);
   assert.deepEqual(miss.body, { session: null });
   assert.equal((await call('GET', `/api/sessions/by-trace/nothex?from=${from}&to=${to}`, member)).status, 404);
+});
+
+test('replay chunks that collide (same seq from a confused or hostile page) never break the session detail', { skip }, async () => {
+  const key = (await call('POST', '/api/ingest-keys', admin, { name: 'collide' })).body.key;
+  const sid = `s_${randomUUID().replace(/-/g, '')}`;
+  const t0 = Date.now() - 20_000;
+  const big = (tag: string) => [{ type: 2, timestamp: t0, data: { tag, html: tag.repeat(300_000) } }];
+  for (const events of [big('a'), big('b')]) {
+    const r = await call('POST', '/api/ingest/sessions', key, { sessionId: sid, replay: [{ seq: 3, t: t0, events }] });
+    assert.equal(r.status, 200);
+  }
+  await call('POST', '/api/ingest/sessions', key, { sessionId: sid, replay: [{ seq: 4, t: t0 + 1000, events: [{ type: 3, timestamp: t0 + 1000, data: {} }] }] });
+  const from = new Date(t0 - 60_000).toISOString(), to = new Date(Date.now() + 60_000).toISOString();
+  const res = await fetch(`${base}/api/sessions/${sid}?from=${from}&to=${to}`, { headers: { authorization: `Bearer ${member}` } });
+  assert.equal(res.status, 200);
+  const body = JSON.parse(await res.text());
+  assert.ok(body.replay.length >= 1, 'the valid chunk is still there');
+  assert.deepEqual(body.replay.at(-1), [{ type: 3, timestamp: t0 + 1000, data: {} }]);
+  for (const chunk of body.replay) assert.ok(Array.isArray(chunk));
 });

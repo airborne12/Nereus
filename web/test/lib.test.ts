@@ -250,3 +250,10 @@ test('sdk trace propagation: W3C traceparent, own origin always, others only whe
   assert.equal(shouldPropagate('https://cdn.other.com/x', page, [/\.example\.com\//]), false);
   assert.equal(shouldPropagate('https://pay.example.com/x', page, [/\.example\.com\//]), true);
 });
+
+test('sdk: clicks inside editable, masked or blocked parts carry no text', async () => {
+  const { describeElement } = await import('../src/sdk/core.ts');
+  const p = { tagName: 'P', className: 'para', getAttribute: (n: string) => (n === 'aria-label' ? 'Note' : null), textContent: 'my private note' };
+  assert.equal(describeElement(p), 'p.para "Note"');
+  assert.equal(describeElement(p, true), 'p.para');
+});
