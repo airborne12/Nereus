@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as api from '../api.ts';
+import { newId } from '../lib/browser.ts';
 import { ChartView } from '../components/Chart.tsx';
 import { ChartBuilder, DEFAULT_CHART } from '../components/ChartBuilder.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -64,7 +65,7 @@ function TileEditor({ tile, range, onSave, onClose }: { tile: api.Tile | null; r
         </div>
         <ChartBuilder value={def} onRun={setDef} />
         <div className="chart-panel"><ChartView def={def} range={range} height={200} /></div>
-        <button type="button" className="btn primary" onClick={() => onSave({ id: tile?.id ?? crypto.randomUUID(), title: title || 'Untitled chart', chart: def, w })}>
+        <button type="button" className="btn primary" onClick={() => onSave({ id: tile?.id ?? newId(), title: title || 'Untitled chart', chart: def, w })}>
           {tile ? 'Save tile' : 'Add tile'}
         </button>
       </div>
@@ -165,7 +166,7 @@ export function DashboardPage({ id, go, onChanged }: { id: number; go: (url: str
               {menu === t.id && (
                 <div className="menu tile-menu" role="menu" onMouseLeave={() => setMenu(null)}>
                   <button type="button" role="menuitem" onClick={() => { setMenu(null); setEditing(t); }}>Edit</button>
-                  <button type="button" role="menuitem" onClick={() => { setMenu(null); save({ ...d, tiles: [...tiles.slice(0, i + 1), { ...t, id: crypto.randomUUID(), title: `${t.title} (copy)` }, ...tiles.slice(i + 1)] }); }}>Duplicate</button>
+                  <button type="button" role="menuitem" onClick={() => { setMenu(null); save({ ...d, tiles: [...tiles.slice(0, i + 1), { ...t, id: newId(), title: `${t.title} (copy)` }, ...tiles.slice(i + 1)] }); }}>Duplicate</button>
                   <button type="button" role="menuitem" disabled={i === 0} onClick={() => { setMenu(null); move(i, -1); }}>Move left</button>
                   <button type="button" role="menuitem" disabled={i === tiles.length - 1} onClick={() => { setMenu(null); move(i, 1); }}>Move right</button>
                   <button type="button" role="menuitem" onClick={() => { setMenu(null); go(`/chart?chart=${encodeURIComponent(JSON.stringify(t.chart))}`); }}>Open in Chart explorer</button>

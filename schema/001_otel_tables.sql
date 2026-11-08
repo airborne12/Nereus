@@ -8,6 +8,7 @@
 --     dynamic partitions created by the exporter.
 --   * Inverted indexes only where the search page filters: body (tokenized), ids,
 --     severity, service, attribute VARIANTs. No index on columns that are only read.
+--   * VARIANT for events, links and exemplars to preserve JSON string escapes.
 --   * time_series compaction.
 --   * `traces.duration` is in MICROSECONDS (the exporter computes
 --     EndTimestamp - StartTimestamp in microseconds).
@@ -60,8 +61,8 @@ CREATE TABLE IF NOT EXISTS ${DB}.otel_traces (
     end_time              DATETIME(6),
     duration              BIGINT COMMENT 'microseconds',
     span_attributes       VARIANT,
-    events                ARRAY<STRUCT<timestamp:DATETIME(6), name:STRING, attributes:MAP<STRING, STRING>>>,
-    links                 ARRAY<STRUCT<trace_id:STRING, span_id:STRING, trace_state:STRING, attributes:MAP<STRING, STRING>>>,
+    events                VARIANT,
+    links                 VARIANT,
     status_message        STRING,
     status_code           VARCHAR(32),
     resource_attributes   VARIANT,
@@ -100,7 +101,7 @@ CREATE TABLE IF NOT EXISTS ${DB}.otel_metrics_gauge (
     attributes            VARIANT,
     start_time            DATETIME(6),
     value                 DOUBLE,
-    exemplars             ARRAY<STRUCT<filtered_attributes:MAP<STRING, STRING>, timestamp:DATETIME(6), value:DOUBLE, span_id:STRING, trace_id:STRING>>,
+    exemplars             VARIANT,
     resource_attributes   VARIANT,
     scope_name            VARCHAR(256),
     scope_version         VARCHAR(64),
@@ -126,7 +127,7 @@ CREATE TABLE IF NOT EXISTS ${DB}.otel_metrics_sum (
     attributes              VARIANT,
     start_time              DATETIME(6),
     value                   DOUBLE,
-    exemplars               ARRAY<STRUCT<filtered_attributes:MAP<STRING, STRING>, timestamp:DATETIME(6), value:DOUBLE, span_id:STRING, trace_id:STRING>>,
+    exemplars               VARIANT,
     aggregation_temporality VARCHAR(32),
     is_monotonic            BOOLEAN,
     resource_attributes     VARIANT,
@@ -157,7 +158,7 @@ CREATE TABLE IF NOT EXISTS ${DB}.otel_metrics_histogram (
     sum                     DOUBLE,
     bucket_counts           ARRAY<BIGINT>,
     explicit_bounds         ARRAY<DOUBLE>,
-    exemplars               ARRAY<STRUCT<filtered_attributes:MAP<STRING, STRING>, timestamp:DATETIME(6), value:DOUBLE, span_id:STRING, trace_id:STRING>>,
+    exemplars               VARIANT,
     min                     DOUBLE,
     max                     DOUBLE,
     aggregation_temporality VARCHAR(32),
@@ -195,7 +196,7 @@ CREATE TABLE IF NOT EXISTS ${DB}.otel_metrics_exponential_histogram (
     positive_bucket_counts  ARRAY<BIGINT>,
     negative_offset         INT,
     negative_bucket_counts  ARRAY<BIGINT>,
-    exemplars               ARRAY<STRUCT<filtered_attributes:MAP<STRING, STRING>, timestamp:DATETIME(6), value:DOUBLE, span_id:STRING, trace_id:STRING>>,
+    exemplars               VARIANT,
     min                     DOUBLE,
     max                     DOUBLE,
     zero_threshold          DOUBLE,

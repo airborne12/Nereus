@@ -318,14 +318,16 @@ const FACET_SAMPLE = 20_000;
  * Top values of several fields at once, from a sample of the newest matching rows (counts are
  * within the sample, which `__sampled` reports). topn() returns a JSON object value -> count.
  */
-export function facetsSql(source: Source, spec: SearchSpec, fields: string[]): string {
+export function facetsSql(source: Source, spec: SearchSpec, fields: string[], value?: string): string {
   if (fields.length === 0 || fields.length > 60) throw new CompileError('ask for 1 to 60 facet fields');
+  if (value !== undefined && fields.length !== 1) throw new CompileError('value search requires one facet field');
   // The sample reads only the faceted expressions: SELECT * would read every column, whole VARIANT
   // and ARRAY columns included, for each of the sampled rows.
   const exprs = fields.map((f, i) => `${fieldExpr(source, f)} AS f${i}`);
-  const tops = fields.map((_, i) => `topn(f${i}, 10) AS f${i}`);
+  const tops = fields.map((_, i) => `topn(f${i}, 100) AS f${i}`);
+  const match = value ? ` AND instr(lower(CAST(${fieldExpr(source, fields[0]!)} AS STRING)), lower(${sqlString(value)})) > 0` : '';
   return `SELECT count(*) AS __sampled, ${tops.join(', ')} FROM (SELECT ${exprs.join(', ')} FROM ${source.table} ` +
-    `WHERE ${searchWhere(source, spec)} ORDER BY ${source.timestampColumn} DESC LIMIT ${FACET_SAMPLE}) s`;
+    `WHERE ${searchWhere(source, spec)}${match} ORDER BY ${source.timestampColumn} DESC LIMIT ${FACET_SAMPLE}) s`;
 }
 
 const PRIMARY_FACETS = ['service_name', 'severity_text', 'status_code', 'span_kind', 'span_name'];

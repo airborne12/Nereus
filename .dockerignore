@@ -6,3 +6,4 @@ web/dist-demo
 web/demo/demo-data.json
 bench
 **/__pycache__
+test-results

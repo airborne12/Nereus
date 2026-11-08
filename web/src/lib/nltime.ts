@@ -2,6 +2,8 @@
 // "since 10 minutes ago", "today", "yesterday", "this week", "last week", "2026-11-04 10:00 to 12:00".
 // Returns null when the text is not understood.
 
+import { localTime, parseLocalTime } from './time.ts';
+
 const UNITS: Record<string, number> = {
   s: 1e3, sec: 1e3, second: 1e3, m: 6e4, min: 6e4, minute: 6e4, h: 36e5, hr: 36e5, hour: 36e5,
   d: 864e5, day: 864e5, w: 6048e5, week: 6048e5,
@@ -19,11 +21,12 @@ function startOfDay(ms: number): number {
 }
 
 function parseLocal(s: string, day: number | null): number | null {
-  let m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(s.trim());
-  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] ?? 0), Number(m[5] ?? 0), Number(m[6] ?? 0)).getTime();
-  m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
-  if (m && day !== null) return day + Number(m[1]) * 36e5 + Number(m[2]) * 6e4;
-  return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
+  if (m && day !== null) {
+    const d = new Date(day);
+    return localTime(d.getFullYear(), d.getMonth() + 1, d.getDate(), Number(m[1]), Number(m[2]));
+  }
+  return parseLocalTime(s);
 }
 
 export function parseNaturalRange(text: string, now: number): { from: number; to: number } | null {

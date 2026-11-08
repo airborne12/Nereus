@@ -4,6 +4,21 @@ import { addFilter, quoteValue, replaceField, tokenAt } from '../src/lib/filters
 import { rowFields, waterfall, type Span } from '../src/lib/rows.ts';
 import { minePatterns, template } from '../src/lib/patterns.ts';
 import { DEFAULT_STATE, dorisTimeToMs, parseState, presetLabel, resolveWindow, serializeState, toggleFilter } from '../src/lib/state.ts';
+import { parseLocalTime } from '../src/lib/time.ts';
+import { parseNaturalRange } from '../src/lib/nltime.ts';
+
+test('time input rejects normalized dates and out-of-range clock fields', () => {
+  for (const text of ['2026-02-31 10:00', '2026-02-29 10:00', '2026-13-01 10:00', '2026-00-01 10:00',
+    '2026-01-00 10:00', '2026-04-31 10:00', '2026-01-01 24:00', '2026-01-01 10:60', '2026-01-01 10:00:60']) {
+    assert.equal(parseLocalTime(text), null, text);
+    assert.equal(parseNaturalRange(`${text} to 2027-01-01 00:00`, Date.now()), null, text);
+  }
+  const leap = new Date(2024, 1, 29, 10, 15, 30).getTime();
+  assert.equal(parseLocalTime('2024-02-29 10:15:30'), leap);
+  assert.deepEqual(parseNaturalRange('2024-02-29 10:15:30 to 12:00', leap), { from: leap, to: new Date(2024, 1, 29, 12).getTime() });
+  for (const end of ['24:00', '12:60']) assert.equal(parseNaturalRange(`2024-02-29 10:00 to ${end}`, leap), null);
+  assert.equal(new Date(parseLocalTime('0099-01-01 10:00')!).getFullYear(), 99);
+});
 
 test('state round-trips through the URL', () => {
   const s = {

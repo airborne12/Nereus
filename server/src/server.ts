@@ -214,6 +214,8 @@ export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, 
       const source = sourceParam(url);
       const asked = param(url, 'fields', false)?.split(',').filter(Boolean);
       const names = asked ?? defaultFacetFields(source, await fields(source)).slice(0, 40);
+      const value = param(url, 'value', false);
+      if (value !== undefined && names.length !== 1) throw new CompileError('value search requires one facet field');
       const spec = searchSpec(url);
       // A field with a filter lists its values without its own filter, so more of them can be
       // picked (values of one field are ORed); every other filter still applies. Unfiltered
@@ -224,7 +226,7 @@ export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, 
         ...filtered.map((n) => ({ fields: [n], spec: { ...spec, filters: (spec.filters ?? []).filter((f) => f.field !== n) } })),
       ].filter((g) => g.fields.length > 0);
       const results = await Promise.all(groups.map(async (g) => {
-        const sql = facetsSql(source, g.spec, g.fields);
+        const sql = facetsSql(source, g.spec, g.fields, value);
         return { g, sql, row: (await doris.query(sql))[0] };
       }));
       const byField = new Map<string, { field: string; sampled: number; values: { v: string; n: number }[] }>();

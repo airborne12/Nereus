@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { parseNaturalRange } from '../lib/nltime.ts';
+import { parseLocalTime } from '../lib/time.ts';
 import { PRESETS, type Preset, type TimeWindow, presetLabel } from '../lib/state.ts';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -10,7 +11,7 @@ function fmt(ms: number): string {
 function parseLocal(s: string): number | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s.trim());
   if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] ?? 0)).getTime();
+  return parseLocalTime(s);
 }
 
 const AROUND = [['30s', 30e3], ['1m', 60e3], ['5m', 300e3], ['15m', 900e3], ['30m', 1800e3], ['1h', 3600e3], ['3h', 10800e3], ['12h', 43200e3]] as const;
@@ -73,7 +74,7 @@ export function TimePicker({ window: w, range, onChange }: Props) {
     <div className="timepicker" ref={box}>
       <button type="button" className={`tp-input${'preset' in w && w.preset === 'live' ? ' live' : ''}`} aria-label="Time Range"
         aria-expanded={open} onClick={() => setOpen(!open)}>
-        {'preset' in w && w.preset === 'live' && <span className="live-dot" />}{label}
+        {'preset' in w && w.preset === 'live' && <span className="live-dot" />}<span>{label}</span>
       </button>
       {open && (
         <div className="tp-pop" role="dialog" aria-label="Time Range">

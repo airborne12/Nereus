@@ -32,6 +32,9 @@ the ones in `schema/`), and metrics other than gauges in Chart explorer.
 The Compose stack defaults to Doris **4.1.5**. If you override `DORIS_VERSION`, use a release
 that supports both `search()` and the schema's `partition.retention_count` property.
 
+Existing installations with ARRAY/STRUCT span events, links or metric exemplars must run
+the [nested attribute migration](schema/upgrades/README.md) to preserve JSON string escapes.
+
 ## API service
 
 ```bash
@@ -127,6 +130,9 @@ cd ../server && DORIS_HOST=<fe> DORIS_PORT=9030 META_DATABASE_URL=... node src/s
 Browser tests (Playwright + Chromium) drive the built page against a live Doris and PostgreSQL:
 `npm run build && DORIS_PORT=9030 DORIS_DB=otel_bench npm run e2e`.
 The tests select their browser time zones explicitly and cover UTC, Asia/Shanghai, and phone layouts.
+HTTP compatibility tests bind an ephemeral port and use a local non-loopback IPv4 address;
+set `BROWSER_HTTP_HOST` to choose the address. They verify the actual system clipboard too.
+For schema Stream Load tests, set `DORIS_TEST=1` and `DORIS_BE_HTTP_URL` to the BE HTTP endpoint.
 
 ## Saved searches, alerts, charts and dashboards
 

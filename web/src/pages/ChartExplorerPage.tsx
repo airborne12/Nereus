@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as api from '../api.ts';
+import { newId } from '../lib/browser.ts';
 import { ChartView } from '../components/Chart.tsx';
 import { ChartBuilder, DEFAULT_CHART } from '../components/ChartBuilder.tsx';
 import { Modal } from '../components/Modal.tsx';
@@ -24,7 +25,7 @@ function SaveToDashboard({ def, onClose, go }: { def: api.ChartDef; onClose: () 
   useEffect(() => { api.content.dashboards().then((r) => setDashboards(r.items), () => {}); }, []);
   async function save() {
     try {
-      const tile = { id: crypto.randomUUID(), title: title || 'Untitled chart', chart: def, w: 6 };
+      const tile = { id: newId(), title: title || 'Untitled chart', chart: def, w: 6 };
       const d = target === 'new'
         ? await api.content.createDashboard({ name: name || 'My dashboard', tiles: [tile] })
         : await (async () => {

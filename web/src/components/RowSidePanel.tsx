@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import * as api from '../api.ts';
+import { CopyButton } from './CopyButton.tsx';
 import { type FieldValue, isError, type Row, rowFields, type Span, waterfall } from '../lib/rows.ts';
 import { dorisTimeToMs, type Filter, type SourceName } from '../lib/state.ts';
 import { Icon } from './Icon.tsx';
@@ -40,10 +41,6 @@ const GROUP_TITLES: Record<string, string> = {
   resource_attributes: 'Resource Attributes',
 };
 
-function copy(text: string) {
-  navigator.clipboard?.writeText(text).catch(() => {});
-}
-
 function ValueActions({ f, actions }: { f: FieldValue; actions: PanelActions }) {
   return (
     <span className="kv-actions">
@@ -51,7 +48,7 @@ function ValueActions({ f, actions }: { f: FieldValue; actions: PanelActions }) 
       <button type="button" title="Exclude this value" aria-label={`Exclude ${f.field}`} onClick={() => actions.onFilter(f.field, f.value, 'exclude')}><Icon name="minus" size={12} /></button>
       <button type="button" title="Search for this value only" aria-label={`Search ${f.field}`} onClick={() => actions.onSearchValue(f.field, f.value)}><Icon name="search" size={12} /></button>
       <button type="button" title={`Add ${f.field} column to results table`} aria-label={`Add column ${f.field}`} onClick={() => actions.onAddColumn(f.field)}><Icon name="columns" size={12} /></button>
-      <button type="button" title="Copy value" aria-label={`Copy ${f.field}`} onClick={() => copy(f.value)}><Icon name="copy" size={12} /></button>
+      <CopyButton title="Copy value" aria-label={`Copy ${f.field}`} text={f.value}><Icon name="copy" size={12} /></CopyButton>
     </span>
   );
 }
@@ -98,7 +95,7 @@ function ColumnValues({ row, actions }: { row: Row; actions: PanelActions }) {
       <div className="cv-toolbar">
         <input placeholder="Search properties by key or value" aria-label="Search properties by key or value" value={q}
           onChange={(e) => setQ(e.target.value)} />
-        <button type="button" className="btn" onClick={() => copy(JSON.stringify(row, null, 2))}>Copy row as JSON</button>
+        <CopyButton className="btn" text={JSON.stringify(row, null, 2)}>Copy row as JSON</CopyButton>
       </div>
       <KeyValues fields={shown} actions={actions} labelOf={full} />
     </div>
@@ -343,7 +340,7 @@ export function RowSidePanel({ source, row, actions, onClose, onOpenRow }: Props
             <span className={isErr ? 'lvl lvl-error' : 'lvl ok'}>{isErr ? 'Error' : 'Ok'}</span>
             <span className="badge">{String(row.span_kind ?? '').replace('SPAN_KIND_', '').toLowerCase()}</span>
           </>}
-          {traceId && <button type="button" className="link small" onClick={() => copy(traceId)}>Copy Trace ID</button>}
+          {traceId && <CopyButton className="link small" text={traceId}>Copy Trace ID</CopyButton>}
         </div>
         <span className="grow" />
         <button type="button" className="icon-btn" aria-label={full ? 'Collapse panel width' : 'Expand panel width'} title={full ? 'Collapse panel width' : 'Expand panel width'}

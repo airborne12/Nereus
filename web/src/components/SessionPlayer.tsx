@@ -110,19 +110,19 @@ export function SessionPlayer({ detail, at, go }: { detail: api.SessionDetail; a
     setPlaying(!playing);
   };
 
-  const timeline = detail.events.map((e) => ({ ...e, at: dorisTimeToMs(e.t) - meta.startTime }));
+  const hasReplay = events.length >= 2;
+  const startTime = hasReplay && meta.startTime ? meta.startTime : dorisTimeToMs(detail.session.started);
+  const timeline = detail.events.map((e) => ({ ...e, at: dorisTimeToMs(e.t) - startTime }));
   const shown = timeline.filter((e) => filter === 'all' || (filter === 'error' ? isBad(e) : e.type === filter));
 
-  if (events.length < 2) {
-    return <div className="empty">This session has no replay (the SDK may run with recordReplay off). Its events are listed below.</div>;
-  }
   return (
     <div className="session-view">
       <div className="player">
         <div className="player-stage" ref={stage}>
-          {error ? <div className="error">{error}</div> : <div className="player-host" ref={host} data-testid="replay" />}
+          {!hasReplay ? <div className="empty">This session has no replay. Its events are available in the timeline.</div> :
+            error ? <div className="error">{error}</div> : <div className="player-host" ref={host} data-testid="replay" />}
         </div>
-        <div className="player-bar">
+        {hasReplay && <div className="player-bar">
           <button type="button" className="icon-btn" aria-label={playing ? 'Pause' : 'Play'} onClick={toggle} disabled={!player}>
             <Icon name={playing ? 'pause' : 'play'} size={14} /></button>
           <span className="mono small" aria-label="Replay time">{clock(now)} / {clock(meta.totalTime)}</span>
@@ -137,12 +137,12 @@ export function SessionPlayer({ detail, at, go }: { detail: api.SessionDetail; a
             {SPEEDS.map((s) => <option key={s} value={s}>{s}x</option>)}
           </select>
           <label className="small"><input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> Skip inactivity</label>
-        </div>
+        </div>}
       </div>
       <aside className="session-events" aria-label="Session events">
         <div className="segmented" role="tablist">
           {FILTERS.map(([k, label]) => (
-            <button key={k} type="button" role="tab" aria-selected={filter === k} onClick={() => setFilter(k)}>
+            <button key={k} type="button" role="tab" aria-selected={filter === k} onClick={() => { setFilter(k); setOpen(null); }}>
               {label}{k !== 'all' && <span className="muted"> {timeline.filter((e) => (k === 'error' ? isBad(e) : e.type === k)).length}</span>}
             </button>
           ))}

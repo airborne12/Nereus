@@ -135,6 +135,10 @@ export function facets(s: Spec, signal?: AbortSignal) {
   return get<{ sampled: number; facets: Facet[] }>('/api/facets', specParams(s), signal);
 }
 
+export function facetValues(s: Spec, field: string, value: string, signal?: AbortSignal) {
+  return get<{ sampled: number; facets: Facet[] }>('/api/facets', { ...specParams(s), fields: field, value }, signal);
+}
+
 export function trace(id: string, r: Range, signal?: AbortSignal) {
   return get<{ spans: Span[] }>(`/api/trace/${id}`, { from: iso(r.from), to: iso(r.to) }, signal);
 }

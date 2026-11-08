@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import * as api from '../api.ts';
+import { CopyButton } from './CopyButton.tsx';
 
 function when(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : 'never';
@@ -40,7 +41,7 @@ function ApiKeys() {
         <div className="fresh-key" role="status">
           <div>Copy this key now. It is not shown again.</div>
           <code data-testid="new-key">{fresh}</code>
-          <button type="button" className="btn" onClick={() => navigator.clipboard?.writeText(fresh)}>Copy</button>
+          <CopyButton className="btn" text={fresh}>Copy</CopyButton>
         </div>
       )}
       {error && <div className="error" role="alert">{error}</div>}

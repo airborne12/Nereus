@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import type * as api from '../api.ts';
+import { useEffect, useState } from 'react';
+import * as api from '../api.ts';
 import type { Filter, SourceName } from '../lib/state.ts';
 import { Icon } from './Icon.tsx';
 
 export type AnalysisTab = 'results' | 'patterns' | 'deltas';
 
 interface Props {
+  spec: api.Spec;
   source: SourceName;
   facets: api.Facet[];
   sampled: number;
@@ -21,14 +22,35 @@ interface Props {
   onHide: () => void;
 }
 
-function FacetGroup({ facet, filter, sampled, open, onOpen, onToggle, onClear }: {
+function FacetGroup({ spec, facet, filter, sampled, open, onOpen, onToggle, onClear }: {
+  spec: api.Spec;
   facet: api.Facet; filter: Filter | undefined; sampled: number; open: boolean; onOpen: () => void;
   onToggle: Props['onToggle']; onClear: () => void;
 }) {
   const [q, setQ] = useState('');
   const [more, setMore] = useState(false);
+  const [remote, setRemote] = useState<api.Facet | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    setRemote(null);
+    setError('');
+    setLoading(false);
+    if (!open || !q.trim()) return;
+    const ac = new AbortController();
+    setLoading(true);
+    const timer = setTimeout(() => {
+      api.facetValues(spec, facet.field, q, ac.signal).then((r) => {
+        if (!ac.signal.aborted) { setRemote(r.facets[0] ?? { field: facet.field, values: [] }); setLoading(false); }
+      }, (e) => {
+        if (!ac.signal.aborted) { setError(e.message); setLoading(false); }
+      });
+    }, 200);
+    return () => { clearTimeout(timer); ac.abort(); };
+  }, [spec, facet.field, q, open]);
   // Selected values stay listed even when they are no longer among the top values.
-  const listed = [...facet.values];
+  const current = remote ?? facet;
+  const listed = [...current.values];
   for (const v of filter?.values ?? []) if (!listed.some((x) => x.v === v)) listed.push({ v, n: 0 });
   const shown = listed.filter((x) => x.v.toLowerCase().includes(q.toLowerCase()));
   const visible = more ? shown : shown.slice(0, 10);
@@ -44,14 +66,14 @@ function FacetGroup({ facet, filter, sampled, open, onOpen, onToggle, onClear }:
       </div>
       {open && (
         <div className="facet-body">
-          {listed.length > 10 && (
-            <input className="facet-search" placeholder="Search values..." aria-label={`Search ${facet.field} values`} value={q}
-              onChange={(e) => setQ(e.target.value)} />
-          )}
+          <input className="facet-search" placeholder="Search values..." aria-label={`Search ${facet.field} values`} value={q}
+            onChange={(e) => { setQ(e.target.value); setMore(false); }} />
+          {loading && <div className="muted small" role="status">Searching values…</div>}
+          {error && <div className="error small" role="alert">{error}</div>}
           {visible.map((x) => {
             const included = Boolean(filter && !filter.exclude && filter.values.includes(x.v));
             const excluded = Boolean(filter?.exclude && filter.values.includes(x.v));
-            const base = facet.sampled ?? sampled;
+            const base = current.sampled ?? sampled;
             const pct = base ? Math.round((x.n / base) * 100) : 0;
             return (
               <div key={x.v} className={`facet-value${excluded ? ' excluded' : ''}`}>
@@ -65,7 +87,7 @@ function FacetGroup({ facet, filter, sampled, open, onOpen, onToggle, onClear }:
                   <button type="button" onClick={() => onToggle(facet.field, x.v, 'only')}>Only</button>
                   <button type="button" onClick={() => onToggle(facet.field, x.v, 'exclude')}>Exclude</button>
                 </span>
-                <span className="fv-count" title={`${x.n.toLocaleString()} of ${sampled.toLocaleString()} sampled rows`}>
+                <span className="fv-count" title={`${x.n.toLocaleString()} of ${base.toLocaleString()} sampled rows`}>
                   {x.n ? `${pct}%` : ''}
                 </span>
                 <span className="fv-bar" style={{ width: `${pct}%` }} />
@@ -115,7 +137,7 @@ export function FilterPanel(p: Props) {
       )}
       <div className="facet-list">
         {order.map((f, i) => (
-          <FacetGroup key={f.field} facet={f} filter={p.filters.find((x) => x.field === f.field)} sampled={p.sampled}
+          <FacetGroup key={f.field} spec={p.spec} facet={f} filter={p.filters.find((x) => x.field === f.field)} sampled={p.sampled}
             open={isOpen(f.field, i)} onOpen={() => setOpened({ ...opened, [f.field]: !isOpen(f.field, i) })}
             onToggle={p.onToggle} onClear={() => p.onClearField(f.field)} />
         ))}

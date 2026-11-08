@@ -210,6 +210,10 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
 
   // Live tail: move the window forward on an interval until the user scrolls, zooms or opens a row.
   useEffect(() => {
+    if (live && selected) setPaused(true);
+  }, [live, selected]);
+
+  useEffect(() => {
     if (!live || paused) return;
     const t = setInterval(() => setNow(Date.now()), liveEvery * 1000);
     return () => clearInterval(t);
@@ -333,7 +337,7 @@ export function SearchPage({ go: navigate, onChanged }: { go: (url: string) => v
 
       <div className="search-body">
         {showFilters && (
-          <FilterPanel source={state.source} facets={facets.facets} sampled={facets.sampled} loading={facets.loading}
+          <FilterPanel spec={spec} source={state.source} facets={facets.facets} sampled={facets.sampled} loading={facets.loading}
             filters={state.filters} tab={tab} rootOnly={state.filters.some((f) => f.field === 'is_root')}
             onTab={setTab} onHide={() => setShowFilters(false)}
             onRootOnly={(v) => go({ filters: v ? [...state.filters.filter((f) => f.field !== 'is_root'), { field: 'is_root', values: ['1'] }] : state.filters.filter((f) => f.field !== 'is_root') })}

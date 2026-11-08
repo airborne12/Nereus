@@ -248,7 +248,7 @@ test('histogram drag zooms; Generated SQL shows what ran', async () => {
   await page.getByRole('button', { name: 'Show Generated SQL' }).click();
   const dialog = page.getByRole('dialog', { name: 'Generated SQL' });
   const sql = await dialog.innerText();
-  assert.match(sql, /SELECT \* FROM otel_bench\.otel_logs WHERE timestamp >= /);
+  assert.ok(sql.includes(`SELECT * FROM ${DB}.otel_logs WHERE timestamp >= `));
   assert.match(sql, /GROUP BY t, g/);
   await dialog.getByRole('button', { name: 'Close' }).click();
 });
