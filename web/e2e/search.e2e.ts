@@ -707,6 +707,171 @@ test('phone search keeps navigation and result actions accessible', async () => 
   }
 });
 
+test('navigation collapse persists and keyboard shortcuts move between event details', async () => {
+  await open('source=logs&t=7d');
+  const collapse = page.getByRole('button', { name: 'Collapse/expand navigation', exact: true });
+  await collapse.click();
+  await page.locator('.shell.nav-collapsed').waitFor();
+  await page.reload();
+  await page.locator('.shell.nav-collapsed').waitFor();
+  await settled();
+  await collapse.click();
+  await page.waitForFunction(() => !document.querySelector('.shell.nav-collapsed'));
+  await page.locator('.count').click();
+  await page.keyboard.press('/');
+  assert.equal(await where().evaluate((el) => el === document.activeElement), true);
+  await where().press('Escape');
+  await where().blur();
+  await rows().first().click();
+  const panel = page.getByLabel('Event details', { exact: true });
+  const timestamp = panel.locator('.kv').filter({ has: page.getByRole('button', { name: 'Copy timestamp', exact: true }) }).locator('dd');
+  const first = await timestamp.innerText();
+  await page.keyboard.press('j');
+  assert.notEqual(await timestamp.innerText(), first);
+  await page.keyboard.press('k');
+  assert.equal(await timestamp.innerText(), first);
+  await page.keyboard.press('Escape');
+  assert.equal(await panel.count(), 0);
+});
+
+test('saved search rename, tag filtering and delete confirmation persist through reload', async () => {
+  await open('source=logs&t=7d&where=level%3Aerror');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Save search', exact: true });
+  await dialog.getByLabel('Name', { exact: true }).fill('Lifecycle search');
+  await dialog.getByLabel('Tags', { exact: true }).fill('before');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByLabel('Saved search name').waitFor();
+  const id = new URL(page.url()).searchParams.get('saved')!;
+  const renamed = page.waitForResponse((r) => r.url().endsWith(`/api/saved-searches/${id}`) && r.request().method() === 'PUT');
+  await page.getByLabel('Saved search name').fill('Lifecycle renamed');
+  await page.getByLabel('Saved search name').press('Enter');
+  assert.equal((await renamed).status(), 200);
+  const tagged = page.waitForResponse((r) => r.url().endsWith(`/api/saved-searches/${id}`) && r.request().method() === 'PUT');
+  await page.getByLabel('Tags', { exact: true }).fill('lifecycle, after');
+  await page.getByLabel('Tags', { exact: true }).blur();
+  assert.equal((await tagged).status(), 200);
+  await page.reload();
+  await page.getByLabel('Saved search name').waitFor();
+  assert.equal(await page.getByLabel('Saved search name').inputValue(), 'Lifecycle renamed');
+  assert.equal(await page.getByLabel('Tags', { exact: true }).inputValue(), 'lifecycle, after');
+  await page.goto(`${base}/search/list`);
+  await page.getByLabel('Filter by tag').selectOption('lifecycle');
+  await page.getByLabel('Search by name').fill('Lifecycle');
+  await page.locator('table.list tbody tr').first().waitFor();
+  assert.equal(await page.locator('table.list tbody tr').count(), 1);
+  await page.locator('table.list tbody tr').first().click();
+  await settled();
+  await page.getByRole('button', { name: 'Delete saved search', exact: true }).click();
+  await page.getByRole('button', { name: 'No', exact: true }).click();
+  assert.equal(await page.evaluate((id) => fetch(`/api/saved-searches/${id}`).then((r) => r.status), id), 200);
+  await page.getByRole('button', { name: 'Delete saved search', exact: true }).click();
+  const deleted = page.waitForResponse((r) => r.url().endsWith(`/api/saved-searches/${id}`) && r.request().method() === 'DELETE');
+  await page.getByRole('button', { name: 'Yes', exact: true }).click();
+  assert.equal((await deleted).status(), 200);
+  await page.waitForFunction(() => !document.querySelector('.saved-bar'));
+  assert.equal(await page.evaluate((id) => fetch(`/api/saved-searches/${id}`).then((r) => r.status), id), 404);
+});
+
+test('settings enforce member controls, reject duplicate users and invalidate disabled sessions', async () => {
+  const email = 'lifecycle-member@example.test', password = 'member-integration-pass';
+  await page.goto(`${base}/team`);
+  await page.getByLabel('New user email').fill(email);
+  await page.getByLabel('New user name').fill('Lifecycle member');
+  await page.getByLabel('New user password').fill(password);
+  await page.getByLabel('New user role').selectOption('member');
+  await page.getByRole('button', { name: 'Add user', exact: true }).click();
+  await page.getByRole('cell', { name: email, exact: true }).waitFor();
+  const own = page.locator('table.list tbody tr').filter({ has: page.getByRole('cell', { name: 'admin@example.com', exact: true }) });
+  assert.equal(await own.getByRole('button', { name: /^Disable/ }).count(), 0);
+  await page.getByLabel('New user email').fill(email);
+  await page.getByLabel('New user password').fill(password);
+  await page.getByRole('button', { name: 'Add user', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: /already|exists|duplicate/i }).waitFor();
+  const context = await browser.newContext();
+  try {
+    const member = await context.newPage();
+    await member.goto(`${base}/team`);
+    await member.getByLabel('Email', { exact: true }).fill(email);
+    await member.getByLabel('Password', { exact: true }).fill('deliberately-wrong-password');
+    await member.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await member.getByRole('alert').filter({ hasText: 'wrong email or password' }).waitFor();
+    await member.getByLabel('Password', { exact: true }).fill(password);
+    await member.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await member.getByRole('heading', { name: 'API keys', exact: true }).waitFor();
+    for (const name of ['Users', 'Webhooks', 'Ingestion keys']) {
+      assert.equal(await member.getByRole('heading', { name, exact: true }).count(), 0, `${name} is restricted to administrators`);
+    }
+    assert.equal(await member.evaluate(() => fetch('/api/users').then((r) => r.status)), 403);
+    await page.getByRole('button', { name: `Disable ${email}`, exact: true }).click();
+    await page.getByRole('button', { name: `Enable ${email}`, exact: true }).waitFor();
+    await member.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Search', exact: true }).click();
+    await member.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
+    await page.getByRole('button', { name: `Enable ${email}`, exact: true }).click();
+    await page.getByRole('button', { name: `Disable ${email}`, exact: true }).waitFor();
+    await member.getByLabel('Email', { exact: true }).fill(email);
+    await member.getByLabel('Password', { exact: true }).fill(password);
+    await member.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await member.getByLabel('Search query').waitFor();
+  } finally {
+    await context.close();
+  }
+});
+
+test('settings revoke API keys and keep ingestion keys write-only', async () => {
+  await page.goto(`${base}/team`);
+  await page.getByLabel('New key name').fill('Lifecycle API key');
+  await page.getByRole('button', { name: 'Create key', exact: true }).click();
+  const key = await page.getByTestId('new-key').innerText();
+  const bearerStatus = (token: string) => fetch(`${base}/api/fields?source=logs`, { headers: { authorization: `Bearer ${token}` } }).then((r) => r.status);
+  assert.equal(await bearerStatus(key), 200);
+  await page.getByRole('button', { name: 'Revoke Lifecycle API key', exact: true }).click();
+  const keyRow = page.locator('section.card').filter({ has: page.getByRole('heading', { name: 'API keys', exact: true }) }).locator('tbody tr').filter({ hasText: 'Lifecycle API key' });
+  await keyRow.getByText('revoked', { exact: true }).waitFor();
+  assert.equal(await bearerStatus(key), 401);
+  await page.getByLabel('Ingestion key name').fill('Lifecycle browser key');
+  await page.getByRole('button', { name: 'Create ingestion key', exact: true }).click();
+  const ingest = await page.getByTestId('new-ingest-key').innerText();
+  const snippet = await page.locator('.key-shown pre').innerText();
+  assert.ok(snippet.includes(base) && snippet.includes(ingest));
+  assert.equal(await bearerStatus(ingest), 401);
+  await page.getByRole('button', { name: 'Revoke ingestion key Lifecycle browser key', exact: true }).click();
+  const ingestRow = page.locator('section.card').filter({ has: page.getByRole('heading', { name: 'Ingestion keys', exact: true }) }).locator('tbody tr').filter({ hasText: 'Lifecycle browser key' });
+  await ingestRow.getByText('revoked', { exact: true }).waitFor();
+  const response = await fetch(`${base}/api/ingest/sessions`, { method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${ingest}` },
+    body: JSON.stringify({ sessionId: 's_revoked_lifecycle', events: [] }) });
+  assert.equal(response.status, 401);
+});
+
+test('saved search alerts can be silenced, restored and deleted through the dialog', async () => {
+  await page.getByRole('list', { name: 'Favorite saved searches' }).getByRole('button', { name: 'Payment errors' }).click();
+  await settled();
+  await page.locator('.saved-bar').getByRole('button', { name: /Alerts/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Alerts for "Payment errors"', exact: true });
+  await dialog.getByRole('button', { name: 'Silence 1h', exact: true }).click();
+  await dialog.getByText('silenced', { exact: true }).waitFor();
+  await dialog.getByRole('button', { name: 'Unsilence', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Silence 1h', exact: true }).waitFor();
+  assert.equal(await dialog.getByText('silenced', { exact: true }).count(), 0);
+  await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"] tbody tr'));
+  await page.keyboard.press('Escape');
+});
+
+test('Chart explorer enforces the series limit and its save dialog can be cancelled', async () => {
+  await page.goto(`${base}/chart`);
+  for (let i = 1; i < 10; i++) await page.getByRole('button', { name: '+ Add series', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '+ Add series', exact: true }).isDisabled(), true);
+  assert.equal(await page.locator('.chart-builder .series').count(), 10);
+  await page.getByRole('button', { name: 'Remove series 10', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '+ Add series', exact: true }).isEnabled(), true);
+  await page.getByRole('button', { name: 'Save to dashboard', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Save to dashboard', exact: true }).waitFor();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.getByRole('dialog').count(), 0);
+});
+
 test('team settings: an API key works as a bearer token; users; logout', async () => {
   await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Team settings' }).click();
   await page.getByLabel('New key name').fill('ci');

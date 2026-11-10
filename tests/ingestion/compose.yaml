@@ -1,0 +1,141 @@
+# No host ports or fixed subnets. Each run creates its own Compose project.
+x-client: &client
+  image: ${INGEST_TEST_PROJECT:?}-otlp
+  build:
+    context: ../..
+    dockerfile: tests/ingestion/clients/Dockerfile
+    target: otlp
+  user: "${INGEST_TEST_UID:?}:${INGEST_TEST_GID:?}"
+  volumes:
+    - ${INGEST_TEST_ARTIFACTS:?}:/artifacts
+  mem_limit: 512m
+
+x-doris: &doris
+  init: true
+  volumes:
+    - ./doris-entrypoint.sh:/test-start.sh:ro
+
+x-collector: &collector
+  image: otel/opentelemetry-collector-contrib:0.164.0
+  environment:
+    DORIS_HTTP: http://doris-fe:8030
+    DORIS_DB: otel_test
+  command: ["--config=/etc/otelcol/base.yaml"]
+  volumes:
+    - ../../collector/config.yaml:/etc/otelcol/base.yaml:ro
+  depends_on:
+    schema-init:
+      condition: service_completed_successfully
+  mem_limit: 512m
+
+services:
+  doris-fe:
+    <<: *doris
+    image: apache/doris:fe-4.1.5
+    entrypoint: ["bash", "/test-start.sh", "fe"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8030/api/bootstrap | grep -q '\"code\":0'"]
+      interval: 3s
+      timeout: 3s
+      retries: 80
+    cpus: 2
+    mem_limit: 4g
+
+  doris-be:
+    <<: *doris
+    image: apache/doris:be-4.1.5
+    entrypoint: ["bash", "/test-start.sh", "be"]
+    depends_on:
+      doris-fe:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -hdoris-fe -P9030 -uroot -N -e 'SHOW BACKENDS' | grep -wq true"]
+      interval: 3s
+      timeout: 3s
+      retries: 80
+    cpus: 4
+    mem_limit: 8g
+
+  schema-init:
+    image: mysql:8.0
+    volumes:
+      - ../../schema:/schema:ro
+    entrypoint: ["bash", "/schema/apply.sh", "-h", "doris-fe", "-P", "9030", "-d", "otel_test"]
+    depends_on:
+      doris-be:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: nereus
+      POSTGRES_PASSWORD: integration-test
+      POSTGRES_DB: nereus
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nereus"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 512m
+
+  nereus:
+    image: ${INGEST_TEST_PROJECT:?}-app
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      DORIS_HOST: doris-fe
+      DORIS_DB: otel_test
+      META_DATABASE_URL: postgres://nereus:integration-test@postgres:5432/nereus
+      COOKIE_SECURE: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      schema-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    mem_limit: 1g
+
+  collector:
+    <<: *collector
+
+  jaeger-collector:
+    <<: *collector
+    profiles: [jaeger]
+    command: ["--config=/etc/otelcol/base.yaml", "--config=/etc/otelcol/jaeger.yaml"]
+    volumes:
+      - ../../collector/config.yaml:/etc/otelcol/base.yaml:ro
+      - ./collector-jaeger.yaml:/etc/otelcol/jaeger.yaml:ro
+
+  client:
+    <<: *client
+    profiles: [test]
+
+  jaeger-client:
+    <<: *client
+    profiles: [jaeger]
+    image: ${INGEST_TEST_PROJECT:?}-jaeger
+    build:
+      context: ../..
+      dockerfile: tests/ingestion/clients/Dockerfile
+      target: jaeger
+
+  verify:
+    image: ${INGEST_TEST_PROJECT:?}-app
+    profiles: [test]
+    user: "${INGEST_TEST_UID:?}:${INGEST_TEST_GID:?}"
+    environment:
+      DORIS_HOST: doris-fe
+      DORIS_DB: otel_test
+      NEREUS_URL: http://nereus:8090
+      ARTIFACT_DIR: /artifacts
+      INCLUDE_JAEGER: ${INGEST_TEST_JAEGER:-0}
+    entrypoint: ["node", "--test", "--test-reporter=tap", "/app/tests/ingestion/verify.mjs"]
+    volumes:
+      - ./verify.mjs:/app/tests/ingestion/verify.mjs:ro
+      - ${INGEST_TEST_ARTIFACTS:?}:/artifacts
+    mem_limit: 512m

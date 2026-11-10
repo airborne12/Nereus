@@ -134,6 +134,13 @@ HTTP compatibility tests bind an ephemeral port and use a local non-loopback IPv
 set `BROWSER_HTTP_HOST` to choose the address. They verify the actual system clipboard too.
 For schema Stream Load tests, set `DORIS_TEST=1` and `DORIS_BE_HTTP_URL` to the BE HTTP endpoint.
 
+For a self-contained test of real client ingestion, run `./tests/ingestion/run.sh`.
+It builds the application, starts isolated Doris/PostgreSQL/Collector services,
+and validates official OpenTelemetry HTTP/gRPC exporters and string fidelity.
+Add `--jaeger` for native Jaeger Thrift/UDP compatibility checks.
+See [client ingestion integration tests](tests/ingestion/README.md) for requirements,
+coverage, cleanup and result artifacts.
+
 ## Saved searches, alerts, charts and dashboards
 
 - **Saved searches** keep the query (source, WHERE and language, filters, SELECT, ORDER BY) and tags,

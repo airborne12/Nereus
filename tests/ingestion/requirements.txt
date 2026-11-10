@@ -1,0 +1,19 @@
+# Pinned Python 3.11 dependencies for official OpenTelemetry clients.
+certifi==2026.10.23
+charset-normalizer==3.5.2
+googleapis-common-protos==1.76.0
+grpcio==1.85.1
+idna==3.20
+importlib_metadata==8.7.1
+opentelemetry-api==1.40.0
+opentelemetry-exporter-otlp-proto-common==1.40.0
+opentelemetry-exporter-otlp-proto-grpc==1.40.0
+opentelemetry-exporter-otlp-proto-http==1.40.0
+opentelemetry-proto==1.40.0
+opentelemetry-sdk==1.40.0
+opentelemetry-semantic-conventions==0.61b0
+protobuf==6.33.6
+requests==2.34.2
+typing_extensions==4.16.0
+urllib3==2.8.0
+zipp==4.1.2
