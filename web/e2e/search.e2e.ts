@@ -4,17 +4,17 @@
 //
 //   npm run build && DORIS_PORT=9930 DORIS_DB=otel_bench SHOTS=/tmp/shots npm run e2e
 
-import { IngestKeys } from '../../server/src/sessions/http.ts';
+import { IngestKeys } from '../../server/src/rum/http.ts';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { type Browser, type Page, chromium } from 'playwright';
-import { ContentStore } from '../../server/src/content/store.ts';
+import { ContentStore } from '../../server/src/control/content/store.ts';
 import { createServer } from 'node:http';
-import { AuthStore } from '../../server/src/auth/store.ts';
-import { AlertRunner } from '../../server/src/content/alerts.ts';
-import { Doris, configFromEnv } from '../../server/src/db.ts';
+import { AuthStore } from '../../server/src/control/auth/store.ts';
+import { AlertRunner } from '../../server/src/control/content/alerts.ts';
+import { Doris, configFromEnv } from '../../server/src/db/doris.ts';
 import { createApp, sourcesFor } from '../../server/src/server.ts';
 import { freshMetaDb } from '../../server/test/meta-helper.ts';
 
@@ -607,7 +607,7 @@ test('client sessions: the SDK on another site records a session that replays, m
   await new Promise<void>((r) => shopServer.close(() => r()));
 
   // Inputs are masked: the card number is nowhere in what was stored.
-  const [{ n, leaks }] = await doris.query(`SELECT count(*) AS n, sum(if(payload LIKE '%4111%' OR message LIKE '%4111%', 1, 0)) AS leaks FROM ${DB}.otel_sessions WHERE session_id = '${sid}'`) as any[];
+  const [{ n, leaks }] = await doris.query(`SELECT count(*) AS n, sum(if(payload LIKE '%4111%' OR message LIKE '%4111%', 1, 0)) AS leaks FROM ${DB}.rum_sessions WHERE session_id = '${sid}'`) as any[];
   assert.ok(Number(n) > 5, `${n} rows`);
   assert.equal(Number(leaks), 0);
 
@@ -640,7 +640,7 @@ test('client sessions: the SDK on another site records a session that replays, m
   assert.match(text, /Checkout failed: payment service unavailable/);
   assert.match(text, /input#card/);
   assert.doesNotMatch(text, /4111/);
-  const urls = (await doris.query(`SELECT url FROM ${DB}.otel_sessions WHERE session_id = '${sid}' AND event_type = 'navigation' ORDER BY timestamp`) as any[]).map((r) => r.url);
+  const urls = (await doris.query(`SELECT url FROM ${DB}.rum_sessions WHERE session_id = '${sid}' AND event_type = 'navigation' ORDER BY timestamp`) as any[]).map((r) => r.url);
   assert.deepEqual(urls.map((u: string) => new URL(u).pathname), ['/', '/cart'], 'page views, without the example\'s parameters');
   await list.getByRole('tab', { name: /^Errors/ }).click();
   assert.equal(await list.locator('li').count(), 2);

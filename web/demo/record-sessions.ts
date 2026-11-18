@@ -1,6 +1,6 @@
 // Records a few browser sessions on the example shop (sdk-example/shop.html) through the real SDK
 // and ingestion API, for the offline demo's snapshot. Runs the API service in-process on a fresh
-// metadata database; the rows land in DORIS_DB.otel_sessions. Prints the session ids.
+// metadata database; the rows land in DORIS_DB.rum_sessions. Prints the session ids.
 //
 //   npm run build && DORIS_PORT=9930 DORIS_DB=otel_bench node demo/record-sessions.ts
 
@@ -8,11 +8,11 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { chromium, type Page } from 'playwright';
-import { AuthStore } from '../../server/src/auth/store.ts';
-import { ContentStore } from '../../server/src/content/store.ts';
-import { Doris, configFromEnv } from '../../server/src/db.ts';
+import { AuthStore } from '../../server/src/control/auth/store.ts';
+import { ContentStore } from '../../server/src/control/content/store.ts';
+import { Doris, configFromEnv } from '../../server/src/db/doris.ts';
 import { createApp } from '../../server/src/server.ts';
-import { IngestKeys } from '../../server/src/sessions/http.ts';
+import { IngestKeys } from '../../server/src/rum/http.ts';
 import { freshMetaDb } from '../../server/test/meta-helper.ts';
 
 const doris = new Doris(configFromEnv());

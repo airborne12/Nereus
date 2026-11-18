@@ -76,8 +76,8 @@ Every `/api/*` call except `/api/auth/*` needs a login: the browser's session co
 | `GET /api/service-map?where=&language=&filters=&from=&to=` | calls between services and per-service requests, errors, p99 |
 | `GET /api/heatmap?where=&language=&filters=&from=&to=&buckets=` | trace durations per time bucket and duration band (Event Deltas) |
 | `POST /api/ingest/sessions` (ingestion key; CORS) | browser SDK: replay chunks and session events |
-| `GET /api/sessions?where=&language=&filters=&from=&to=`, `GET /api/sessions/<id>?from=&to=` | sessions with a matching event; one session's events and replay |
-| `GET /api/sessions/by-trace/<trace id>?from=&to=` | the session whose request started a trace |
+| `GET /api/rum/sessions?where=&language=&filters=&from=&to=`, `GET /api/rum/sessions/<id>?from=&to=` | sessions with a matching event; one session's events and replay |
+| `GET /api/rum/sessions/by-trace/<trace id>?from=&to=` | the session whose request started a trace |
 | `GET`/`POST /api/ingest-keys`, `DELETE …/<id>` (admins) | ingestion keys for the browser SDK |
 
 Users, sessions and keys: passwords are scrypt hashes, session and API key tokens are 256-bit
@@ -195,8 +195,8 @@ console errors and network requests (method, URL, status, duration):
 </script>
 ```
 
-A session ends after 30 minutes without activity or 4 hours. Rows go to `otel_sessions`
-(`schema/002_sessions.sql`, zstd, keyed by session); a replay chunk bigger than a Doris STRING
+A session ends after 30 minutes without activity or 4 hours. Rows go to `rum_sessions`
+(`schema/002_rum_sessions.sql`, zstd, keyed by session); a replay chunk bigger than a Doris STRING
 value is split into parts and joined back on read. **Client sessions** lists the sessions with an
 event matching the WHERE (`type:error`, `email:ada@example.com`, `url:checkout`, `"text"`) and
 replays one, with a timeline of its events that seeks the player. `web/sdk-example/shop.html` is
@@ -227,6 +227,23 @@ Privacy and security:
   cached for 10 s, so a revoked key stops working within 10 s.
 - Replays render the recorded DOM in rrweb's iframe sandbox without `allow-scripts`, so recorded
   scripts do not run. The viewer's browser does load the recorded page's images and styles.
+
+## Agent trajectories: importing Claude Code transcripts
+
+Create the agent tables (`schema/apply.sh` applies `schema/003_agent_tables.sql`; `-a` sets their
+retention in days, 365 by default), then import transcripts:
+
+    cd server
+    DORIS_HOST=127.0.0.1 DORIS_PORT=9030 DORIS_DB=otel DORIS_BE_HTTP_URL=http://127.0.0.1:8040 \
+      node src/cli/import-transcripts.ts ~/.claude/projects
+
+Each `<session>.jsonl` becomes a main session; files under `<session>/subagents/` become its
+sub-agent sessions. A file is imported again only when its size or modification time changed
+(`--force` imports regardless). The importer should use its own Doris account that can only load
+the agent tables:
+
+    GRANT LOAD_PRIV ON otel.agent_sessions TO 'nereus_import'@'%';
+    -- likewise agent_events, agent_messages, agent_contexts, agent_prompts; plus SELECT_PRIV on them
 
 ## Scale
 
@@ -291,7 +308,7 @@ Deployment checklist:
   ```sql
   CREATE USER 'nereus'@'%' IDENTIFIED BY '<password>';
   GRANT SELECT_PRIV ON otel.* TO 'nereus'@'%';
-  GRANT LOAD_PRIV ON otel.otel_sessions TO 'nereus'@'%';
+  GRANT LOAD_PRIV ON otel.rum_sessions TO 'nereus'@'%';
   -- Optional second layer: refuse table functions that reach other hosts, and exports.
   CREATE SQL_BLOCK_RULE nereus_no_external PROPERTIES (
     'sql' = '(?i)\\b(http|s3|hdfs|local)\\s*\\(|\\binto\\s+outfile\\b', 'global' = 'false', 'enable' = 'true');

@@ -3,9 +3,9 @@
 
 import {
   defaultFacetFields, facetsSql, heatmapSql, HEAT_BANDS_PER_DECADE, histogramStep, OTHER_GROUP, searchHistogramSql, serviceMapSql, searchRowsSql, selectColumns, type Filter, type SearchSpec,
-} from '../../../server/src/query/build.ts';
-import { unknownFields } from '../../../server/src/query/compile.ts';
-import { logsSource, metricsSource, sessionsSource, tracesSource, type Source } from '../../../server/src/query/source.ts';
+} from '../../../server/src/semantics/search/build.ts';
+import { unknownFields } from '../../../server/src/semantics/search/compile.ts';
+import { logsSource, metricsSource, rumSource, tracesSource, type Source } from '../../../server/src/semantics/search/source.ts';
 import { createDemoContent } from './content.ts';
 import { compileFilter, type DemoRow, fieldValue } from './evaluate.ts';
 
@@ -13,7 +13,7 @@ interface Snapshot {
   logs: DemoRow[];
   traces: DemoRow[];
   metrics?: DemoRow[];
-  /** otel_sessions rows of a few sessions recorded on the example shop (demo/record-sessions.ts). */
+  /** rum_sessions rows of a few sessions recorded on the example shop (demo/record-sessions.ts). */
   sessions?: DemoRow[];
   fields: Record<string, { name: string; type: string }[]>;
 }
@@ -154,7 +154,7 @@ export async function install(): Promise<void> {
   const data: Record<string, DemoRow[]> = { logs: snap.logs, traces: snap.traces, metrics: snap.metrics };
 
   // Sessions end two minutes ago; rrweb timestamps inside the replay move with them.
-  const sessionSource = sessionsSource('demo');
+  const sessionSource = rumSource('demo');
   const parts = new Map<string, Map<number, string[]>>();
   for (const r of sessRows) {
     r.timestamp = shiftTime(String(r.timestamp), sOff);
@@ -302,7 +302,7 @@ export async function install(): Promise<void> {
       }
       const dis = /^\/api\/users\/(\d+)\/disabled$/.exec(path);
       if (dis) { const u = users.find((x) => x.id === Number(dis[1])); if (u) u.disabled = Boolean((body as { disabled: boolean }).disabled); return json(200, { user: u }); }
-      if (path === '/api/sessions') {
+      if (path === '/api/rum/sessions') {
         const spec = specOf(p);
         if (spec.language === 'sql') throw new Error('The offline demo runs Lucene queries only; SQL mode needs a Doris cluster.');
         const match = matcher(sessionSource, spec);
@@ -321,14 +321,14 @@ export async function install(): Promise<void> {
         }).sort((a, b) => String(b.started).localeCompare(String(a.started)));
         return json(200, { sessions, sql: '(offline demo: computed in the browser)' });
       }
-      const bt = /^\/api\/sessions\/by-trace\/([0-9a-f]{32})$/.exec(path);
+      const bt = /^\/api\/rum\/sessions\/by-trace\/([0-9a-f]{32})$/.exec(path);
       if (bt) {
         const hit = sessionEvents.find((r) => r.event_type === 'network' && (r.attributes as Record<string, unknown> | null)?.trace_id === bt[1]);
         if (!hit) return json(200, { session: null });
         const rs = sessRows.filter((r) => r.session_id === hit.session_id).map((r) => String(r.timestamp)).sort();
         return json(200, { session: { sessionId: hit.session_id, at: hit.timestamp, started: rs[0], ended: rs.at(-1), user: hit.user_email ?? hit.user_name ?? null } });
       }
-      const sm = /^\/api\/sessions\/([^/]+)$/.exec(path);
+      const sm = /^\/api\/rum\/sessions\/([^/]+)$/.exec(path);
       if (sm) {
         const sid = decodeURIComponent(sm[1]!);
         const rs = sessRows.filter((r) => r.session_id === sid).sort((a, b) => (a._ms as number) - (b._ms as number));

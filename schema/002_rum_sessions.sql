@@ -2,7 +2,7 @@
 -- the session (clicks, page views, errors, console errors, network requests). One session's rows
 -- sit together (session_id leads the key). A replay chunk too big for one STRING value is split
 -- into parts (seq, part) that the reader joins back.
-CREATE TABLE IF NOT EXISTS ${DB}.otel_sessions (
+CREATE TABLE IF NOT EXISTS ${DB}.rum_sessions (
     session_id   VARCHAR(64) NOT NULL,
     timestamp    DATETIME(6) NOT NULL,
     seq          INT NOT NULL,

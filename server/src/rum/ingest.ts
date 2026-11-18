@@ -1,4 +1,4 @@
-// Browser session ingestion: validate what the SDK sends and turn it into otel_sessions rows.
+// Browser session ingestion: validate what the SDK sends and turn it into rum_sessions rows.
 //
 // Body: {sessionId, service?, userAgent?, user?: {id, email, name},
 //        replay?: [{seq, t, events: [...rrweb events]}],

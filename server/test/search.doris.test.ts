@@ -6,8 +6,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
-import { compileWhere } from '../src/query/compile.ts';
-import { logsSource, tracesSource } from '../src/query/source.ts';
+import { compileWhere } from '../src/semantics/search/compile.ts';
+import { logsSource, tracesSource } from '../src/semantics/search/source.ts';
 
 const enabled = process.env.DORIS_TEST === '1';
 const host = process.env.DORIS_HOST ?? '127.0.0.1';

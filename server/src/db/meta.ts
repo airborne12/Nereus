@@ -9,7 +9,7 @@ export function metaPoolFromEnv(env: NodeJS.ProcessEnv = process.env): pg.Pool {
   return new pg.Pool({ connectionString: url, max: Number(env.META_POOL_SIZE ?? 10) });
 }
 
-const MIGRATIONS_DIR = new URL('../migrations/', import.meta.url);
+const MIGRATIONS_DIR = new URL('../../migrations/', import.meta.url);
 
 /**
  * Apply migrations/NNN_*.sql in order, each once and in its own transaction. An advisory lock

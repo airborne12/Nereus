@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import {
   defaultFacetFields, facetsSql, fieldsFromDescribe, histogramStep, parseTime, searchHistogramSql, searchRowsSql,
   searchWhere, selectColumns, splitSelect, traceSql, valuesSql,
-} from '../src/query/build.ts';
-import { CompileError } from '../src/query/compile.ts';
-import { logsSource, tracesSource } from '../src/query/source.ts';
+} from '../src/semantics/search/build.ts';
+import { CompileError } from '../src/semantics/search/compile.ts';
+import { logsSource, tracesSource } from '../src/semantics/search/source.ts';
 
 const logs = logsSource();
 const traces = tracesSource();
@@ -95,7 +95,7 @@ test('values and fields', () => {
 });
 
 test('SQL fragments: expressions pass; subqueries, table functions, exports, comments and escapes are refused', async () => {
-  const { sqlFragment } = await import('../src/query/build.ts');
+  const { sqlFragment } = await import('../src/semantics/search/build.ts');
   for (const ok of [
     "severity_text = 'ERROR' AND body LIKE '%select from union%'",
     'duration > 1000 AND lower(service_name) IN (\'cart\', "payment")',

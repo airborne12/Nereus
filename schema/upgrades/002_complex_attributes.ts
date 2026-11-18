@@ -1,6 +1,6 @@
 // Run with Node 24 after stopping all telemetry writers. Old tables remain as backups.
 import { pathToFileURL } from 'node:url';
-import { Doris, configFromEnv } from '../../server/src/db.ts';
+import { Doris, configFromEnv } from '../../server/src/db/doris.ts';
 
 function identifier(value: string): string {
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value)) throw new Error('Invalid SQL identifier');

@@ -4,9 +4,9 @@
 // resolves) unless the alert is silenced. A grouped tile breaches when any of its groups does
 // (the highest value for "above", the lowest for "below", among the 100 largest groups).
 
-import type { Doris } from '../db.ts';
-import { type ChartSpec, chartSql, countSql, type Filter } from '../query/build.ts';
-import type { Source } from '../query/source.ts';
+import type { Doris } from '../../db/doris.ts';
+import { type ChartSpec, chartSql, countSql, type Filter } from '../../semantics/search/build.ts';
+import type { Source } from '../../semantics/search/source.ts';
 import type { ContentStore } from './store.ts';
 
 export interface AlertMessage {

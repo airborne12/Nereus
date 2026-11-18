@@ -1,9 +1,9 @@
 // Facets with the sample as SELECT * (before) and as the faceted expressions only (now), at scale.
 //   PATH=/opt/doris/node/bin:$PATH DORIS_PORT=9930 DORIS_DB=otel_scale node bench/facets-compare.ts
 import mysql from 'mysql2/promise';
-import { defaultFacetFields, facetsSql, fieldsFromDescribe, searchWhere } from '../src/query/build.ts';
-import { fieldExpr } from '../src/query/compile.ts';
-import { logsSource, tracesSource } from '../src/query/source.ts';
+import { defaultFacetFields, facetsSql, fieldsFromDescribe, searchWhere } from '../src/semantics/search/build.ts';
+import { fieldExpr } from '../src/semantics/search/compile.ts';
+import { logsSource, tracesSource } from '../src/semantics/search/source.ts';
 
 const DB = process.env.DORIS_DB ?? 'otel_scale';
 const conn = await mysql.createConnection({ host: '127.0.0.1', port: Number(process.env.DORIS_PORT ?? 9030), user: 'root', dateStrings: true });

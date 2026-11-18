@@ -23,22 +23,22 @@
 import { readFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
-import { QuerySyntaxError } from './query/ast.ts';
-import { AlertRunner } from './content/alerts.ts';
-import { contentRoutes } from './content/http.ts';
-import { ContentStore } from './content/store.ts';
-import { readJson } from './auth/http.ts';
+import { QuerySyntaxError } from './semantics/search/ast.ts';
+import { AlertRunner } from './control/content/alerts.ts';
+import { contentRoutes } from './control/content/http.ts';
+import { ContentStore } from './control/content/store.ts';
+import { readJson } from './control/auth/http.ts';
 import {
   type ChartSpec, chartSql, defaultFacetFields, facetsSql, heatmapSql, serviceMapSql, fieldsFromDescribe, type Filter, searchHistogramSql, searchRowsSql, type SearchSpec,
   traceSql, valuesSql, type Field,
-} from './query/build.ts';
-import { CompileError, unknownFields } from './query/compile.ts';
-import { logsSource, metricsSource, sessionsSource, tracesSource, type Source } from './query/source.ts';
-import { Doris, configFromEnv } from './db.ts';
-import { type AuthContext, authRoutes, authenticate } from './auth/http.ts';
-import { type IngestLimits, IngestKeys, sessionRoutes } from './sessions/http.ts';
-import { AuthError, AuthStore } from './auth/store.ts';
-import { metaPoolFromEnv, migrate } from './meta.ts';
+} from './semantics/search/build.ts';
+import { CompileError, unknownFields } from './semantics/search/compile.ts';
+import { logsSource, metricsSource, rumSource, tracesSource, type Source } from './semantics/search/source.ts';
+import { Doris, configFromEnv } from './db/doris.ts';
+import { type AuthContext, authRoutes, authenticate } from './control/auth/http.ts';
+import { type IngestLimits, IngestKeys, rumRoutes } from './rum/http.ts';
+import { AuthError, AuthStore } from './control/auth/store.ts';
+import { metaPoolFromEnv, migrate } from './db/meta.ts';
 
 class BadRequest extends Error {}
 
@@ -112,7 +112,7 @@ export function sourcesFor(db: string): Record<string, Source> {
 
 export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, fetchImpl, webDir }: AppOptions): Server {
   const account = authRoutes(auth, send);
-  const sessions = sessionRoutes({ doris, keys: ingestKeys, source: sessionsSource(db), send, limits: ingestLimits });
+  const rum = rumRoutes({ doris, keys: ingestKeys, source: rumSource(db), send, limits: ingestLimits });
   const contentApi = contentRoutes(content, send, fetchImpl);
   const sources = sourcesFor(db);
   const sourceParam = (url: URL): Source => {
@@ -166,7 +166,7 @@ export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, 
       return serveStatic(webDir, path, res);
     }
     // Browser SDK ingestion: authorised by an ingestion key only, never by a session cookie.
-    if (path === '/api/ingest/sessions') return sessions.ingest(req, res);
+    if (path === '/api/ingest/sessions') return rum.ingest(req, res);
     if (path.startsWith('/api/auth/')) {
       if (await account.handlePublic(req, res, path)) return;
       return send(res, 404, { error: 'not found' });
@@ -175,7 +175,7 @@ export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, 
     if (!user) return send(res, 401, { error: 'login required' });
     if (await account.handleAccount(req, res, path, user)) return;
     if (await contentApi(req, res, url, user)) return;
-    if (await sessions.handle(req, res, url, user, () => searchSpec(url))) return;
+    if (await rum.handle(req, res, url, user, () => searchSpec(url))) return;
     if (path === '/api/chart' && req.method === 'POST') {
       const b = await readJson(req);
       const source = sources[String(b.source)];

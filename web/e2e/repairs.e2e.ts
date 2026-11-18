@@ -5,10 +5,10 @@ import type { AddressInfo } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { after, before, test } from 'node:test';
 import { type Browser, type BrowserContext, type Page, chromium } from 'playwright';
-import { Doris, configFromEnv } from '../../server/src/db.ts';
-import { AuthStore } from '../../server/src/auth/store.ts';
-import { ContentStore } from '../../server/src/content/store.ts';
-import { IngestKeys } from '../../server/src/sessions/http.ts';
+import { Doris, configFromEnv } from '../../server/src/db/doris.ts';
+import { AuthStore } from '../../server/src/control/auth/store.ts';
+import { ContentStore } from '../../server/src/control/content/store.ts';
+import { IngestKeys } from '../../server/src/rum/http.ts';
 import { createApp } from '../../server/src/server.ts';
 import { freshMetaDb } from '../../server/test/meta-helper.ts';
 
@@ -39,7 +39,7 @@ before(async () => {
     await browser.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await doris.query(`DELETE FROM ${db}.otel_logs WHERE service_name='${service}'`);
-    if (sessionId) await doris.query(`DELETE FROM ${db}.otel_sessions WHERE session_id='${sessionId}'`);
+    if (sessionId) await doris.query(`DELETE FROM ${db}.rum_sessions WHERE session_id='${sessionId}'`);
     await doris.close();
     await meta.drop();
   };

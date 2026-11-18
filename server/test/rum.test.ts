@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { insertSql, PART_CHARS, sessionRows, splitParts } from '../src/sessions/ingest.ts';
+import { insertSql, PART_CHARS, sessionRows, splitParts } from '../src/rum/ingest.ts';
 
 const now = Date.parse('2026-11-05T10:00:00Z');
 
@@ -50,9 +50,9 @@ test('sessionRows: rejects what does not fit', () => {
 
 test('insertSql: values escaped, statements batched by size', () => {
   const rows = sessionRows({ sessionId: 's_12345678', events: Array.from({ length: 30 }, (_, i) => ({ t: now, type: 'custom', message: `it's \\ ${i}` })) }, now);
-  const sql = insertSql('db.otel_sessions', rows, 1000);
+  const sql = insertSql('db.rum_sessions', rows, 1000);
   assert.ok(sql.length > 1);
-  assert.ok(sql.every((s) => s.startsWith('INSERT INTO db.otel_sessions (session_id, timestamp,')));
+  assert.ok(sql.every((s) => s.startsWith('INSERT INTO db.rum_sessions (session_id, timestamp,')));
   assert.match(sql[0]!, /'it\\'s \\\\ 0'/);
   assert.equal(sql.join(' ').match(/\('s_12345678'/g)!.length, 30);
   const withAttrs = insertSql('t', sessionRows({ sessionId: 's_12345678', events: [{ t: now, type: 'network', attributes: { status: 500 } }] }, now))[0]!;
@@ -60,7 +60,7 @@ test('insertSql: values escaped, statements batched by size', () => {
 });
 
 test('rate limiter: burst, then the refill rate; buckets are independent', async () => {
-  const { RateLimiter } = await import('../src/sessions/limit.ts');
+  const { RateLimiter } = await import('../src/rum/limit.ts');
   let t = 0;
   const l = new RateLimiter(2, 5, () => t);
   for (let i = 0; i < 5; i++) assert.equal(l.take('a').ok, true);
@@ -76,10 +76,17 @@ test('rate limiter: burst, then the refill rate; buckets are independent', async
 });
 
 test('client address: right-most entries come from trusted proxies; what the client sent is ignored', async () => {
-  const { clientAddress } = await import('../src/sessions/http.ts');
+  const { clientAddress } = await import('../src/rum/http.ts');
   assert.equal(clientAddress('1.1.1.1', '10.0.0.9', 0), '10.0.0.9', 'no proxy: the socket');
   assert.equal(clientAddress('spoofed, 203.0.113.7', '10.0.0.9', 1), '203.0.113.7', 'one proxy: its entry, the right-most');
   assert.equal(clientAddress('spoofed, 203.0.113.7, 198.51.100.1', '10.0.0.9', 2), '203.0.113.7', 'two proxies');
   assert.equal(clientAddress(undefined, '10.0.0.9', 1), '10.0.0.9', 'no header: the socket');
   assert.equal(clientAddress('203.0.113.7', '10.0.0.9', 2), '10.0.0.9', 'fewer entries than proxies: the socket');
+});
+
+test('browser sessions are searched as the rum source over rum_sessions', async () => {
+  const { rumSource } = await import('../src/semantics/search/source.ts');
+  const s = rumSource('db');
+  assert.equal(s.name, 'rum');
+  assert.equal(s.table, 'db.rum_sessions');
 });

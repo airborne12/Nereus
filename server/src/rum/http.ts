@@ -1,21 +1,21 @@
 // Client sessions: ingestion from the browser SDK, ingestion keys, and the Sessions pages' reads.
 //
 //   OPTIONS|POST /api/ingest/sessions   Authorization: Bearer <ingestion key>; CORS for any origin, no cookies
-//   GET /api/sessions?where=&language=&filters=&from=&to=   sessions with a matching event
-//   GET /api/sessions/<id>?from=&to=                         rows of one session (events and replay)
-//   GET /api/sessions/by-trace/<trace id>?from=&to=          the session whose request started a trace
+//   GET /api/rum/sessions?where=&language=&filters=&from=&to=   sessions with a matching event
+//   GET /api/rum/sessions/<id>?from=&to=                         rows of one session (events and replay)
+//   GET /api/rum/sessions/by-trace/<trace id>?from=&to=          the session whose request started a trace
 //   GET /api/ingest-keys; POST {name}, DELETE /api/ingest-keys/<id>   (admins)
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type pg from 'pg';
-import { readJson } from '../auth/http.ts';
-import { newToken, tokenHash } from '../auth/secrets.ts';
-import { AuthError, type User } from '../auth/store.ts';
-import type { Doris } from '../db.ts';
-import type { SearchSpec } from '../query/build.ts';
-import type { Source } from '../query/source.ts';
+import { readJson } from '../control/auth/http.ts';
+import { newToken, tokenHash } from '../control/auth/secrets.ts';
+import { AuthError, type User } from '../control/auth/store.ts';
+import type { Doris } from '../db/doris.ts';
+import type { SearchSpec } from '../semantics/search/build.ts';
+import type { Source } from '../semantics/search/source.ts';
 import { IngestError, insertSql, SESSION_ID, sessionRows } from './ingest.ts';
-import { parseTime } from '../query/build.ts';
+import { parseTime } from '../semantics/search/build.ts';
 import { RateLimiter } from './limit.ts';
 import { sessionForTraceSql, sessionRowsSql, sessionsListSql } from './query.ts';
 
@@ -135,7 +135,7 @@ export function limitsFromEnv(env = process.env): IngestLimits {
   return { perKey: new RateLimiter(perKey, perKey * 4), perClient: new RateLimiter(perClient, perClient * 6), proxyHops: hops };
 }
 
-export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Source; send: Send; now?: () => number; limits?: IngestLimits }) {
+export function rumRoutes(o: { doris: Doris; keys: IngestKeys; source: Source; send: Send; now?: () => number; limits?: IngestLimits }) {
   const { doris, keys, source, send } = o;
   const limits = o.limits ?? limitsFromEnv();
   const limited = (res: ServerResponse, r: { ok: false; retryAfter: number }, what: string) =>
@@ -173,12 +173,12 @@ export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Sourc
   async function handle(req: IncomingMessage, res: ServerResponse, url: URL, user: User, spec: () => SearchSpec): Promise<boolean> {
     const path = url.pathname;
     let m: RegExpExecArray | null;
-    if (path === '/api/sessions' && req.method === 'GET') {
+    if (path === '/api/rum/sessions' && req.method === 'GET') {
       const sql = sessionsListSql(source, spec());
       send(res, 200, { sessions: await doris.query(sql), sql });
       return true;
     }
-    if ((m = /^\/api\/sessions\/by-trace\/([0-9a-f]{32})$/.exec(path)) && req.method === 'GET') {
+    if ((m = /^\/api\/rum\/sessions\/by-trace\/([0-9a-f]{32})$/.exec(path)) && req.method === 'GET') {
       const from = parseTime(url.searchParams.get('from') ?? ''), to = parseTime(url.searchParams.get('to') ?? '');
       if (to <= from) throw new AuthError(400, 'to must be after from');
       const [row] = (await doris.query(sessionForTraceSql(source, m[1]!, from, to))) as Record<string, string>[];
@@ -189,7 +189,7 @@ export function sessionRoutes(o: { doris: Doris; keys: IngestKeys; source: Sourc
       send(res, 200, { session: { sessionId: row.session_id, at: row.timestamp, started: row.started, ended: row.ended, user: row.user_email ?? row.user_name ?? null } });
       return true;
     }
-    if ((m = /^\/api\/sessions\/([^/]+)$/.exec(path)) && req.method === 'GET') {
+    if ((m = /^\/api\/rum\/sessions\/([^/]+)$/.exec(path)) && req.method === 'GET') {
       const id = decodeURIComponent(m[1]!);
       if (!SESSION_ID.test(id)) throw new AuthError(400, 'bad session id');
       const from = parseTime(url.searchParams.get('from') ?? ''), to = parseTime(url.searchParams.get('to') ?? '');

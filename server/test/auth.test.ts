@@ -1,14 +1,14 @@
 // Password hashing (always) and the auth endpoints against a real PostgreSQL (PG_TEST=1).
 
-import { IngestKeys } from '../src/sessions/http.ts';
+import { IngestKeys } from '../src/rum/http.ts';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
-import { API_KEY_PREFIX, hashPassword, newToken, tokenHash, verifyPassword } from '../src/auth/secrets.ts';
-import { ContentStore } from '../src/content/store.ts';
-import { AuthStore } from '../src/auth/store.ts';
-import { Doris, configFromEnv } from '../src/db.ts';
-import { migrate } from '../src/meta.ts';
+import { API_KEY_PREFIX, hashPassword, newToken, tokenHash, verifyPassword } from '../src/control/auth/secrets.ts';
+import { ContentStore } from '../src/control/content/store.ts';
+import { AuthStore } from '../src/control/auth/store.ts';
+import { Doris, configFromEnv } from '../src/db/doris.ts';
+import { migrate } from '../src/db/meta.ts';
 import { createApp } from '../src/server.ts';
 import { freshMetaDb, pgEnabled } from './meta-helper.ts';
 

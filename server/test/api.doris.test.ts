@@ -1,14 +1,14 @@
 // End-to-end API checks against a live Doris loaded by bench/otelgen.py. Skipped unless DORIS_TEST=1.
 //   DORIS_TEST=1 DORIS_PORT=9930 DORIS_DB=otel_bench node --test test/api.doris.test.ts
 
-import { IngestKeys } from '../src/sessions/http.ts';
+import { IngestKeys } from '../src/rum/http.ts';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { Doris, configFromEnv } from '../src/db.ts';
-import { ContentStore } from '../src/content/store.ts';
-import { AuthStore } from '../src/auth/store.ts';
+import { Doris, configFromEnv } from '../src/db/doris.ts';
+import { ContentStore } from '../src/control/content/store.ts';
+import { AuthStore } from '../src/control/auth/store.ts';
 import { createApp } from '../src/server.ts';
 import { freshMetaDb } from './meta-helper.ts';
 

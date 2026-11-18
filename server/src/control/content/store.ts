@@ -4,7 +4,7 @@
 import { metricLabel } from './alerts.ts';
 import type pg from 'pg';
 import { AuthError } from '../auth/store.ts';
-import { AGGREGATES } from '../query/build.ts';
+import { AGGREGATES } from '../../semantics/search/build.ts';
 
 type J = Record<string, unknown>;
 
