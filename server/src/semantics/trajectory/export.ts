@@ -11,7 +11,7 @@ type Row = Record<string, unknown>;
 /** Most rows a CSV export writes; a larger result is refused so it never comes back cut. */
 export const MAX_EXPORT_ROWS = 200_000;
 /** Most bytes of text a conversations export writes. */
-export const MAX_EXPORT_BYTES = 512 * 1024 * 1024;
+export const MAX_EXPORT_BYTES = 128 * 1024 * 1024;
 /** Sessions and messages per line in the preview of a conversations export. */
 export const PREVIEW_SESSIONS = 3;
 export const PREVIEW_MESSAGES = 6;

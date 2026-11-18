@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { test } from 'node:test';
 import { agentRoutes } from '../src/api/agents/routes.ts';
 import type { Doris } from '../src/db/doris.ts';
-import { MAX_EXPORT_ROWS } from '../src/semantics/trajectory/export.ts';
+import { MAX_EXPORT_BYTES, MAX_EXPORT_ROWS } from '../src/semantics/trajectory/export.ts';
 
 /** A Doris that answers counts with `total` and everything else with `rows`, recording the SQL. */
 function stub(total: number, rows: Record<string, unknown>[] = []) {
@@ -61,4 +61,21 @@ test('Compare accepts turn 0, the turn of events before the first user input', a
   const a = c.answers[0]!;
   assert.equal(a.status, 200);
   assert.equal(a.body.sql[2].title, 'Steps of turn 0');
+});
+
+test('a conversations export over the byte cap is refused before its lines are built', async () => {
+  const seen: string[] = [];
+  const doris = {
+    query: async (sql: string) => {
+      seen.push(sql);
+      const isSize = sql.startsWith('WITH') && sql.includes('count(DISTINCT session_id)');
+      return isSize ? [{ bytes: MAX_EXPORT_BYTES + 1 }] : [];
+    },
+  } as unknown as Doris;
+  await assert.rejects(call(doris, `/api/agents/sessions?${RANGE}&format=jsonl`).done, /more than 134217728 bytes/);
+  assert.equal(seen.length, 1, 'only the size statement ran');
+});
+
+test('the conversations export cap is at most 128 MiB', () => {
+  assert.ok(MAX_EXPORT_BYTES <= 128 * 1024 * 1024);
 });
