@@ -1,0 +1,147 @@
+// The Sessions, Steps and Messages pages as data: their columns in display order, which are shown
+// at first, how a cell and a condition on it are written, and what a row opens.
+
+import type { Row, TableName } from '../../api/agents.ts';
+import { num, plainLine, text } from './format.ts';
+import { cutKey, stepKey, turnKey } from './select.ts';
+
+/** How a column's values are written and compared. */
+export type CellKind = 'time' | 'text' | 'enum' | 'number' | 'count' | 'tokens' | 'duration' | 'percent';
+
+export interface ColumnDef {
+  /** Column name in the API. */
+  name: string;
+  label: string;
+  kind: CellKind;
+  /** Shown before the viewer changes the Columns menu. */
+  shown: boolean;
+  /** Values offered when a condition is put on the column. */
+  values?: readonly string[];
+  /** The column takes the width the others leave. */
+  fill?: boolean;
+}
+
+export interface PageDef {
+  name: TableName;
+  label: string;
+  /** One row of the page, in the singular. */
+  noun: string;
+  /** What a row is, said once under the title. */
+  unit: string;
+  /** Placeholder of the search box: the text the search runs on. */
+  search: string;
+  defaultSort: string;
+  columns: ColumnDef[];
+}
+
+const col = (name: string, label: string, kind: CellKind, shown: boolean, values?: readonly string[]): ColumnDef =>
+  ({ name, label, kind, shown, ...(values ? { values } : {}) });
+
+const STATUS = ['ok', 'failed'] as const;
+
+export const SESSIONS: PageDef = {
+  name: 'sessions', label: 'Sessions', noun: 'session', defaultSort: 'last_event_at',
+  unit: 'One row per session tree: a main session with its sub-agent sessions.',
+  search: 'Search title, first input, last output',
+  columns: [
+    col('last_event_at', 'Last activity', 'time', true),
+    col('title', 'Session', 'text', true),
+    col('tool_errors', 'Errors', 'count', true),
+    col('first_input', 'First input', 'text', true),
+    col('last_output', 'Last output', 'text', true),
+    col('turns', 'Turns', 'number', true),
+    col('steps', 'Steps', 'number', true),
+    col('tokens', 'Tokens', 'tokens', true),
+    col('started_at', 'Started', 'time', false),
+    col('active_us', 'Active time', 'duration', false),
+    col('subagents', 'Sub-agents', 'count', false),
+    col('compactions', 'Compactions', 'count', false),
+    col('peak_ctx_tokens', 'Peak context', 'tokens', false),
+    col('model', 'Model', 'enum', false),
+    col('user_id', 'User', 'enum', false),
+  ],
+};
+
+export const STEPS: PageDef = {
+  name: 'steps', label: 'Steps', noun: 'step', defaultSort: 'ts',
+  unit: 'One row per step: one model request and the tool calls it issued.',
+  search: 'Search output and tool calls',
+  columns: [
+    col('ts', 'Time', 'time', true),
+    col('title', 'Session', 'text', true),
+    col('agent', 'Agent', 'enum', true),
+    col('turn', 'Turn', 'number', true),
+    col('step', 'Step', 'number', true),
+    col('calls', 'Tool calls', 'text', true),
+    col('status', 'Status', 'enum', true, STATUS),
+    col('output', 'Output', 'text', true),
+    col('ctx_tokens', 'Context', 'tokens', true),
+    col('duration_us', 'Latency', 'duration', true),
+    col('repeated_call', 'Repeated call', 'enum', false, ['still in context', 'no longer in context']),
+    col('stop_reason', 'Stop reason', 'enum', false, ['tool_use', 'end_turn', 'max_tokens']),
+    col('ctx_msgs', 'Context msgs', 'number', false),
+    col('ctx_new', 'New', 'number', false),
+    col('ctx_change', 'Context change', 'enum', false, ['fresh', 'append', 'truncate', 'compact']),
+    col('cache_pct', 'Cache hit', 'percent', false),
+    col('output_tokens', 'Output tokens', 'tokens', false),
+    col('tool_us', 'Tool time', 'duration', false),
+    col('retries', 'Retries', 'count', false),
+    col('model', 'Model', 'enum', false),
+  ],
+};
+
+export const MESSAGES: PageDef = {
+  name: 'messages', label: 'Messages', noun: 'message', defaultSort: 'ts',
+  unit: 'One row per message block: a text, a tool call, a tool result or a summary, each with its role.',
+  search: 'Search message text',
+  columns: [
+    col('ts', 'Time', 'time', true),
+    col('title', 'Session', 'text', true),
+    col('agent', 'Agent', 'enum', true),
+    col('turn', 'Turn', 'number', true),
+    col('step', 'Step', 'number', true),
+    col('msg_role', 'Role', 'enum', true, ['user', 'assistant', 'tool', 'system']),
+    col('kind', 'Kind', 'enum', true, ['text', 'tool_use', 'tool_result', 'thinking', 'summary', 'attachment']),
+    col('tool_name', 'Tool', 'enum', true),
+    col('status', 'Status', 'enum', true, STATUS),
+    { ...col('text', 'Text', 'text', true), fill: true },
+    col('tokens', 'Tokens', 'tokens', true),
+  ],
+};
+
+export const PAGES: Record<TableName, PageDef> = { sessions: SESSIONS, steps: STEPS, messages: MESSAGES };
+
+export const columnOf = (def: PageDef, name: string): ColumnDef | undefined => def.columns.find((c) => c.name === name);
+
+/** The names of the columns a page shows: the viewer's choice in the page's order, or the default. */
+export function shownColumns(def: PageDef, chosen: readonly string[] | null): string[] {
+  const names = def.columns.filter((c) => (chosen ? chosen.includes(c.name) : c.shown)).map((c) => c.name);
+  return names.length ? names : def.columns.filter((c) => c.shown).map((c) => c.name);
+}
+
+/** A column whose values are numbers, set to the right. */
+export const isNumeric = (kind: CellKind): boolean => kind !== 'time' && kind !== 'text' && kind !== 'enum';
+
+/** What a session is called on a row: its title, else the start of its first input, else its id. */
+export function sessionName(row: Row): string {
+  return text(row.title).trim() || plainLine(text(row.first_input)).slice(0, 80) || text(row.session_id);
+}
+
+/** What a row opens: the tree of its session, and what is selected there (null: the first turn). */
+export function openTarget(page: TableName, row: Row): { root: string; sel: string | null } {
+  const sid = text(row.session_id);
+  if (page === 'sessions') return { root: sid, sel: null };
+  const root = text(row.root_id) || sid;
+  if (page === 'steps') return { root, sel: stepKey(sid, num(row.seq)) };
+  const kind = text(row.event_kind);
+  // A block opens the step that produced it, a summary its compaction, a user message its turn.
+  if ((kind === 'llm_call' || kind === 'tool_call') && row.step_seq !== null && row.step_seq !== undefined) return { root, sel: stepKey(sid, num(row.step_seq)) };
+  if (kind === 'compaction') return { root, sel: cutKey(sid, num(row.event_seq)) };
+  if (row.turn !== null && row.turn !== undefined) return { root, sel: turnKey(sid, num(row.turn)) };
+  return { root, sel: null };
+}
+
+/** The address of a session page. */
+export function sessionUrl(root: string, sel: string | null): string {
+  return `/agents/sessions/${encodeURIComponent(root)}${sel ? `?sel=${encodeURIComponent(sel)}` : ''}`;
+}
