@@ -17,6 +17,7 @@
 //   GET /api/trace/<trace id>?from=&to=
 //   GET /api/fields?source=                  search bar fields (cached for a minute)
 //   GET /api/values?source=&field=&q=&from=&to=&limit=   top values of a field
+//   GET /api/agents/...                      agent trajectories: see api/agents/routes.ts
 //
 // Times are UTC (ISO 8601 or "YYYY-MM-DD HH:MM:SS"). Query errors answer 400 with a message.
 
@@ -39,6 +40,7 @@ import {
 import { Doris, configFromEnv } from './db/doris.ts';
 import { type AuthContext, authRoutes, authenticate } from './control/auth/http.ts';
 import { type IngestLimits, IngestKeys, rumRoutes } from './rum/http.ts';
+import { agentRoutes } from './api/agents/routes.ts';
 import { AuthError, AuthStore } from './control/auth/store.ts';
 import { metaPoolFromEnv, migrate } from './db/meta.ts';
 
@@ -119,6 +121,7 @@ export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, 
   const account = authRoutes(auth, send);
   const rum = rumRoutes({ doris, keys: ingestKeys, source: rumSource(db), send, limits: ingestLimits });
   const contentApi = contentRoutes(content, send, fetchImpl);
+  const agents = agentRoutes({ doris, db, send });
   const sources = sourcesFor(db);
   const sourceParam = (url: URL): Source => {
     const name = param(url, 'source')!;
@@ -181,6 +184,7 @@ export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, 
     if (await account.handleAccount(req, res, path, user)) return;
     if (await contentApi(req, res, url, user)) return;
     if (await rum.handle(req, res, url, user, () => searchSpec(url))) return;
+    if (await agents.handle(req, res, url)) return;
     if (path === '/api/chart' && req.method === 'POST') {
       const b = await readJson(req);
       const source = sources[String(b.source)];
