@@ -46,3 +46,17 @@ test('a compaction reads the context change of the next model call', () => {
   assert.match(c.blocks.sql, /c\.seq = \(SELECT min\(seq\) FROM otel\.agent_events WHERE session_id = 'm' AND kind = 'llm_call' AND seq > 12\)/);
   assert.match(c.blocks.sql, /c\.rel = 'out' OR m\.kind = 'summary'/);
 });
+
+test('numeric arguments: whole numbers from 0 only, refused before they reach SQL', () => {
+  assert.throws(() => turnStepsSql('otel', 'm', 1, -1), /must be a whole number from 0/);
+  assert.throws(() => turnStepsSql('otel', 'm', Number.NaN, 0), /must be a whole number from 0/);
+  assert.throws(() => turnSql('otel', 'm', 1e21), /must be a whole number from 0/);
+  assert.throws(() => stepSql('otel', 'm', Number.NaN, 0), /must be a whole number from 0/);
+  assert.throws(() => stepSql('otel', 'm', 5, 1.5), /must be a whole number from 0/);
+  assert.throws(() => compactionSql('otel', 'm', Number.POSITIVE_INFINITY), /must be a whole number from 0/);
+  assert.equal(turnSql('otel', 'm', 0).title, 'Turn 0');
+});
+
+test('a bad session id is refused on the turns path too', () => {
+  assert.throws(() => turnsSql('otel', ["x'"]), /bad session id/);
+});

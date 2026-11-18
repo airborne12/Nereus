@@ -22,6 +22,12 @@ export function sessionId(id: string): string {
   return id;
 }
 
+/** A number used as a count, offset or sequence number; anything else is refused before it reaches SQL. */
+function count(n: number, name: string): number {
+  if (!Number.isSafeInteger(n) || n < 0) throw new CompileError(`'${name}' must be a whole number from 0`);
+  return n;
+}
+
 const TREE = ['session_id', 'root_id', 'parent_id', 'parent_seq', 'kind', 'agent_name', 'title', 'model', 'runtime', 'runtime_version',
   'user_id', 'started_at', 'last_event_at', 'last_seq', 'turns', 'steps', 'tool_calls', 'tool_errors', 'subagents', 'compactions',
   'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'peak_ctx_tokens', 'active_us', 'safety_risks'];
@@ -82,15 +88,17 @@ export function treeStepsSql(db: string, ids: readonly string[]): Statement {
  * the turn, with their tool calls; a compaction before the turn's first call belongs to page one.
  */
 export function turnStepsSql(db: string, id: string, turn: number, offset: number): Statement {
+  const t = count(turn, 'turn');
+  const from = count(offset, 'offset');
   return {
-    title: `Steps of turn ${turn}`,
+    title: `Steps of turn ${t}`,
     sql: `SELECT * FROM (
   SELECT ${LIGHT},
          greatest(sum(if(e.kind = 'llm_call', 1, 0)) OVER (ORDER BY e.seq), 1) AS nth
   FROM ${db}.agent_events e
-  WHERE e.session_id = ${sqlString(sessionId(id))} AND e.turn = ${Math.trunc(turn)} AND e.kind IN ('llm_call', 'tool_call', 'compaction')
+  WHERE e.session_id = ${sqlString(sessionId(id))} AND e.turn = ${t} AND e.kind IN ('llm_call', 'tool_call', 'compaction')
 ) x
-WHERE nth > ${Math.trunc(offset)} AND nth <= ${Math.trunc(offset) + STEPS_PAGE}
+WHERE nth > ${from} AND nth <= ${from + STEPS_PAGE}
 ORDER BY seq`,
   };
 }
@@ -101,13 +109,14 @@ const BLOCK = `m.msg_seq, m.ts, m.msg_role, m.kind, m.api_msg, m.event_seq, m.to
 /** A turn as the right side reads it: what the user asked and the text of the turn's last model call. */
 export function turnSql(db: string, id: string, turn: number): Statement {
   const sid = sqlString(sessionId(id));
+  const t = count(turn, 'turn');
   return {
-    title: `Turn ${turn}`,
+    title: `Turn ${t}`,
     sql: `SELECT ${BLOCK}
 FROM (
   SELECT max(if(kind = 'user_input', msg_seq, NULL)) AS asked, max(if(kind = 'llm_call', seq, NULL)) AS last_call
   FROM ${db}.agent_events
-  WHERE session_id = ${sid} AND turn = ${Math.trunc(turn)}
+  WHERE session_id = ${sid} AND turn = ${t}
 ) t
 JOIN ${db}.agent_messages m ON m.session_id = ${sid} AND (m.msg_seq = t.asked OR (m.event_seq = t.last_call AND m.kind = 'text'))
 ORDER BY m.msg_seq`,
@@ -117,14 +126,15 @@ ORDER BY m.msg_seq`,
 /** The statements of a step (one model call): its event, its input one page at a time, its output and its prompt. */
 export function stepSql(db: string, id: string, seq: number, inputOffset: number): { event: Statement; input: Statement; output: Statement; prompt: Statement } {
   const sid = sqlString(sessionId(id));
-  const at = Math.trunc(seq);
+  const at = count(seq, 'seq');
+  const skip = count(inputOffset, 'inputOffset');
   const context = `FROM ${db}.agent_contexts c
 JOIN ${db}.agent_messages m ON m.session_id = c.session_id AND m.msg_seq BETWEEN c.from_msg AND c.to_msg
 WHERE c.session_id = ${sid} AND c.seq = ${at} AND c.rel = 'in'`;
   return {
     event: { title: 'Step', sql: `SELECT *\nFROM ${db}.agent_events\nWHERE session_id = ${sid} AND seq = ${at} AND kind = 'llm_call'` },
     // Latest first: the blocks new in this request come before the ones earlier requests had.
-    input: { title: 'Input', sql: `SELECT c.pos, ${BLOCK}\n${context}\nORDER BY c.pos DESC, m.msg_seq DESC\nLIMIT ${INPUT_PAGE} OFFSET ${Math.trunc(inputOffset)}` },
+    input: { title: 'Input', sql: `SELECT c.pos, ${BLOCK}\n${context}\nORDER BY c.pos DESC, m.msg_seq DESC\nLIMIT ${INPUT_PAGE} OFFSET ${skip}` },
     output: {
       title: 'Output',
       sql: `SELECT ${BLOCK}, m.payload,
@@ -149,7 +159,7 @@ WHERE p.prompt_hash = (SELECT prompt_hash FROM ${db}.agent_events WHERE session_
  */
 export function compactionSql(db: string, id: string, seq: number): { event: Statement; blocks: Statement } {
   const sid = sqlString(sessionId(id));
-  const at = Math.trunc(seq);
+  const at = count(seq, 'seq');
   return {
     event: { title: 'Compaction', sql: `SELECT *\nFROM ${db}.agent_events\nWHERE session_id = ${sid} AND seq = ${at} AND kind = 'compaction'` },
     blocks: {
