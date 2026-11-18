@@ -74,7 +74,7 @@ function numberLiteral(v: string, field: string): string {
 }
 
 const UNIT_RE = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+))(us|µs|ms|s|m|h)$/;
-const MICROS: Record<string, number> = { us: 1, µs: 1, ms: 1000, s: 1e6, m: 6e7, h: 3.6e9 };
+const MICROS: Record<string, number> = { us: 1, 'µs': 1, ms: 1000, s: 1e6, m: 6e7, h: 3.6e9 };
 
 /** A number for column `c`; a column with a unit also takes 50ms, 1.5s, 250us, 2m. */
 function columnNumber(c: Column, v: string): string {
