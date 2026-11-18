@@ -18,7 +18,7 @@ export async function compare(doris: Doris, db: string, send: Send, res: ServerR
   const a = url.searchParams.get('a');
   const b = url.searchParams.get('b');
   if (!a || !b) throw new CompileError("'a' and 'b' are required");
-  const turn = url.searchParams.has('turn') ? intParam(url, 'turn', 1, 1) : null;
+  const turn = url.searchParams.has('turn') ? intParam(url, 'turn', 0, 0) : null;
   const statements = compareSql(db, a, b, turn);
   const { results, elapsedMs } = await run(doris, statements);
   const [sessions, turns, steps] = results;

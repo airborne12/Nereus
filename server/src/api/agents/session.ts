@@ -9,6 +9,7 @@
 
 import type { ServerResponse } from 'node:http';
 import type { Doris } from '../../db/doris.ts';
+import { CompileError } from '../../semantics/search/compile.ts';
 import {
   compactionSql, OPEN_ALL_STEPS, sessionId, STEPS_PAGE, stepSql, treeSql, treeStepsSql, turnSql, turnStepsSql, turnsSql,
 } from '../../semantics/trajectory/session.ts';
@@ -55,7 +56,9 @@ async function compaction(doris: Doris, db: string, send: Send, res: ServerRespo
 export async function session(doris: Doris, db: string, send: Send, res: ServerResponse, url: URL): Promise<boolean> {
   const m = /^\/api\/agents\/sessions\/([^/]+)(?:\/(turns|steps|events)\/(\d+)(\/steps|\/compaction)?)?$/.exec(url.pathname);
   if (!m) return false;
-  const id = sessionId(decodeURIComponent(m[1]!));
+  let raw: string;
+  try { raw = decodeURIComponent(m[1]!); } catch { throw new CompileError('bad session id'); }
+  const id = sessionId(raw);
   const [what, n, tail] = [m[2], Number(m[3]), m[4]];
   if (!what) await tree(doris, db, send, res, id);
   else if (what === 'turns' && !tail) {

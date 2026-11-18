@@ -48,3 +48,17 @@ test('paths outside the agent API are left to other routes; unknown agent paths 
   assert.equal(await c.done, true);
   assert.equal(c.answers[0]!.status, 404);
 });
+
+test('a malformed percent-escape in a session path answers 400', async () => {
+  const { doris } = stub(0);
+  await assert.rejects(call(doris, '/api/agents/sessions/%E0%A4%A').done, /bad session id/);
+});
+
+test('Compare accepts turn 0, the turn of events before the first user input', async () => {
+  const { doris } = stub(0, [{ session_id: 'x' }, { session_id: 'y' }]);
+  const c = call(doris, '/api/agents/compare?a=x&b=y&turn=0');
+  assert.equal(await c.done, true);
+  const a = c.answers[0]!;
+  assert.equal(a.status, 200);
+  assert.equal(a.body.sql[2].title, 'Steps of turn 0');
+});
