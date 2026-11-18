@@ -24,10 +24,10 @@ export interface Usage { input: number; output: number; cacheRead: number; cache
 
 /**
  * A request's context as the source logs it: the first `keep` API messages of the base request,
- * then `tail`, one entry per API message listing the `apiMsg` keys it is made of. `exact` is false
- * when some tail message could not be found.
+ * then `tail`, one entry per API message listing the `apiMsg` keys it is made of, or null for a
+ * message that could not be found. `exact` is false when some tail message is unknown.
  */
-export interface ContextDelta { request: string; base: string | null; keep: number; tail: string[][]; exact: boolean }
+export interface ContextDelta { request: string; base: string | null; keep: number; tail: (string[] | null)[]; exact: boolean }
 
 export interface SessionRecord {
   type: 'session';

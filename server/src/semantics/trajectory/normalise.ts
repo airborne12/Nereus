@@ -62,7 +62,8 @@ export function normalise(session: SessionRecord, records: readonly CaptureRecor
   const toolCalls = new Map<string, number>();
   const startMs = new Map<number, number>();
   const firstByArgs = new Map<string, number>();
-  const requests = new Map<string, string[][]>();
+  // The API messages of each request seen; null marks a message whose content is unknown.
+  const requests = new Map<string, (string[] | null)[]>();
   const history: number[] = [];
   const inHistory = new Set<number>();
   const n = { seq: 0, msg: 0, turn: 0, step: 0 };
@@ -102,16 +103,17 @@ export function normalise(session: SessionRecord, records: readonly CaptureRecor
     if (!d) return { blocks: [...history], change: compactedSince ? 'compact' : lastCall ? 'append' : 'fresh', exact: false, request: null };
     const base = d.base === null ? [] : requests.get(d.base);
     const baseLen = base?.length ?? 0;
-    const units = [...(base ?? []).slice(0, d.keep), ...d.tail];
+    const kept = base ? base.slice(0, d.keep) : new Array<null>(d.keep).fill(null);
+    const units = [...kept, ...d.tail];
     requests.set(d.request, units);
     const seen = new Set<number>();
     const blocks: number[] = [];
-    for (const key of units.flat()) {
+    for (const key of units.flatMap((u) => u ?? [])) {
       for (const m of blocksOf.get(key) ?? []) if (!seen.has(m)) { seen.add(m); blocks.push(m); }
     }
     const change: CtxChange = compactedSince ? 'compact' : d.base === null ? 'fresh'
       : d.base === lastCall?.request && d.keep === baseLen ? 'append' : d.keep < baseLen ? 'truncate' : 'append';
-    return { blocks, change, exact: d.exact && base !== undefined, request: d.request };
+    return { blocks, change, exact: d.exact && base !== undefined && units.every((u) => u !== null), request: d.request };
   }
 
   function writeContext(seq: number, ts: string, ctx: Context): void {

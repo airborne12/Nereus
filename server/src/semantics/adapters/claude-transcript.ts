@@ -233,7 +233,7 @@ export function readTranscript(lines: readonly string[]): TranscriptResult {
     if (req && ref) {
       const d = throughUnanswered(ix, req);
       const tail = d.tail.map((h) => resolve(h, startTs));
-      context = { request: ref, base: d.base, keep: d.keep, tail: tail.filter((t): t is string[] => t !== null), exact: tail.every((t) => t !== null) };
+      context = { request: ref, base: d.base, keep: d.keep, tail, exact: tail.every((t) => t !== null) };
     }
     const msg = messageOf(last);
     return { type: 'call', blocks: rows.flatMap((r) => blocksOf('assistant', messageOf(r).content, id, tsOf(r, endTs))),

@@ -125,3 +125,15 @@ test('cutUtf8 cuts on a character boundary; toRanges keeps list order', () => {
   assert.deepEqual(cutUtf8('ab', 4), { text: 'ab', cut: false });
   assert.deepEqual(toRanges([1, 2, 3, 7, 8, 5]), [{ from: 1, to: 3 }, { from: 7, to: 8 }, { from: 5, to: 5 }]);
 });
+
+test('a context built on an unknown base or an unresolved message stays inexact in later calls', () => {
+  const n = run([
+    ask('u1', 'one', 0),
+    call(1, [said('c1', 'a', 1)], delta('r1', 'earlier', 2, [['u1']])),
+    ask('u2', 'two', 3),
+    call(4, [said('c2', 'b', 4)], delta('r2', 'r1', 3, [['c1'], ['u2']])),
+    call(6, [said('c3', 'c', 6)], { request: 'r3', base: null, keep: 0, tail: [null, ['u2']], exact: false }),
+    call(8, [said('c4', 'd', 8)], delta('r4', 'r3', 2, [['c3']])),
+  ]);
+  assert.deepEqual([2, 4, 5, 6].map((s) => ev(n, s).ctx_exact), [false, false, false, false]);
+});
