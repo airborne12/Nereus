@@ -39,7 +39,7 @@ before(async () => {
     await browser.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await doris.query(`DELETE FROM ${db}.otel_logs WHERE service_name='${service}'`);
-    if (sessionId) await doris.query(`DELETE FROM ${db}.otel_sessions WHERE session_id='${sessionId}'`);
+    if (sessionId) await doris.query(`DELETE FROM ${db}.rum_sessions WHERE session_id='${sessionId}'`);
     await doris.close();
     await meta.drop();
   };

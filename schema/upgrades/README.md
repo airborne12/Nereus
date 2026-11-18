@@ -42,3 +42,11 @@ to retain the newly ingested rows.
 The migration preserves the values already stored. It cannot reconstruct string
 characters that were lost before the upgrade; re-export the original telemetry
 when those historical values are needed.
+
+## Rename browser sessions to rum_sessions
+
+Browser sessions moved from `otel_sessions` to `rum_sessions`, and their read API from
+`/api/sessions` to `/api/rum/sessions`. The SDK's ingestion URL is unchanged. With the server
+and every writer stopped, run `schema/upgrades/003_rum_sessions.sql` with `${DB}` replaced by the
+database name, then start the new server. Grants on the old table name must be given again on the
+new one (`GRANT LOAD_PRIV ON otel.rum_sessions TO ...`).

@@ -607,7 +607,7 @@ test('client sessions: the SDK on another site records a session that replays, m
   await new Promise<void>((r) => shopServer.close(() => r()));
 
   // Inputs are masked: the card number is nowhere in what was stored.
-  const [{ n, leaks }] = await doris.query(`SELECT count(*) AS n, sum(if(payload LIKE '%4111%' OR message LIKE '%4111%', 1, 0)) AS leaks FROM ${DB}.otel_sessions WHERE session_id = '${sid}'`) as any[];
+  const [{ n, leaks }] = await doris.query(`SELECT count(*) AS n, sum(if(payload LIKE '%4111%' OR message LIKE '%4111%', 1, 0)) AS leaks FROM ${DB}.rum_sessions WHERE session_id = '${sid}'`) as any[];
   assert.ok(Number(n) > 5, `${n} rows`);
   assert.equal(Number(leaks), 0);
 
@@ -640,7 +640,7 @@ test('client sessions: the SDK on another site records a session that replays, m
   assert.match(text, /Checkout failed: payment service unavailable/);
   assert.match(text, /input#card/);
   assert.doesNotMatch(text, /4111/);
-  const urls = (await doris.query(`SELECT url FROM ${DB}.otel_sessions WHERE session_id = '${sid}' AND event_type = 'navigation' ORDER BY timestamp`) as any[]).map((r) => r.url);
+  const urls = (await doris.query(`SELECT url FROM ${DB}.rum_sessions WHERE session_id = '${sid}' AND event_type = 'navigation' ORDER BY timestamp`) as any[]).map((r) => r.url);
   assert.deepEqual(urls.map((u: string) => new URL(u).pathname), ['/', '/cart'], 'page views, without the example\'s parameters');
   await list.getByRole('tab', { name: /^Errors/ }).click();
   assert.equal(await list.locator('li').count(), 2);

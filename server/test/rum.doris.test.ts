@@ -1,7 +1,7 @@
-// Client sessions end to end on a live Doris (otel_sessions from schema/002_sessions.sql) and a
+// Client sessions end to end on a live Doris (rum_sessions from schema/002_rum_sessions.sql) and a
 // fresh PostgreSQL: ingestion keys, CORS, ingest, list, detail. Skipped unless DORIS_TEST=1.
 //
-//   DORIS_TEST=1 DORIS_PORT=9930 DORIS_DB=otel_bench node --test test/sessions.doris.test.ts
+//   DORIS_TEST=1 DORIS_PORT=9930 DORIS_DB=otel_bench node --test test/rum.doris.test.ts
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -67,7 +67,7 @@ test('ingestion keys: admins only, write-only, revocable; CORS for any page', { 
   assert.match(key, /^nereus_ingest_/);
   assert.equal((await call('GET', '/api/ingest-keys', admin)).body.keys[0].name, 'shop');
   assert.equal((await call('GET', '/api/fields?source=logs', key)).status, 401, 'an ingestion key reads nothing');
-  assert.equal((await call('GET', '/api/sessions?from=2026-01-01T00:00:00Z&to=2026-01-02T00:00:00Z', key)).status, 401);
+  assert.equal((await call('GET', '/api/rum/sessions?from=2026-01-01T00:00:00Z&to=2026-01-02T00:00:00Z', key)).status, 401);
   const body = { sessionId: `s_${randomUUID().slice(0, 8)}`, events: [{ t: Date.now(), type: 'custom', message: 'hello' }] };
   assert.equal((await call('POST', '/api/ingest/sessions', admin, body)).status, 401, 'an API key does not ingest');
   const pre = await fetch(`${base}/api/ingest/sessions`, { method: 'OPTIONS', headers: { origin: 'https://shop.example.com', 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization, content-type' } });
@@ -111,23 +111,23 @@ test('a session round-trips: replay chunks byte for byte, events, the list and i
     ],
   });
   const from = new Date(t0 - 60_000).toISOString(), to = new Date(Date.now() + 60_000).toISOString();
-  const list = await call('GET', `/api/sessions?from=${from}&to=${to}&where=${encodeURIComponent('type:error "cart failed"')}`, member);
+  const list = await call('GET', `/api/rum/sessions?from=${from}&to=${to}&where=${encodeURIComponent('type:error "cart failed"')}`, member);
   assert.equal(list.status, 200, JSON.stringify(list.body));
   const s = list.body.sessions.find((x: any) => x.session_id === sid);
   assert.ok(s, 'found by its error');
   assert.deepEqual([s.user_email, s.service, s.first_url, Number(s.clicks), Number(s.errors), Number(s.pages), Number(s.requests)],
     ['ada@example.com', 'shop-web', 'https://shop.example.com/', 1, 2, 1, 1], 'the 500 counts as an error too');
-  const none = await call('GET', `/api/sessions?from=${from}&to=${to}&where=${encodeURIComponent('email:nobody@example.com')}`, member);
+  const none = await call('GET', `/api/rum/sessions?from=${from}&to=${to}&where=${encodeURIComponent('email:nobody@example.com')}`, member);
   assert.ok(!none.body.sessions.some((x: any) => x.session_id === sid));
 
-  const detail = await call('GET', `/api/sessions/${sid}?from=${from}&to=${to}`, member);
+  const detail = await call('GET', `/api/rum/sessions/${sid}?from=${from}&to=${to}`, member);
   assert.equal(detail.status, 200);
   assert.deepEqual(detail.body.replay, [chunk1, chunk2], 'replay chunks come back exactly');
   assert.deepEqual(detail.body.events.map((e: any) => e.type), ['navigation', 'click', 'network', 'error']);
   assert.equal(detail.body.events[2].attributes.status, 500);
   assert.deepEqual(detail.body.session.user, user);
-  assert.equal((await call('GET', `/api/sessions/${sid}?from=${from}`, member)).status, 400);
-  assert.equal((await call('GET', `/api/sessions/s_doesnotexist?from=${from}&to=${to}`, member)).status, 404);
+  assert.equal((await call('GET', `/api/rum/sessions/${sid}?from=${from}`, member)).status, 400);
+  assert.equal((await call('GET', `/api/rum/sessions/s_doesnotexist?from=${from}&to=${to}`, member)).status, 404);
 });
 
 test('ingestion is rate limited per client address and per key, with Retry-After and CORS', { skip }, async () => {
@@ -165,15 +165,15 @@ test('a trace started by a request in a session finds that session', { skip }, a
     ],
   });
   const from = new Date(t0 - 3600_000).toISOString(), to = new Date(Date.now() + 60_000).toISOString();
-  const hit = await call('GET', `/api/sessions/by-trace/${traceId}?from=${from}&to=${to}`, member);
+  const hit = await call('GET', `/api/rum/sessions/by-trace/${traceId}?from=${from}&to=${to}`, member);
   assert.equal(hit.status, 200);
   assert.equal(hit.body.session.sessionId, sid);
   assert.equal(hit.body.session.user, 'trace@example.com');
   assert.equal(Date.parse(`${hit.body.session.at.replace(' ', 'T')}Z`), t0 + 2000);
   assert.equal(Date.parse(`${hit.body.session.ended.replace(' ', 'T')}Z`), t0 + 4000, 'the whole session, not only the request');
-  const miss = await call('GET', `/api/sessions/by-trace/${'f'.repeat(32)}?from=${from}&to=${to}`, member);
+  const miss = await call('GET', `/api/rum/sessions/by-trace/${'f'.repeat(32)}?from=${from}&to=${to}`, member);
   assert.deepEqual(miss.body, { session: null });
-  assert.equal((await call('GET', `/api/sessions/by-trace/nothex?from=${from}&to=${to}`, member)).status, 404);
+  assert.equal((await call('GET', `/api/rum/sessions/by-trace/nothex?from=${from}&to=${to}`, member)).status, 404);
 });
 
 test('replay chunks that collide (same seq from a confused or hostile page) never break the session detail', { skip }, async () => {
@@ -187,7 +187,7 @@ test('replay chunks that collide (same seq from a confused or hostile page) neve
   }
   await call('POST', '/api/ingest/sessions', key, { sessionId: sid, replay: [{ seq: 4, t: t0 + 1000, events: [{ type: 3, timestamp: t0 + 1000, data: {} }] }] });
   const from = new Date(t0 - 60_000).toISOString(), to = new Date(Date.now() + 60_000).toISOString();
-  const res = await fetch(`${base}/api/sessions/${sid}?from=${from}&to=${to}`, { headers: { authorization: `Bearer ${member}` } });
+  const res = await fetch(`${base}/api/rum/sessions/${sid}?from=${from}&to=${to}`, { headers: { authorization: `Bearer ${member}` } });
   assert.equal(res.status, 200);
   const body = JSON.parse(await res.text());
   assert.ok(body.replay.length >= 1, 'the valid chunk is still there');

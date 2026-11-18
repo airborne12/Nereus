@@ -1,6 +1,6 @@
 // Records a few browser sessions on the example shop (sdk-example/shop.html) through the real SDK
 // and ingestion API, for the offline demo's snapshot. Runs the API service in-process on a fresh
-// metadata database; the rows land in DORIS_DB.otel_sessions. Prints the session ids.
+// metadata database; the rows land in DORIS_DB.rum_sessions. Prints the session ids.
 //
 //   npm run build && DORIS_PORT=9930 DORIS_DB=otel_bench node demo/record-sessions.ts
 

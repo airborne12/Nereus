@@ -328,16 +328,16 @@ export interface SessionDetail {
 }
 
 export function sessions(s: Omit<Spec, 'source'>, signal?: AbortSignal) {
-  return get<{ sessions: SessionSummary[]; sql: string }>('/api/sessions', specParams({ ...s, source: 'logs' }), signal);
+  return get<{ sessions: SessionSummary[]; sql: string }>('/api/rum/sessions', specParams({ ...s, source: 'logs' }), signal);
 }
 
 export function session(id: string, range: Range, signal?: AbortSignal) {
-  return get<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`, { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, signal);
+  return get<SessionDetail>(`/api/rum/sessions/${encodeURIComponent(id)}`, { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, signal);
 }
 
 export function sessionForTrace(traceId: string, range: Range, signal?: AbortSignal) {
   return get<{ session: { sessionId: string; at: string; started: string; ended: string; user: string | null } | null }>(
-    `/api/sessions/by-trace/${traceId}`, { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, signal);
+    `/api/rum/sessions/by-trace/${traceId}`, { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, signal);
 }
 
 export interface IngestKey { id: number; name: string; prefix: string; createdBy: string | null; createdAt: string; lastUsedAt: string | null; revoked: boolean }

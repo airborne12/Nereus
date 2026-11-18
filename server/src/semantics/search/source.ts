@@ -161,13 +161,13 @@ export function metricsSource(db = 'otel'): Source {
 }
 
 /**
- * otel_sessions (schema/002_sessions.sql): the events of browser sessions, searched to find
+ * rum_sessions (schema/002_rum_sessions.sql): the events of browser sessions, searched to find
  * sessions. Replay payloads are never selected through the search language.
  */
-export function sessionsSource(db = 'otel'): Source {
+export function rumSource(db = 'otel'): Source {
   return {
-    name: 'sessions',
-    table: `${db}.otel_sessions`,
+    name: 'rum',
+    table: `${db}.rum_sessions`,
     timestampColumn: 'timestamp',
     defaultFields: ['message', 'url'],
     attributeColumns: ['attributes'],

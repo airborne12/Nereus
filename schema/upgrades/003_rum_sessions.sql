@@ -1,0 +1,3 @@
+-- Browser sessions are called rum_sessions from Nereus 0.2 on, so that "session" means an agent session.
+-- Run once with writers stopped: sed "s/\${DB}/otel/g" schema/upgrades/003_rum_sessions.sql | mysql -h... -P... -u...
+ALTER TABLE ${DB}.otel_sessions RENAME rum_sessions;
