@@ -50,3 +50,11 @@ Browser sessions moved from `otel_sessions` to `rum_sessions`, and their read AP
 and every writer stopped, run `schema/upgrades/003_rum_sessions.sql` with `${DB}` replaced by the
 database name, then start the new server. Grants on the old table name must be given again on the
 new one (`GRANT LOAD_PRIV ON otel.rum_sessions TO ...`).
+
+`schema/apply.sh` stops with a message while `otel_sessions` exists and `rum_sessions` does not,
+so a new server never starts on an empty `rum_sessions`. With the Compose deployment, where
+`schema-init` runs `apply.sh` on every `docker compose up`:
+
+1. `docker compose stop nereus otel-collector telemetrygen`
+2. `docker compose exec doris-fe mysql -h127.0.0.1 -P9030 -uroot -e 'ALTER TABLE otel.otel_sessions RENAME rum_sessions'`
+3. Pull the new version and `docker compose up -d`.
