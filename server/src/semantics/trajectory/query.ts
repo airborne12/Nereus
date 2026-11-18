@@ -71,7 +71,7 @@ export function parseCondition(raw: string): Condition {
   const m = /^([a-z_]+):([a-z]+):(.*)$/s.exec(raw);
   if (!m) throw new CompileError(`condition '${raw}' must be column:op:value`);
   const op = m[2] as Op;
-  if (!(op in OPS)) throw new CompileError(`unknown comparison '${m[2]}'; use ${Object.keys(OPS).join(', ')}`);
+  if (!Object.hasOwn(OPS, op)) throw new CompileError(`unknown comparison '${m[2]}'; use ${Object.keys(OPS).join(', ')}`);
   return { column: m[1]!, op, value: m[3]! };
 }
 
@@ -129,9 +129,17 @@ export function filterOf(page: Page, req: TableRequest): { from: string[]; where
 function orderOf(page: Page, req: TableRequest): string {
   const name = req.sort ?? page.defaultSort;
   const by = columnOf(page, name);
-  const dir = req.dir ?? 'desc';
+  const dir: string = req.dir ?? 'desc';
+  if (dir !== 'asc' && dir !== 'desc') throw new CompileError(`sort direction must be asc or desc, not '${dir}'`);
   const ties = page.keys.filter((k) => k !== name).map((k) => columnOf(page, k).expr);
   return [`${by.expr} ${dir.toUpperCase()}`, ...ties].join(', ');
+}
+
+/** The LIMIT and OFFSET of a list page, checked before they reach the SQL. */
+function listLimitOf(req: TableRequest): string {
+  if (!Number.isInteger(req.limit) || req.limit < 1 || req.limit > MAX_LIMIT) throw new CompileError(`limit must be an integer from 1 to ${MAX_LIMIT}`);
+  if (!Number.isInteger(req.offset) || req.offset < 0) throw new CompileError('offset must be an integer of 0 or more');
+  return `LIMIT ${req.limit} OFFSET ${req.offset}`;
 }
 
 /**
@@ -142,7 +150,7 @@ export function tableSql(page: Page, req: TableRequest, mode: 'list' | 'export',
   const { from, where } = filterOf(page, req);
   const select = page.columns.map((c) => `${mode === 'list' && c.long ? `left(${c.expr}, ${PREVIEW_CHARS})` : c.expr} AS \`${c.name}\``);
   const body = `${from.join('\n')}\nWHERE ${where.join('\n  AND ')}`;
-  const limit = mode === 'list' ? `LIMIT ${Math.trunc(req.limit)} OFFSET ${Math.trunc(req.offset)}` : `LIMIT ${Math.trunc(cap) + 1}`;
+  const limit = mode === 'list' ? listLimitOf(req) : `LIMIT ${Math.trunc(cap) + 1}`;
   return {
     rows: { title: 'Rows', sql: `SELECT ${select.join(',\n       ')}\n${body}\nORDER BY ${orderOf(page, req)}\n${limit}` },
     total: { title: 'Total', sql: `SELECT count(*) AS total\n${body}` },

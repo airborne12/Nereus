@@ -73,3 +73,31 @@ test('refused: unknown columns, wrong kinds, non-numbers, an empty range', () =>
   assert.throws(() => tableSql(page, req({ sort: 'steps;' }), 'list'), /unknown column/);
   assert.throws(() => tableSql(page, req({ to: '2026-11-17T00:00:00Z' }), 'list'), /time range is empty/);
 });
+
+test('refused: a sort direction other than asc or desc', () => {
+  assert.throws(() => tableSql(sessionsPage('otel'), req({ dir: 'up' as TableRequest['dir'] }), 'list'), /sort direction/);
+});
+
+test('refused: a limit outside 1 to 1000 and an offset that is negative or fractional', () => {
+  const page = sessionsPage('otel');
+  assert.throws(() => tableSql(page, req({ limit: 0 }), 'list'), /limit/);
+  assert.throws(() => tableSql(page, req({ limit: 1001 }), 'list'), /limit/);
+  assert.throws(() => tableSql(page, req({ offset: -1 }), 'list'), /offset/);
+  assert.throws(() => tableSql(page, req({ offset: 1.5 }), 'list'), /offset/);
+});
+
+test('refused: a comparison name that is only an object property', () => {
+  assert.throws(() => parseCondition('x:constructor:1'), /unknown comparison/);
+});
+
+test('comparisons ne, lt and le and a time-kind condition', () => {
+  const page = sessionsPage('otel');
+  const sql = tableSql(page, req({
+    conditions: [parseCondition('steps:ne:7'), parseCondition('steps:lt:3'), parseCondition('steps:le:5'),
+      parseCondition('started_at:ge:2026-11-17 10:00:00')],
+  }), 'list').rows.sql;
+  assert.match(sql, /s\.steps <> 7/);
+  assert.match(sql, /s\.steps < 3/);
+  assert.match(sql, /s\.steps <= 5/);
+  assert.match(sql, /s\.started_at >= '2026-11-17 10:00:00\.000'/);
+});
