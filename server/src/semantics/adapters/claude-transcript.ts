@@ -85,14 +85,20 @@ function parse(lines: readonly string[]): { rows: Raw[]; malformed: number } {
   return { rows, malformed };
 }
 
-interface Index { blobs: Map<string, Raw>; requests: Map<string, Raw>; groups: Map<string, Raw[]>; byHash: Map<string, string[]> }
+interface Index {
+  blobs: Map<string, Raw>; requests: Map<string, Raw>; groups: Map<string, Raw[]>; byHash: Map<string, string[]>;
+  /** Requests that a model answer refers to. */
+  answered: Set<string>;
+}
 
 /** First pass: what later rows refer to, and every API message of the file by its hash. */
 function indexRows(rows: readonly Raw[]): Index {
   const blobs = new Map<string, Raw>();
   const requests = new Map<string, Raw>();
   const groups = new Map<string, Raw[]>();
+  const answered = new Set<string>();
   for (const r of rows) {
+    if (r.type === 'assistant' && str(r.requestRef) && !isSynthetic(r)) answered.add(r.requestRef as string);
     if (r.type === 'api-request-blob' && str(r.hash)) blobs.set(r.hash as string, messageOf(r));
     else if (r.type === 'api-request' && str(r.id)) requests.set(r.id as string, r);
     else if (r.type === 'assistant' && str(messageOf(r).id)) {
@@ -121,7 +127,28 @@ function indexRows(rows: readonly Raw[]): Index {
     } else if (r.type === 'assistant') flush();
   }
   flush();
-  return { blobs, requests, groups, byHash };
+  return { blobs, requests, groups, byHash, answered };
+}
+
+/**
+ * A request's base, keep and tail hashes, with a base that never got an answer replaced by its own
+ * base: the first `keep` messages of that base are its kept prefix followed by part of its tail.
+ */
+function throughUnanswered(ix: Index, req: Raw): { base: string | null; keep: number; tail: string[] } {
+  let base = str(req.base);
+  let keep = num(req.keep) ?? 0;
+  let tail = list(req.tail).map(String);
+  const seen = new Set<string>();
+  while (base !== null && !ix.answered.has(base) && !seen.has(base)) {
+    seen.add(base);
+    const b = ix.requests.get(base);
+    if (!b) break;
+    const baseKeep = num(b.keep) ?? 0;
+    tail = [...list(b.tail).map(String).slice(0, Math.max(0, keep - baseKeep)), ...tail];
+    keep = Math.min(keep, baseKeep);
+    base = str(b.base);
+  }
+  return { base, keep, tail };
 }
 
 const ordered = (rs: readonly Raw[]): Raw[] => [...rs].sort((a, b) => (num(a.apiBlockIndex) ?? 0) - (num(b.apiBlockIndex) ?? 0));
@@ -154,6 +181,13 @@ function systemRecord(r: Raw, ts: string): CaptureRecord | null {
   }
   if (r.subtype === 'turn_duration') return { type: 'turn_end', ts, durationMs: num(r.durationMs) ?? 0 };
   return null;
+}
+
+/** An assistant message the client wrote itself, such as an API or login error; no model call made it. */
+const isSynthetic = (r: Raw): boolean => r.isApiErrorMessage === true || messageOf(r).model === '<synthetic>';
+
+function syntheticError(r: Raw, ts: string): CaptureRecord {
+  return { type: 'error', ts, message: contentText(messageOf(r).content) || 'API error', attempt: null, maxAttempts: null, retryInMs: null };
 }
 
 export function readTranscript(lines: readonly string[]): TranscriptResult {
@@ -197,8 +231,9 @@ export function readTranscript(lines: readonly string[]): TranscriptResult {
     const endTs = tsOf(last, startTs);
     let context: ContextDelta | null = null;
     if (req && ref) {
-      const tail = list(req.tail).map((h) => resolve(String(h), startTs));
-      context = { request: ref, base: str(req.base), keep: num(req.keep) ?? 0, tail: tail.filter((t): t is string[] => t !== null), exact: tail.every((t) => t !== null) };
+      const d = throughUnanswered(ix, req);
+      const tail = d.tail.map((h) => resolve(h, startTs));
+      context = { request: ref, base: d.base, keep: d.keep, tail: tail.filter((t): t is string[] => t !== null), exact: tail.every((t) => t !== null) };
     }
     const msg = messageOf(last);
     return { type: 'call', blocks: rows.flatMap((r) => blocksOf('assistant', messageOf(r).content, id, tsOf(r, endTs))),
@@ -214,6 +249,7 @@ export function readTranscript(lines: readonly string[]): TranscriptResult {
     if (r.type === 'ai-title') title = str(r.aiTitle) ?? title;
     else if (r.type === 'user') records.push(...userRecords(r, when));
     else if (r.type === 'attachment') { if (!hasRequestLog) records.push(...attachmentRecords(r, when)); }
+    else if (r.type === 'assistant' && isSynthetic(r)) records.push(syntheticError(r, when));
     else if (r.type === 'assistant') {
       const id = str(messageOf(r).id);
       if (id && !emittedCalls.has(id)) { emittedCalls.add(id); records.push(callRecord(id, ix.groups.get(id)!)); }

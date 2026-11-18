@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readTranscript } from '../src/semantics/adapters/claude-transcript.ts';
+import { apiMessageHash } from '../src/semantics/trajectory/hash.ts';
 import type { SessionRecord } from '../src/semantics/trajectory/model.ts';
 import { normalise } from '../src/semantics/trajectory/normalise.ts';
 import { agentLines, MAIN_ID, mainLines } from './fixtures/claude-transcript.ts';
@@ -60,4 +61,30 @@ test('a transcript without a request log gets inferred contexts', () => {
   const e = (seq: number) => n.events.find((x) => x.seq === seq)!;
   assert.deepEqual(n.events.map((x) => x.kind), ['user_input', 'llm_call', 'tool_call', 'llm_call']);
   assert.deepEqual([e(2).ctx_msgs, e(2).ctx_exact, e(3).resource, e(4).ctx_msgs, e(4).ctx_change], [1, false, 'src', 3, 'append']);
+});
+
+test('a synthetic assistant message (a client-side API error) is an error, not a model call', () => {
+  const lines = [
+    { type: 'user', uuid: 'u1', timestamp: '2026-11-17T10:00:00.000Z', message: { role: 'user', content: 'hi' } },
+    { type: 'assistant', uuid: 'x1', timestamp: '2026-11-17T10:00:01.000Z', isApiErrorMessage: true, requestId: 'req_x',
+      message: { id: 'syn1', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: "You've hit your limit" }], stop_reason: 'stop_sequence' } },
+  ].map((r) => JSON.stringify(r));
+  const r = readTranscript(lines);
+  assert.deepEqual(r.records.map((x) => x.type), ['input', 'error']);
+  const e = r.records[1]!;
+  assert.deepEqual(e.type === 'error' ? [e.ts, e.message, e.attempt] : null, ['2026-11-17T10:00:01.000Z', "You've hit your limit", null]);
+});
+
+test('a request whose base was never answered is resolved through that base', () => {
+  const h = (text: string) => apiMessageHash({ role: 'user', content: text });
+  const lines = [
+    { type: 'user', uuid: 'u1', timestamp: '2026-11-17T10:00:00.000Z', message: { role: 'user', content: 'one' } },
+    { type: 'api-request', id: 'r1', timestamp: '2026-11-17T10:00:01.000Z', base: null, keep: 0, tail: [h('one')] },
+    { type: 'user', uuid: 'u2', timestamp: '2026-11-17T10:00:02.000Z', message: { role: 'user', content: 'two' } },
+    { type: 'api-request', id: 'r2', timestamp: '2026-11-17T10:00:03.000Z', base: 'r1', keep: 1, tail: [h('two')] },
+    { type: 'assistant', uuid: 'a1', timestamp: '2026-11-17T10:00:04.000Z', requestRef: 'r2', requestId: 'req_2',
+      message: { id: 'm1', role: 'assistant', model: 'm', content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' } },
+  ].map((r) => JSON.stringify(r));
+  const call = readTranscript(lines).records.find((x) => x.type === 'call');
+  assert.deepEqual(call?.type === 'call' ? call.context : null, { request: 'r2', base: null, keep: 0, tail: [['u1'], ['u2']], exact: true });
 });
