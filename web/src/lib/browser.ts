@@ -38,3 +38,15 @@ export async function copyText(text: string): Promise<void> {
     }
   }
 }
+
+/** Saves a file the page holds in memory under the given name. */
+export function saveBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
