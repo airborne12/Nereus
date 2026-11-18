@@ -245,6 +245,26 @@ the agent tables:
     GRANT LOAD_PRIV ON otel.agent_sessions TO 'nereus_import'@'%';
     -- likewise agent_events, agent_messages, agent_contexts, agent_prompts; plus SELECT_PRIV on them
 
+### Agent trajectory API
+
+Read-only routes under `/api/agents/` (any signed-in user or API key). Every answer carries the
+statements that ran (`sql`: title and text) and `elapsedMs`; a query error answers 400.
+
+| Route | Answers |
+| --- | --- |
+| `GET /api/agents/sessions\|steps\|messages?from=&to=&q=&f=&sort=&dir=&limit=&offset=` | One page of rows (100 by default) and the total. `q`: every word must match, quotes make a phrase. `f=column:op:value`, repeatable, op one of `eq ne lt le gt ge contains` |
+| the same with `format=csv` | Every matching row as CSV (at most 200,000) |
+| `GET /api/agents/sessions?...&format=jsonl` | The matching sessions and their sub-agents as conversations, one JSON line per stretch between compactions |
+| `GET /api/agents/sessions?...&format=jsonl&size=1` | Size of that export, a preview of three sessions, and its SQL |
+| `GET /api/agents/sessions/<id>` | The session tree, one row per turn, and every step when the tree has at most 40 |
+| `GET /api/agents/sessions/<id>/turns/<n>` and `.../turns/<n>/steps?offset=` | A turn's input and final answer; 100 of its steps |
+| `GET /api/agents/sessions/<id>/steps/<seq>?inputOffset=` | A model call: its input (100 blocks at a time, latest first), output, tool results and prompt |
+| `GET /api/agents/sessions/<id>/events/<seq>/compaction` | The blocks a compaction replaced and its summary |
+| `GET /api/agents/compare?a=&b=&turn=` | Two sessions' trees and turns; with `turn`, that pair of turns' steps paired in order |
+
+`agent_sessions`, `agent_events` and `agent_messages` are also sources of search, charts and alerts
+(`/api/search?source=agent_messages&q=role:assistant AND timeout`).
+
 ## Scale
 
 On 103M logs and 69M spans (7 days, one BE with 32 cores) the UI's queries take a median of 31 ms
