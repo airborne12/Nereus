@@ -3,9 +3,9 @@
 
 import {
   defaultFacetFields, facetsSql, heatmapSql, HEAT_BANDS_PER_DECADE, histogramStep, OTHER_GROUP, searchHistogramSql, serviceMapSql, searchRowsSql, selectColumns, type Filter, type SearchSpec,
-} from '../../../server/src/query/build.ts';
-import { unknownFields } from '../../../server/src/query/compile.ts';
-import { logsSource, metricsSource, sessionsSource, tracesSource, type Source } from '../../../server/src/query/source.ts';
+} from '../../../server/src/semantics/search/build.ts';
+import { unknownFields } from '../../../server/src/semantics/search/compile.ts';
+import { logsSource, metricsSource, sessionsSource, tracesSource, type Source } from '../../../server/src/semantics/search/source.ts';
 import { createDemoContent } from './content.ts';
 import { compileFilter, type DemoRow, fieldValue } from './evaluate.ts';
 

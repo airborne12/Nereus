@@ -4,7 +4,7 @@
 //   DORIS_PORT=9930 DORIS_DB=otel_bench node demo/export-sessions.ts <id> [<id> ...]
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { Doris, configFromEnv } from '../../server/src/db.ts';
+import { Doris, configFromEnv } from '../../server/src/db/doris.ts';
 
 const ids = process.argv.slice(2);
 if (ids.length === 0 || !ids.every((x) => /^[A-Za-z0-9_-]{8,64}$/.test(x))) throw new Error('give session ids');

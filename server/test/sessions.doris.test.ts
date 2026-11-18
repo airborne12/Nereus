@@ -7,12 +7,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
-import { AuthStore } from '../src/auth/store.ts';
-import { ContentStore } from '../src/content/store.ts';
-import { Doris, configFromEnv } from '../src/db.ts';
+import { AuthStore } from '../src/control/auth/store.ts';
+import { ContentStore } from '../src/control/content/store.ts';
+import { Doris, configFromEnv } from '../src/db/doris.ts';
 import { createApp } from '../src/server.ts';
-import { IngestKeys } from '../src/sessions/http.ts';
-import { RateLimiter } from '../src/sessions/limit.ts';
+import { IngestKeys } from '../src/rum/http.ts';
+import { RateLimiter } from '../src/rum/limit.ts';
 import { freshMetaDb } from './meta-helper.ts';
 
 const enabled = process.env.DORIS_TEST === '1';

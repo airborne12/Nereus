@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CompileError, compileWhere, sqlString } from '../src/query/compile.ts';
-import { QuerySyntaxError } from '../src/query/ast.ts';
-import { parseQuery } from '../src/query/parser.ts';
-import { logsSource, tracesSource } from '../src/query/source.ts';
+import { CompileError, compileWhere, sqlString } from '../src/semantics/search/compile.ts';
+import { QuerySyntaxError } from '../src/semantics/search/ast.ts';
+import { parseQuery } from '../src/semantics/search/parser.ts';
+import { logsSource, tracesSource } from '../src/semantics/search/source.ts';
 
 const logs = logsSource();
 const traces = tracesSource();
@@ -133,7 +133,7 @@ test('traces: bare words search span names and services', () => {
 });
 
 test('unknown fields are reported with a likely correction', async () => {
-  const { unknownFields } = await import('../src/query/compile.ts');
+  const { unknownFields } = await import('../src/semantics/search/compile.ts');
   const known = ['body', 'level', 'severity_text', 'service', 'service_name', 'k8s.pod.name', 'thread.id'];
   assert.deepEqual(unknownFields(logs, 'levl:ERROR timeout', known), [{ field: 'levl', suggestion: 'level' }]);
   assert.deepEqual(unknownFields(logs, 'k8s.pod.nme:x', known), [{ field: 'k8s.pod.nme', suggestion: 'k8s.pod.name' }]);

@@ -8,8 +8,8 @@ import mysql from 'mysql2/promise';
 import {
   chartSql, defaultFacetFields, facetsSql, fieldsFromDescribe, heatmapSql, searchHistogramSql, searchRowsSql, serviceMapSql,
   traceSql, valuesSql,
-} from '../src/query/build.ts';
-import { logsSource, tracesSource } from '../src/query/source.ts';
+} from '../src/semantics/search/build.ts';
+import { logsSource, tracesSource } from '../src/semantics/search/source.ts';
 
 const DB = process.env.DORIS_DB ?? 'otel_scale';
 const RUNS = Number(process.env.RUNS ?? 4);
@@ -19,7 +19,7 @@ const conn = await mysql.createConnection({
   host: process.env.DORIS_HOST ?? '127.0.0.1', port: Number(process.env.DORIS_PORT ?? 9030), user: process.env.DORIS_USER ?? 'root',
   password: process.env.DORIS_PASSWORD ?? '', dateStrings: true, supportBigNumbers: true, bigNumberStrings: true,
 });
-// As the server's pool sets them (server/src/db.ts), plus no result cache so every run executes.
+// As the server's pool sets them (server/src/db/doris.ts), plus no result cache so every run executes.
 await conn.query('SET inverted_index_skip_threshold = 0, query_timeout = 300, describe_extend_variant_column = true');
 await conn.query('SET enable_sql_cache = false');
 

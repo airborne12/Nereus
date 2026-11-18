@@ -8,14 +8,14 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type pg from 'pg';
-import { readJson } from '../auth/http.ts';
-import { newToken, tokenHash } from '../auth/secrets.ts';
-import { AuthError, type User } from '../auth/store.ts';
-import type { Doris } from '../db.ts';
-import type { SearchSpec } from '../query/build.ts';
-import type { Source } from '../query/source.ts';
+import { readJson } from '../control/auth/http.ts';
+import { newToken, tokenHash } from '../control/auth/secrets.ts';
+import { AuthError, type User } from '../control/auth/store.ts';
+import type { Doris } from '../db/doris.ts';
+import type { SearchSpec } from '../semantics/search/build.ts';
+import type { Source } from '../semantics/search/source.ts';
 import { IngestError, insertSql, SESSION_ID, sessionRows } from './ingest.ts';
-import { parseTime } from '../query/build.ts';
+import { parseTime } from '../semantics/search/build.ts';
 import { RateLimiter } from './limit.ts';
 import { sessionForTraceSql, sessionRowsSql, sessionsListSql } from './query.ts';
 

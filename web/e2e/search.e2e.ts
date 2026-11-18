@@ -4,17 +4,17 @@
 //
 //   npm run build && DORIS_PORT=9930 DORIS_DB=otel_bench SHOTS=/tmp/shots npm run e2e
 
-import { IngestKeys } from '../../server/src/sessions/http.ts';
+import { IngestKeys } from '../../server/src/rum/http.ts';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { type Browser, type Page, chromium } from 'playwright';
-import { ContentStore } from '../../server/src/content/store.ts';
+import { ContentStore } from '../../server/src/control/content/store.ts';
 import { createServer } from 'node:http';
-import { AuthStore } from '../../server/src/auth/store.ts';
-import { AlertRunner } from '../../server/src/content/alerts.ts';
-import { Doris, configFromEnv } from '../../server/src/db.ts';
+import { AuthStore } from '../../server/src/control/auth/store.ts';
+import { AlertRunner } from '../../server/src/control/content/alerts.ts';
+import { Doris, configFromEnv } from '../../server/src/db/doris.ts';
 import { createApp, sourcesFor } from '../../server/src/server.ts';
 import { freshMetaDb } from '../../server/test/meta-helper.ts';
 

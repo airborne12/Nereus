@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { after, before, test } from 'node:test';
-import { Doris, configFromEnv } from '../src/db.ts';
+import { Doris, configFromEnv } from '../src/db/doris.ts';
 import { migrateComplexTable } from '../../schema/upgrades/002_complex_attributes.ts';
 
 const enabled = process.env.DORIS_TEST === '1';

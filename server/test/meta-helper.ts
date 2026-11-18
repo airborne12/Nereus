@@ -3,7 +3,7 @@
 
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
-import { migrate } from '../src/meta.ts';
+import { migrate } from '../src/db/meta.ts';
 
 export const pgEnabled = process.env.PG_TEST === '1' || process.env.DORIS_TEST === '1';
 const adminUrl = process.env.META_ADMIN_URL ?? 'postgres://postgres@127.0.0.1:5732/postgres';

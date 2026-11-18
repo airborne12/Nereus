@@ -1,15 +1,15 @@
 // Saved searches, dashboards, webhooks, alerts and charts through the HTTP API, on a fresh
 // PostgreSQL database and a live Doris loaded by bench/otelgen.py. Skipped unless DORIS_TEST=1.
 
-import { IngestKeys } from '../src/sessions/http.ts';
+import { IngestKeys } from '../src/rum/http.ts';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
-import { AuthStore } from '../src/auth/store.ts';
-import { AlertRunner } from '../src/content/alerts.ts';
-import { ContentStore } from '../src/content/store.ts';
-import { Doris, configFromEnv } from '../src/db.ts';
+import { AuthStore } from '../src/control/auth/store.ts';
+import { AlertRunner } from '../src/control/content/alerts.ts';
+import { ContentStore } from '../src/control/content/store.ts';
+import { Doris, configFromEnv } from '../src/db/doris.ts';
 import { createApp, sourcesFor } from '../src/server.ts';
 import { freshMetaDb } from './meta-helper.ts';
 

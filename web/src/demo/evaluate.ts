@@ -1,5 +1,5 @@
 // In-browser evaluation of the search bar language over a snapshot of rows, for the offline
-// demo. It parses with the server's parser and follows the compiler's rules (server/src/query/
+// demo. It parses with the server's parser and follows the compiler's rules (server/src/semantics/search/
 // compile.ts) for each kind of column, so the demo answers the way Doris would:
 //   fulltext  (body, span_name): lower-cased word tokens; terms, wildcards and regexes match a token
 //   keyword   (ids, service, level...): the whole value, with case variants and value aliases
@@ -7,9 +7,9 @@
 //   number    : numeric comparison, unit suffixes on unit columns
 // Absent attributes do not match a term, so NOT matches them (as `NOT coalesce(.., false)`).
 
-import { type Node, type Segment, isWildcard, literalText } from '../../../server/src/query/ast.ts';
-import { parseQuery } from '../../../server/src/query/parser.ts';
-import type { Column, Source } from '../../../server/src/query/source.ts';
+import { type Node, type Segment, isWildcard, literalText } from '../../../server/src/semantics/search/ast.ts';
+import { parseQuery } from '../../../server/src/semantics/search/parser.ts';
+import type { Column, Source } from '../../../server/src/semantics/search/source.ts';
 
 export type DemoRow = Record<string, unknown>;
 

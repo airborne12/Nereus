@@ -23,22 +23,22 @@
 import { readFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
-import { QuerySyntaxError } from './query/ast.ts';
-import { AlertRunner } from './content/alerts.ts';
-import { contentRoutes } from './content/http.ts';
-import { ContentStore } from './content/store.ts';
-import { readJson } from './auth/http.ts';
+import { QuerySyntaxError } from './semantics/search/ast.ts';
+import { AlertRunner } from './control/content/alerts.ts';
+import { contentRoutes } from './control/content/http.ts';
+import { ContentStore } from './control/content/store.ts';
+import { readJson } from './control/auth/http.ts';
 import {
   type ChartSpec, chartSql, defaultFacetFields, facetsSql, heatmapSql, serviceMapSql, fieldsFromDescribe, type Filter, searchHistogramSql, searchRowsSql, type SearchSpec,
   traceSql, valuesSql, type Field,
-} from './query/build.ts';
-import { CompileError, unknownFields } from './query/compile.ts';
-import { logsSource, metricsSource, sessionsSource, tracesSource, type Source } from './query/source.ts';
-import { Doris, configFromEnv } from './db.ts';
-import { type AuthContext, authRoutes, authenticate } from './auth/http.ts';
-import { type IngestLimits, IngestKeys, sessionRoutes } from './sessions/http.ts';
-import { AuthError, AuthStore } from './auth/store.ts';
-import { metaPoolFromEnv, migrate } from './meta.ts';
+} from './semantics/search/build.ts';
+import { CompileError, unknownFields } from './semantics/search/compile.ts';
+import { logsSource, metricsSource, sessionsSource, tracesSource, type Source } from './semantics/search/source.ts';
+import { Doris, configFromEnv } from './db/doris.ts';
+import { type AuthContext, authRoutes, authenticate } from './control/auth/http.ts';
+import { type IngestLimits, IngestKeys, sessionRoutes } from './rum/http.ts';
+import { AuthError, AuthStore } from './control/auth/store.ts';
+import { metaPoolFromEnv, migrate } from './db/meta.ts';
 
 class BadRequest extends Error {}
 

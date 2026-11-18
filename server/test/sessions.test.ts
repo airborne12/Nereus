@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { insertSql, PART_CHARS, sessionRows, splitParts } from '../src/sessions/ingest.ts';
+import { insertSql, PART_CHARS, sessionRows, splitParts } from '../src/rum/ingest.ts';
 
 const now = Date.parse('2026-11-05T10:00:00Z');
 
@@ -60,7 +60,7 @@ test('insertSql: values escaped, statements batched by size', () => {
 });
 
 test('rate limiter: burst, then the refill rate; buckets are independent', async () => {
-  const { RateLimiter } = await import('../src/sessions/limit.ts');
+  const { RateLimiter } = await import('../src/rum/limit.ts');
   let t = 0;
   const l = new RateLimiter(2, 5, () => t);
   for (let i = 0; i < 5; i++) assert.equal(l.take('a').ok, true);
@@ -76,7 +76,7 @@ test('rate limiter: burst, then the refill rate; buckets are independent', async
 });
 
 test('client address: right-most entries come from trusted proxies; what the client sent is ignored', async () => {
-  const { clientAddress } = await import('../src/sessions/http.ts');
+  const { clientAddress } = await import('../src/rum/http.ts');
   assert.equal(clientAddress('1.1.1.1', '10.0.0.9', 0), '10.0.0.9', 'no proxy: the socket');
   assert.equal(clientAddress('spoofed, 203.0.113.7', '10.0.0.9', 1), '203.0.113.7', 'one proxy: its entry, the right-most');
   assert.equal(clientAddress('spoofed, 203.0.113.7, 198.51.100.1', '10.0.0.9', 2), '203.0.113.7', 'two proxies');

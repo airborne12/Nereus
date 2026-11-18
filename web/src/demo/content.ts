@@ -1,8 +1,8 @@
 // Offline demo: saved searches, favorites, webhooks, alerts, dashboards and charts, kept in memory
 // and computed over the snapshot. Starts with example content so every page has something.
 
-import { chartSql, type ChartSpec, histogramStep, type SearchSpec } from '../../../server/src/query/build.ts';
-import type { Source } from '../../../server/src/query/source.ts';
+import { chartSql, type ChartSpec, histogramStep, type SearchSpec } from '../../../server/src/semantics/search/build.ts';
+import type { Source } from '../../../server/src/semantics/search/source.ts';
 import { type DemoRow, fieldValue } from './evaluate.ts';
 
 type J = Record<string, any>;

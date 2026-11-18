@@ -1,8 +1,8 @@
 // SQL for the Sessions pages: sessions with any event matching the search, and one session's rows.
 
 import { escape } from 'mysql2';
-import { parseTime, type SearchSpec, searchWhere } from '../query/build.ts';
-import type { Source } from '../query/source.ts';
+import { parseTime, type SearchSpec, searchWhere } from '../semantics/search/build.ts';
+import type { Source } from '../semantics/search/source.ts';
 
 const lit = (ms: number) => escape(new Date(ms).toISOString().replace('T', ' ').replace('Z', ''));
 
