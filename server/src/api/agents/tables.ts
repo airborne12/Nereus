@@ -27,12 +27,19 @@ async function list(doris: Doris, send: Send, res: ServerResponse, page: Page, r
   });
 }
 
+function rowCap(n: number): string {
+  return `${n} rows match; an export holds at most ${MAX_EXPORT_ROWS}. Narrow the range or the filter.`;
+}
+
 async function csv(doris: Doris, res: ServerResponse, page: Page, req: TableRequest): Promise<void> {
   const { rows, total } = tableSql(page, req, 'export', MAX_EXPORT_ROWS);
   const { results: [counted] } = await run(doris, [total]);
   const n = Number(counted![0]?.total ?? 0);
-  if (n > MAX_EXPORT_ROWS) throw new CompileError(`${n} rows match; an export holds at most ${MAX_EXPORT_ROWS}. Narrow the range or the filter.`);
+  if (n > MAX_EXPORT_ROWS) throw new CompileError(rowCap(n));
+  if (Number(counted![0]?.bytes ?? 0) > MAX_EXPORT_BYTES) throw new CompileError(`the export would hold more than ${MAX_EXPORT_BYTES} bytes of text. Narrow the range or the filter.`);
   const { results: [all] } = await run(doris, [rows]);
+  // Rows ingested after the count must not silently cut the file.
+  if (all!.length > MAX_EXPORT_ROWS) throw new CompileError(rowCap(all!.length));
   sendFile(res, exportName(page.name, 'csv'), 'text/csv', toCsv(page.columns.map((c) => c.name), all!));
 }
 

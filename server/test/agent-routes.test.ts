@@ -8,9 +8,9 @@ import type { Doris } from '../src/db/doris.ts';
 import { MAX_EXPORT_BYTES, MAX_EXPORT_ROWS } from '../src/semantics/trajectory/export.ts';
 
 /** A Doris that answers counts with `total` and everything else with `rows`, recording the SQL. */
-function stub(total: number, rows: Record<string, unknown>[] = []) {
+function stub(total: number, rows: Record<string, unknown>[] = [], bytes = 0) {
   const seen: string[] = [];
-  const doris = { query: async (sql: string) => { seen.push(sql); return sql.startsWith('SELECT count(*)') ? [{ total }] : rows; } } as unknown as Doris;
+  const doris = { query: async (sql: string) => { seen.push(sql); return sql.startsWith('SELECT count(*)') ? [{ total, bytes }] : rows; } } as unknown as Doris;
   return { doris, seen };
 }
 
@@ -39,6 +39,18 @@ test('an export larger than the cap is refused before its rows are read', async 
   const { doris, seen } = stub(MAX_EXPORT_ROWS + 1);
   await assert.rejects(call(doris, `/api/agents/messages?${RANGE}&format=csv`).done, /at most 200000/);
   assert.equal(seen.length, 1, 'only the count ran');
+});
+
+test('an export with too much text is refused before its rows are read', async () => {
+  const { doris, seen } = stub(1, [], MAX_EXPORT_BYTES + 1);
+  await assert.rejects(call(doris, `/api/agents/messages?${RANGE}&format=csv`).done, /more than 134217728 bytes/);
+  assert.equal(seen.length, 1, 'only the count ran');
+});
+
+test('an export whose fetched rows exceed the cap is refused, not cut', async () => {
+  const rows = Array.from({ length: MAX_EXPORT_ROWS + 1 }, () => ({ a: 1 }));
+  const { doris } = stub(1, rows);
+  await assert.rejects(call(doris, `/api/agents/messages?${RANGE}&format=csv`).done, /at most 200000/);
 });
 
 test('paths outside the agent API are left to other routes; unknown agent paths answer 404', async () => {

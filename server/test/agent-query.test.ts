@@ -47,6 +47,15 @@ test('an export carries whole text and every row up to the cap plus one', () => 
   assert.match(rows.sql, /ORDER BY s\.last_event_at DESC, s\.session_id\nLIMIT 501$/);
 });
 
+test('the export Total also sums the bytes of the long columns; the list Total does not', () => {
+  const page = sessionsPage('otel');
+  const long = page.columns.find((c) => c.long)!;
+  const exp = tableSql(page, req(), 'export', 500).total.sql;
+  assert.match(exp, /AS bytes/);
+  assert.ok(exp.includes(`length(${long.expr})`));
+  assert.doesNotMatch(tableSql(page, req(), 'list').total.sql, /bytes|length\(/);
+});
+
 test('Steps join one table per search term; Messages search the block text', () => {
   const steps = tableSql(stepsPage('otel'), req({ q: 'read "the test"' }), 'list').rows.sql;
   assert.match(steps, /text MATCH_PHRASE 'read'\n\) w0 ON w0\.session_id = m\.session_id AND w0\.api_msg = m\.api_msg/);

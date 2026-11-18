@@ -150,9 +150,12 @@ export function tableSql(page: Page, req: TableRequest, mode: 'list' | 'export',
   const { from, where } = filterOf(page, req);
   const select = page.columns.map((c) => `${mode === 'list' && c.long ? `left(${c.expr}, ${PREVIEW_CHARS})` : c.expr} AS \`${c.name}\``);
   const body = `${from.join('\n')}\nWHERE ${where.join('\n  AND ')}`;
+  // An export also totals the bytes of its long text (Doris length() counts bytes) so the route can cap it.
+  const sizes = page.columns.filter((c) => c.long).map((c) => `coalesce(length(${c.expr}), 0)`);
+  const counts = mode === 'export' && sizes.length ? `count(*) AS total, coalesce(sum(${sizes.join(' + ')}), 0) AS bytes` : 'count(*) AS total';
   const limit = mode === 'list' ? listLimitOf(req) : `LIMIT ${Math.trunc(cap) + 1}`;
   return {
     rows: { title: 'Rows', sql: `SELECT ${select.join(',\n       ')}\n${body}\nORDER BY ${orderOf(page, req)}\n${limit}` },
-    total: { title: 'Total', sql: `SELECT count(*) AS total\n${body}` },
+    total: { title: 'Total', sql: `SELECT ${counts}\n${body}` },
   };
 }
