@@ -1,6 +1,7 @@
 # Agent trajectories in Nereus: model, import, pages and judgments
 
-Date: 2026-11-11, revised 2026-11-17 after the prototype walk. Status: design, awaiting review.
+Date: 2026-11-11, revised 2026-11-17 after the prototype walk and 2026-11-19 after sub-project 1.
+Status: sub-project 1 is built; sections on the later sub-projects are design.
 
 The pages of section 8 were settled one function at a time on a clickable prototype with invented
 data. Where this document and the prototype differ, this document wins.
@@ -182,7 +183,7 @@ marked as dropped.
 | `peak_ctx_tokens` | BIGINT | Largest context of one request |
 | `active_us` | BIGINT | Span minus the gaps before user inputs |
 | `first_input`, `last_output` | STRING | First user text and last assistant text, cut to 2,000 characters |
-| `safety_risks` | INT | Rows in `agent_risks`, written by the rules job |
+| `safety_risks` | INT | Rows in `agent_risks`, written by the rules job; NULL until sub-project 2 |
 | `source` | VARCHAR(32) NOT NULL | `claude-transcript` for now |
 | `source_cursor` | STRING | Last source row processed, for incremental import |
 
@@ -379,7 +380,8 @@ The adapter emits records of these kinds, in source order per session:
 ### 6.2 Normaliser rules
 
 - **Block identity.** `content_hash` is the SHA-256 of role, kind and canonical content. Canonical
-  content is the block's text, or its JSON with sorted keys. Within a session, a block whose hash
+  content is the block's text, or its JSON with sorted keys. A tool-use or tool-result block also
+  takes its call id, so two identical calls stay two blocks. Within a session, a block whose hash
   is already known keeps its `msg_seq`; a new hash gets `last_msg_seq + 1`.
 - **Events.** A user prompt opens a turn and becomes a `user_input` event. The blocks of one API
   message become one `llm_call` event; `step` increases by one. Each tool-use block becomes a
@@ -410,8 +412,9 @@ The adapter emits records of these kinds, in source order per session:
   it is 0 for the first event. Active time is the span of a session minus the gaps of its
   `user_input` events.
 - **State.** The normaliser needs, per session, the map from hash to `msg_seq`, the last sequence
-  numbers, the open tool calls and the ranges of the last call. On first use the ingest module reads
-  them from Doris; they are cached in memory only.
+  numbers, the open tool calls and the ranges of the last call. The transcript importer reads a
+  file whole each time, so this state starts empty and none is read from Doris. A capture path
+  that appends (sub-project 6) will have to hold or reload it.
 
 ### 6.3 Claude Code transcript adapter
 
@@ -439,11 +442,13 @@ does not know are counted and skipped. A malformed line is skipped and reported.
 
 - Session ids come from file names; sequence numbers come from the deterministic row order, so a
   full re-import produces the same keys.
-- `source_cursor` holds the last source row processed; an incremental import continues after it.
+- `source_cursor` holds the size and modification time of the source file. A file whose cursor is
+  unchanged is skipped. A changed file is read whole again: the rows of its tree are deleted and
+  loaded again, which yields the same keys.
 - Text longer than the Doris single-value limit (`string_type_length_soft_limit_bytes`, 10 MB by
   default) is cut and `truncated` is set; the full text stays in the source file.
-- The writer uses Stream Load with a label derived from session id and sequence range. A repeated
-  batch is rejected by label, and the unique keys make a retried row harmless.
+- The writer uses Stream Load with a label per table, session, batch and import run, and the
+  unique keys make a retried row harmless.
 - The importer connects with its own Doris account that can write only the fact tables. The jobs
   of 6.5 use a second account that can write only the derived tables. The API service is read-only
   on all agent tables; actions that write (a new judge, a rerun) enqueue a job.
@@ -483,7 +488,9 @@ ran and the elapsed time, which the SQL dialog shows.
 Table pages share one request shape: time range (`from`, `to`), search `q` (all words must match,
 quotes make a phrase), conditions `f=<column>:<op>:<value>` joined by AND, `sort`, `dir`, `limit`
 (100) and `offset`, and `format=csv|jsonl` for export, which applies the same filter to every
-matching row.
+matching row. With `size=1` an export answers its size, a preview and its SQL in place of the file.
+A CSV export holds at most 200,000 rows and 128 MiB of text, a conversations export at most
+128 MiB; a larger one answers 400 and is never cut.
 
 | Operation | SQL shape | Endpoint |
 | --- | --- | --- |
@@ -491,11 +498,12 @@ matching row.
 | Steps | `llm_call` events with their tool calls; search joins a derived table of assistant blocks per word | `GET /api/agents/steps` |
 | Messages | Blocks with role and kind; `MATCH_PHRASE` on `text` per word | `GET /api/agents/messages` |
 | Risks | `agent_risks` with the latest judgment | `GET /api/agents/risks` |
-| Session tree and lanes | `WHERE root_id = ?`; per step one light row (kind, status, repeat, context size, compaction) | `GET /api/agents/sessions/<id>` |
+| Session tree and lanes | `WHERE root_id = ?`; one row per turn; the marks (failed and repeated calls, calls that started a sub-agent, compactions; at most 2,000); per step one light row (kind, status, repeat, context size, compaction) when the tree has at most 40 steps | `GET /api/agents/sessions/<id>` |
+| Turn | The user's input and the text of the turn's last model call | `GET /api/agents/sessions/<id>/turns/<n>` |
 | Steps of a turn | One page of 100 steps of one turn | `GET /api/agents/sessions/<id>/turns/<n>/steps` |
 | Step | Input: context ranges joined with blocks, new blocks first, earlier ones on request; output; tool results | `GET /api/agents/sessions/<id>/steps/<seq>` |
 | Compaction | Replaced blocks and the summary | `GET /api/agents/sessions/<id>/events/<seq>/compaction` |
-| Compare | Two sessions' facts; turns paired by number; steps of a pair of turns paired in the semantics layer | `GET /api/agents/compare?a=&b=&turn=` |
+| Compare | Two sessions' facts; turns paired by number; steps of a pair of turns, with their context sizes, paired in the semantics layer; the turn's compactions | `GET /api/agents/compare?a=&b=&turn=` |
 | Conversations export | Blocks by session, part number by a window sum over summary blocks; lines assembled in the semantics layer | `GET /api/agents/sessions?format=jsonl` |
 | Next calls | From a starting kind of call, `lead()` over events, grouped by path | `GET /api/agents/sequences/next?start=&depth=` |
 | Pattern match | Pattern compiled to CTEs over numbered events (next: join on `pos + 1`; later: `pos >` with `min`) | `POST /api/agents/sequences/match` |
@@ -529,6 +537,10 @@ Memories
 Dashboard
 ```
 
+A page appears in the navigation with the sub-project that builds it: Sessions, Steps and Messages
+with sub-project 1. The app opens on Sessions. In a window too narrow for the navigation's labels,
+a table page itself offers its sibling pages.
+
 A page of the navigation replaces whatever is open. Rules for every page:
 
 - List pages are data tables in the convention of observability products, never card lists.
@@ -548,14 +560,18 @@ A page of the navigation replaces whatever is open. Rules for every page:
 **Sessions.** A row is a main session with its tree. Columns, the first nine shown by default:
 Last activity (default sort), Session, Errors, Risks, First input, Last output, Turns, Steps,
 Tokens; in the menu: Started, Active time, Sub-agents, Compactions, Peak context, Model, User.
-Errors counts failed calls. Risks is a red count whose title names the rules. A checkbox column at
-the far left allows ticking two sessions for Compare. Export writes every matching session as a
-table (CSV, database column names, raw values) or as conversations (JSON lines, 8.4).
+Errors counts failed calls. Risks is a red count whose title names the rules; the column comes with
+sub-project 2. A session without a title is called by the first line of its first input. A
+checkbox column at the far left allows ticking two sessions for Compare. Export writes every
+matching session as a table (CSV, database column names, raw values) or as conversations (JSON
+lines, 8.4). In a CSV file, free text that a spreadsheet would run as a formula gets a leading
+apostrophe.
 
 **Steps.** A row is one step, sub-agents included. Shown: Time, Session, Agent, Turn, Step, Tool
 calls, Status, Output, Context, Latency. In the menu: Repeated call ("still in context", "no
 longer in context"), Stop reason, Context msgs, New, Context change, Cache hit, Output tokens, Tool
-time, Retries, Model. Search runs on what the assistant wrote and called. Export: CSV.
+time, Retries, Model. Search runs on what the assistant wrote and called. Output is empty for a
+step that only called tools. Export: CSV.
 
 **Messages.** A row is one block. Columns: Time, Session, Agent, Turn, Step, Role, Kind, Tool,
 Status, Text, Tokens. Role retrieval (3.1.1) is the condition Role = assistant. A row opens the
@@ -569,7 +585,8 @@ happened; Why it counts in the menu. A row opens the session on that risk.
 Header: the title, one line of facts (turns, steps, tool calls, active time, tokens, peak context,
 whether contexts are exact or inferred), "N safety risks", "Wrote memory <name>" when the session
 wrote one, and Jump to buttons (failed calls, repeated calls, compactions, sub-agents) shown only
-when present.
+when present. A button visits its places in the order of the tree, a sub-agent's after the call
+that started it.
 
 Left: the trajectory drawn after the paper's Figure 1. One lane per session; a numbered node per
 turn; a small node per step (filled when it answers, red when a call failed, amber when it repeats
@@ -602,8 +619,8 @@ the comparison. "Swap A and B" changes the baseline. Above 4,000,000 step pairs 
 paired by position.
 
 **Conversations export** writes one JSON line per session and sub-agent session and per stretch
-between compactions, each starting with the system prompt, so every line is a context the model
-really had: `session_id`, `root_id`, `parent_id`, `kind`, `agent_name`, `model`, `title`, `part`,
+between compactions: the context of the stretch's last model call followed by that call's output,
+starting with the system prompt, so every line is a context the model really had: `session_id`, `root_id`, `parent_id`, `kind`, `agent_name`, `model`, `title`, `part`,
 `messages` (role and content; assistant messages carry `tool_calls`; tool messages `name` and
 `is_error`; a summary is a user message marked `summary`). A part with nothing from the assistant
 is left out. The dialog shows a preview, the size and the SQL.
@@ -706,13 +723,14 @@ schema/        DDL; one new file for the agent tables
 web/src/
   pages/agents/       sessions, steps, messages, risks, session, compare, sequences, judges, memories, dashboard
   components/agents/  data table, lanes, chat, SQL and export dialogs, path drawing, judge plan
-  api/                api.ts split by feature
+  api/                http.ts (transport) and one file per feature; agents.ts first
 ```
 
 - A unit test scans imports and fails when `semantics/` imports `api/`, when `db/` imports an upper
   layer, or when the normaliser imports `db/`.
-- The browser-session module becomes `rum/`: table `rum_sessions`, routes `/api/rum/...`. The label
-  "Client sessions" stays. This removes the second meaning of "session" from the code.
+- The browser-session module becomes `rum/`: table `rum_sessions`, read routes `/api/rum/...`; the
+  SDK keeps posting to `/api/ingest/sessions`. The label "Client sessions" stays. This removes the
+  second meaning of "session" from the code.
 - The offline demo build imports server SQL builders; its import paths move with them and it must
   still build.
 
@@ -775,7 +793,8 @@ Open questions:
   unknown rows and fields. Sub-project 6 adds OTLP as the long-term capture path.
 - **Sequence numbers for OTLP.** Spans arrive out of order; how `seq` is assigned is decided in
   sub-project 6.
-- **Large exports.** A streamed download or `SELECT ... INTO OUTFILE` to object storage.
+- **Large exports.** An export over its cap (7) is refused today. A streamed download or
+  `SELECT ... INTO OUTFILE` to object storage would lift the cap.
 - **Unverified statements.** Statements of the Sequences page from prototype version 25 on, and of
   Risks, Judges, Memories and Dashboard, have not been run on Doris yet. They are checked first in
   sub-projects 2 to 5.

@@ -253,17 +253,51 @@ statements that ran (`sql`: title and text) and `elapsedMs`; a query error answe
 | Route | Answers |
 | --- | --- |
 | `GET /api/agents/sessions\|steps\|messages?from=&to=&q=&f=&sort=&dir=&limit=&offset=` | One page of rows (100 by default) and the total. `q`: every word must match, quotes make a phrase. `f=column:op:value`, repeatable, op one of `eq ne lt le gt ge contains`; `limit` at most 1000 |
-| the same with `format=csv` | Every matching row as CSV: at most 200,000 rows and 128 MiB of text, otherwise 400 |
+| the same with `format=csv` | Every matching row as CSV: at most 200,000 rows and 128 MiB of text, otherwise 400. Free text that a spreadsheet would run as a formula (it starts with `=`, `+`, `-`, `@`, a tab or a carriage return) gets a leading apostrophe |
+| the same with `format=csv&size=1` | The number of rows of that export, its first five rows, and its SQL |
 | `GET /api/agents/sessions?...&format=jsonl` | The matching sessions and their sub-agents as conversations, one JSON line per stretch between compactions; at most 128 MiB of text, otherwise 400 |
 | `GET /api/agents/sessions?...&format=jsonl&size=1` | Size of that export, a preview of three sessions, and its SQL |
-| `GET /api/agents/sessions/<id>` | The session tree, one row per turn, and every step when the tree has at most 40 |
+| `GET /api/agents/sessions/<id>` | The session tree, one row per turn, the marks (failed and repeated calls, calls that started a sub-agent, compactions; at most 2,000), and every step when the tree has at most 40 |
 | `GET /api/agents/sessions/<id>/turns/<n>` and `.../turns/<n>/steps?offset=` | A turn's input and final answer; 100 of its steps |
 | `GET /api/agents/sessions/<id>/steps/<seq>?inputOffset=` | A model call: its input (100 blocks at a time, latest first), output, tool results and prompt |
 | `GET /api/agents/sessions/<id>/events/<seq>/compaction` | The blocks a compaction replaced and its summary |
-| `GET /api/agents/compare?a=&b=&turn=` | Two sessions' trees and turns; with `turn` (0 allowed), that pair of turns' steps paired in order |
+| `GET /api/agents/compare?a=&b=&turn=` | Two sessions' trees and turns; with `turn` (0 allowed), that pair of turns' steps paired in order, each with its context size, and the turn's compactions |
 
 `agent_sessions`, `agent_events` and `agent_messages` are also sources of search, charts and alerts
 (`/api/search?source=agent_messages&q=role:assistant AND timeout`).
+
+### Agent trajectory pages
+
+The app opens on **Agent trajectories**, an area of the navigation with three table pages:
+
+- **Sessions** (`/agents/sessions`): one row per session tree. Tick two rows to compare them.
+- **Steps** (`/agents/steps`): one row per model call with the tool calls it issued.
+- **Messages** (`/agents/messages`): one row per content block with its role.
+
+Every table page has one time range (the past 1 hour, 24 hours, 7 days or 30 days, or a custom
+range), one search over the row's own text, conditions added with **Add filter**, a sort by any
+column, a **Columns** menu, **Export** and **SQL**. Its state is in the address, so a view can be
+shared and reloaded. Times are written as `YYYY-MM-DD HH:MM:SS` in the viewer's time zone, which
+is shown beside the range.
+
+A row opens the **session page** (`/agents/sessions/<id>`). On the left the trajectory is drawn
+as lanes: one lane per session, a numbered node per turn, a small node per step, a sub-agent as a
+branch, and the width of a lane as the size of the context, so a compaction shows as a funnel. On
+the right the selected turn, step or compaction reads as a chat between roles: for a step, what
+the model saw, what it answered and what its calls returned. **Jump to** visits the failed calls,
+repeated calls, compactions and sub-agents; the arrow keys move along the lanes.
+
+**Compare** (`/agents/compare?a=&b=`) shows two sessions as two rows of facts with their
+difference, then their lanes side by side with the steps of each pair of turns paired in order.
+
+Browser tests of these pages: `cd web && npm run build && node --test e2e/agents.e2e.ts`. They
+create and drop their own Doris database and need `DORIS_BE_HTTP_URL` and a PostgreSQL for the
+metadata database, as the server's Doris tests do.
+
+Times of the session page on a large session, taken in headless Chromium against a running
+Nereus: `cd web && node bench/agent-pages-report.ts <session id>` (the file's header names its
+settings). The lanes draw only the rows near the window, so a session of thousands of turns opens
+and selects as fast as a small one.
 
 ## Scale
 
