@@ -56,3 +56,18 @@ test('statements: a part is the context of its last model call plus that call ou
 test('export file names carry the page and the time', () => {
   assert.equal(exportName('steps', 'csv', new Date('2026-11-18T09:05:01Z')), 'agent-steps-20261118090501.csv');
 });
+
+test('conversations: a part of 30000 blocks, each listed twice, de-duplicates in linear time', () => {
+  const parts = [{ session_id: 's', part: 1, root_id: 's', parent_id: null, kind: 'main', agent_name: null, model: 'm', title: 't', system_text: null }];
+  const blocks: Record<string, unknown>[] = [];
+  for (let seq = 1; seq <= 15_000; seq++) {
+    const block = b(seq, seq % 2 ? 'user' : 'assistant', 'text', `m${seq}`);
+    blocks.push(block, { ...block });
+  }
+  const start = performance.now();
+  const lines = conversations(parts, blocks);
+  const elapsed = performance.now() - start;
+  assert.equal(lines[0]!.messages.length, 15_000);
+  assert.equal(lines[0]!.messages.some((m) => m.role === 'system'), false);
+  assert.ok(elapsed < 1000, `took ${elapsed.toFixed(0)} ms`);
+});

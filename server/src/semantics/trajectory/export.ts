@@ -148,10 +148,17 @@ export function chat(blocks: readonly Row[]): ChatMessage[] {
  */
 export function conversations(parts: readonly Row[], blocks: readonly Row[], maxMessages = Infinity): ConversationLine[] {
   const byPart = new Map<string, Row[]>();
+  const seen = new Map<string, Set<string>>();
   for (const b of blocks) {
     const k = `${String(b.session_id)}#${String(b.part)}`;
     const list = byPart.get(k) ?? [];
-    if (!list.some((x) => String(x.msg_seq) === String(b.msg_seq))) list.push(b);
+    const keys = seen.get(k) ?? new Set<string>();
+    const seq = String(b.msg_seq);
+    if (!keys.has(seq)) {
+      keys.add(seq);
+      list.push(b);
+    }
+    seen.set(k, keys);
     byPart.set(k, list);
   }
   return parts.flatMap((p) => {
