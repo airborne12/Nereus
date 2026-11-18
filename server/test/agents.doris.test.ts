@@ -83,3 +83,21 @@ test('contexts and repeats as stored', { skip: !enabled }, async () => {
   assert.equal(p!.system_text, 'You are a coding agent.');
   assert.deepEqual(JSON.parse(String(p!.tool_names)), ['Read', 'Bash']);
 });
+
+test('a re-import removes rows the current transcript no longer produces', { skip: !enabled }, async () => {
+  await doris.query(`INSERT INTO ${db}.agent_events (session_id, seq, ts, turn, step, kind) VALUES ('${MAIN_ID}', 99, '2026-11-17 10:00:00.000000', 1, 1, 'note')`);
+  await doris.query(`INSERT INTO ${db}.agent_messages (session_id, msg_seq, ts, content_hash, msg_role, kind, api_msg) VALUES ('${MAIN_ID}', 99, '2026-11-17 10:00:00.000000', 'h', 'user', 'text', 1)`);
+  await importFile(main, { doris, db, load, force: true });
+  const [e] = await doris.query(`SELECT count(*) AS n FROM ${db}.agent_events WHERE session_id = '${MAIN_ID}' AND seq = 99`);
+  const [m] = await doris.query(`SELECT count(*) AS n FROM ${db}.agent_messages WHERE session_id = '${MAIN_ID}' AND msg_seq = 99`);
+  assert.deepEqual([Number(e!.n), Number(m!.n)], [0, 0]);
+  const [s] = await doris.query(`SELECT steps, tool_calls FROM ${db}.agent_sessions WHERE session_id = '${MAIN_ID}'`);
+  assert.deepEqual([Number(s!.steps), Number(s!.tool_calls)], [7, 5]);
+});
+
+test('after the tables are emptied, a forced import loads the rows again', { skip: !enabled }, async () => {
+  for (const t of TABLES) await doris.query(`TRUNCATE TABLE ${db}.${t}`);
+  await importFile(main, { doris, db, load, force: true });
+  const [e] = await doris.query(`SELECT count(*) AS n FROM ${db}.agent_events`);
+  assert.equal(Number(e!.n), 17);
+});

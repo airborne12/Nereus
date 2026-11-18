@@ -7,6 +7,7 @@
 // is skipped unless --force is given. Doris is reached through DORIS_HOST, DORIS_PORT, DORIS_USER,
 // DORIS_PASSWORD, DORIS_DB and DORIS_BE_HTTP_URL.
 
+import { randomUUID } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { escape } from 'mysql2';
@@ -84,6 +85,19 @@ export async function readTree(file: string): Promise<Tree> {
     malformed: read.reduce((a, x) => a + x.result.malformed, 0), unresolved: read.reduce((a, x) => a + x.result.unresolved, 0) };
 }
 
+/**
+ * Deletes the stored rows of a session tree before it is written again, so that rows the transcript
+ * no longer produces (renumbered or dropped) do not stay. The session rows go too, so an import that
+ * fails part-way is redone by the next run. Prompts are shared between sessions and kept.
+ */
+async function removeTree(doris: Doris, db: string, rootId: string, ids: readonly string[]): Promise<void> {
+  const stored = await doris.query(`SELECT session_id FROM ${db}.agent_sessions WHERE root_id = ${escape(rootId)}`);
+  const all = [...new Set([rootId, ...ids, ...stored.map((r) => String(r.session_id))])].map((x) => escape(x)).join(', ');
+  for (const t of ['agent_events', 'agent_messages', 'agent_contexts', 'agent_sessions']) {
+    await doris.query(`DELETE FROM ${db}.${t} WHERE session_id IN (${all})`);
+  }
+}
+
 export async function importFile(file: string, deps: { doris: Doris; db: string; load: Load; force?: boolean }): Promise<ImportReport> {
   const id = basename(file, '.jsonl');
   const cursor = await cursorOf(file);
@@ -94,10 +108,12 @@ export async function importFile(file: string, deps: { doris: Doris; db: string;
     }
   }
   const tree = await readTree(file);
-  for (const n of tree.normalised) await writeBranch(deps.load, n);
+  await removeTree(deps.doris, deps.db, id, tree.branches.map((b) => b.record.id));
+  const run = randomUUID();
+  for (const n of tree.normalised) await writeBranch(deps.load, n, run);
   const totals = totalsFromRows(await deps.doris.query(totalsSql(deps.db, tree.branches.map((b) => b.record.id))));
   const rows = sessionRows(tree.branches, totals, cursor);
-  for (const [i, part] of batches(rows).entries()) await deps.load('agent_sessions', labelFor('agent_sessions', id, i, part), part);
+  for (const [i, part] of batches(rows).entries()) await deps.load('agent_sessions', labelFor('agent_sessions', id, i, part, run), part);
   return {
     session: id, status: 'imported', branches: tree.branches.length,
     events: tree.normalised.reduce((a, n) => a + n.events.length, 0), messages: tree.normalised.reduce((a, n) => a + n.messages.length, 0),
