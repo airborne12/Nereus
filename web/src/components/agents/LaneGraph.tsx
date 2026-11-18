@@ -1,4 +1,4 @@
-import { bandPath, half, HEIGHT, laneX, NODE_Y, type RowKind } from '../../lib/agents/lanes.ts';
+import { bandPath, half, HEIGHT, laneX, NODE_Y, type RowKind } from '../../lib/agents/lane-draw.ts';
 
 interface Props {
   kind: RowKind;
@@ -13,8 +13,8 @@ interface Props {
   pass: (number | null)[];
   /** Tokens of the widest lane. */
   scale: number;
-  /** What sits on the lane: a numbered turn, a step dot, or nothing. */
-  node: { turn: number; selected: boolean } | { dot: string } | null;
+  /** What sits on the lane: a numbered turn, a step dot, the bud where a sub-agent's lane begins, or nothing. */
+  node: { turn: number; selected: boolean } | { dot: string } | { bud: true } | null;
   /** A sub-agent branch leaving the node: open with the width of its lane, or closed as a bud. */
   branch?: { open: boolean; width: number } | null;
   /** The row has no lane of its own; only the lanes that pass by are drawn. */
@@ -47,6 +47,12 @@ export function LaneGraph({ kind, lane, from, at, to, above, below, pass, scale,
         </>
       )}
       {node && 'dot' in node && <circle className={`ag-dot${node.dot ? ` ${node.dot}` : ''}`} cx={cx} cy={cy} r={3.5} />}
+      {node && 'bud' in node && (
+        <>
+          <path className="ag-br" strokeWidth={2} d={`M${laneX(lane - 1)},${cy}H${cx - 4}`} />
+          <circle className="ag-bud" cx={cx} cy={cy} r={3.5} />
+        </>
+      )}
     </svg>
   );
 }

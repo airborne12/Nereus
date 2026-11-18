@@ -11,7 +11,7 @@ import type { ServerResponse } from 'node:http';
 import type { Doris } from '../../db/doris.ts';
 import { CompileError } from '../../semantics/search/compile.ts';
 import {
-  compactionSql, marksSql, OPEN_ALL_STEPS, sessionId, STEPS_PAGE, stepSql, treeSql, treeStepsSql, turnSql, turnStepsSql, turnsSql,
+  compactionSql, MARKS_LIMIT, marksSql, OPEN_ALL_STEPS, sessionId, STEPS_PAGE, stepSql, treeSql, treeStepsSql, turnSql, turnStepsSql, turnsSql,
 } from '../../semantics/trajectory/session.ts';
 import { intParam, parsed, run, type Send } from './request.ts';
 
@@ -24,8 +24,10 @@ async function tree(doris: Doris, db: string, send: Send, res: ServerResponse, i
   const openAll = Number(main.steps ?? 0) <= OPEN_ALL_STEPS;
   const statements = [turnsSql(db, ids), marksSql(db, ids), ...(openAll ? [treeStepsSql(db, ids)] : [])];
   const { results, elapsedMs: more } = await run(doris, statements);
+  const marks = results[1]!;
   send(res, 200, {
-    sessions: parsed(sessions!), turns: results[0], marks: results[1], steps: openAll ? results[2] : null, openAll,
+    sessions: parsed(sessions!), turns: results[0], marks: marks.slice(0, MARKS_LIMIT), marksCut: marks.length > MARKS_LIMIT,
+    steps: openAll ? results[2] : null, openAll,
     sql: [head, ...statements], elapsedMs: elapsedMs + more,
   });
 }

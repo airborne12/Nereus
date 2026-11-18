@@ -15,6 +15,8 @@ const PRESET_MS: Record<RangePreset, number> = { '1h': 3_600_000, '24h': 86_400_
 export const DEFAULT_PRESET: RangePreset = '7d';
 /** Rows a page reads at a time. */
 export const PAGE_ROWS = 100;
+/** The largest time a date holds, in ms either side of 1970. */
+const MAX_TIME = 8.64e15;
 
 export type Op = 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'contains';
 const OPS: readonly Op[] = ['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'contains'];
@@ -55,8 +57,10 @@ export function parseTableState(search: string, def: PageDef): TableState {
   const preset = p.get('t');
   const from = Number(p.get('from'));
   const to = Number(p.get('to'));
+  // A fixed range must fit what a date can hold, or no request could be built from it.
+  const fits = Number.isFinite(from) && Number.isFinite(to) && to > from && from >= -MAX_TIME && to <= MAX_TIME;
   const range: TableRange = (RANGE_PRESETS as readonly string[]).includes(preset ?? '') ? { preset: preset as RangePreset }
-    : p.has('from') && Number.isFinite(from) && Number.isFinite(to) && to > from ? { from, to } : base.range;
+    : p.has('from') && fits ? { from, to } : base.range;
   const sort = p.get('sort');
   const cols = (p.get('cols') ?? '').split(',').filter((name) => columnOf(def, name));
   return {
@@ -127,6 +131,14 @@ export function conditionLabel(def: PageDef, c: Condition): string {
   const n = Number(c.value);
   const value = kind === 'duration' ? duration(n) : kind === 'tokens' ? tokens(n) : kind === 'percent' ? `${c.value}%` : c.value;
   return `${column?.label ?? c.column} ${OP_SIGN[c.op]} ${value}`;
+}
+
+/**
+ * What the search box holds once the address has a search: what is being typed when it says the
+ * same search, since the address stores it trimmed; otherwise the search of the address.
+ */
+export function syncDraft(draft: string, q: string): string {
+  return draft.trim() === q.trim() ? draft : q;
 }
 
 /** Sorting by a column: newest or largest first, and the other way on a second click. */

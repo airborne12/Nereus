@@ -79,6 +79,8 @@ export const MARKS_LIMIT = 2000;
 /**
  * What the Jump to buttons visit, and where each sub-agent branch leaves its parent: the failed
  * and repeated tool calls, the calls that started a sub-agent, and the compactions of the branches.
+ * The page cannot draw a tree without the last two, so they come first; one row more than
+ * MARKS_LIMIT is read so the route can say when marks were cut.
  */
 export function marksSql(db: string, ids: readonly string[]): Statement {
   const list = ids.map((id) => sqlString(sessionId(id))).join(', ');
@@ -90,8 +92,8 @@ FROM ${db}.agent_events e
 LEFT JOIN ${db}.agent_sessions c ON c.parent_id = e.session_id AND c.parent_seq = e.seq
 WHERE e.session_id IN (${list})
   AND (e.kind = 'compaction' OR (e.kind = 'tool_call' AND (e.status = 'error' OR e.repeat_of IS NOT NULL OR c.session_id IS NOT NULL)))
-ORDER BY e.session_id, e.seq
-LIMIT ${MARKS_LIMIT}`,
+ORDER BY if(e.kind = 'compaction' OR c.session_id IS NOT NULL, 0, 1), e.session_id, e.seq
+LIMIT ${MARKS_LIMIT + 1}`,
   };
 }
 

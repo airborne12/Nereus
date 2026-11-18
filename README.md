@@ -257,7 +257,7 @@ statements that ran (`sql`: title and text) and `elapsedMs`; a query error answe
 | the same with `format=csv&size=1` | The number of rows of that export, its first five rows, and its SQL |
 | `GET /api/agents/sessions?...&format=jsonl` | The matching sessions and their sub-agents as conversations, one JSON line per stretch between compactions; at most 128 MiB of text, otherwise 400 |
 | `GET /api/agents/sessions?...&format=jsonl&size=1` | Size of that export, a preview of three sessions, and its SQL |
-| `GET /api/agents/sessions/<id>` | The session tree, one row per turn, the marks (failed and repeated calls, calls that started a sub-agent, compactions; at most 2,000), and every step when the tree has at most 40 |
+| `GET /api/agents/sessions/<id>` | The session tree, one row per turn, the marks (calls that started a sub-agent and compactions first, then failed and repeated calls; at most 2,000, with `marksCut` saying when there were more), and every step when the tree has at most 40 |
 | `GET /api/agents/sessions/<id>/turns/<n>` and `.../turns/<n>/steps?offset=` | A turn's input and final answer; 100 of its steps |
 | `GET /api/agents/sessions/<id>/steps/<seq>?inputOffset=` | A model call: its input (100 blocks at a time, latest first), output, tool results and prompt |
 | `GET /api/agents/sessions/<id>/events/<seq>/compaction` | The blocks a compaction replaced and its summary |
@@ -282,7 +282,8 @@ is shown beside the range.
 
 A row opens the **session page** (`/agents/sessions/<id>`). On the left the trajectory is drawn
 as lanes: one lane per session, a numbered node per turn, a small node per step, a sub-agent as a
-branch, and the width of a lane as the size of the context, so a compaction shows as a funnel. On
+branch (several sub-agents of one step each on a row of their own), and the width of a lane as the
+size of the context, so a compaction shows as a funnel. On
 the right the selected turn, step or compaction reads as a chat between roles: for a step, what
 the model saw, what it answered and what its calls returned. **Jump to** visits the failed calls,
 repeated calls, compactions and sub-agents; the arrow keys move along the lanes.
@@ -296,8 +297,8 @@ metadata database, as the server's Doris tests do.
 
 Times of the session page on a large session, taken in headless Chromium against a running
 Nereus: `cd web && node bench/agent-pages-report.ts <session id>` (the file's header names its
-settings). The lanes draw only the rows near the window, so a session of thousands of turns opens
-and selects as fast as a small one.
+settings). The lanes draw only the rows near the window, so the rows on the page do not grow with
+the session.
 
 ## Scale
 

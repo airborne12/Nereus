@@ -67,6 +67,10 @@ export interface Tree {
   /** The sub-agent branch a tool call started, by `callKey` of the call. */
   children: ReadonlyMap<string, Branch>;
   marks: Mark[];
+  /** The call that started each sub-agent branch, by the branch's session id. */
+  spawns: ReadonlyMap<string, Mark>;
+  /** The tree has more marks than the API sends: counts and jumps taken from them are partial. */
+  marksCut: boolean;
   /** Tokens of the widest lane. */
   scale: number;
 }
@@ -92,7 +96,7 @@ const turnOf = (r: Row): Turn => ({
 });
 
 /** The tree of a session from the rows of its tree answer. */
-export function buildTree(answer: { sessions: readonly Row[]; turns: readonly Row[]; marks: readonly Row[] }): Tree {
+export function buildTree(answer: { sessions: readonly Row[]; turns: readonly Row[]; marks: readonly Row[]; marksCut?: boolean }): Tree {
   const turns = answer.turns.map(turnOf);
   const list = answer.sessions.map((s): Branch => ({
     sid: text(s.session_id), kind: text(s.kind), name: text(s.agent_name) || text(s.title) || text(s.kind), model: text(s.model),
@@ -109,7 +113,8 @@ export function buildTree(answer: { sessions: readonly Row[]; turns: readonly Ro
   }));
   const widest = Math.max(MIN_SCALE, ...list.map((b) => num(b.row.peak_ctx_tokens)), ...turns.map((t) => Math.max(t.ctxFirst, t.ctxLast)));
   const children = new Map(list.filter((b) => b.parent !== null && b.parentSeq !== null).map((b) => [callKey(b.parent!, b.parentSeq!), b]));
-  return { main, branches: new Map(list.map((b) => [b.sid, b])), children, marks, scale: widest };
+  const spawns = new Map(marks.filter((m) => m.child !== null).map((m) => [m.child!, m]));
+  return { main, branches: new Map(list.map((b) => [b.sid, b])), children, marks, spawns, marksCut: answer.marksCut === true, scale: widest };
 }
 
 const toolOf = (r: Row): ToolCall => ({
@@ -119,7 +124,15 @@ const toolOf = (r: Row): ToolCall => ({
 
 /** The light step rows of one turn, in order, as steps with their tool calls and compactions. */
 export function itemsOf(rows: readonly Row[]): Item[] {
-  const calls = rows.filter((r) => r.kind === 'tool_call');
+  // The tool calls by the model call that issued them, gathered in one pass over the rows.
+  const calls = new Map<number, ToolCall[]>();
+  for (const r of rows) {
+    if (r.kind !== 'tool_call') continue;
+    const of = num(r.parent_seq);
+    const list = calls.get(of);
+    if (list) list.push(toolOf(r));
+    else calls.set(of, [toolOf(r)]);
+  }
   return rows.flatMap((r): Item[] => {
     const seq = num(r.seq);
     if (r.kind === 'compaction') return [{ type: 'cut', cut: { sid: text(r.session_id), seq, turn: num(r.turn) } }];
@@ -128,7 +141,7 @@ export function itemsOf(rows: readonly Row[]): Item[] {
       type: 'step',
       step: {
         sid: text(r.session_id), seq, no: num(r.step), turn: num(r.turn), ts: timeOf(r.ts), ctx: num(r.ctx_tokens), stop: text(r.stop_reason),
-        durationUs: num(r.duration_us), tools: calls.filter((c) => num(c.parent_seq) === seq).map(toolOf),
+        durationUs: num(r.duration_us), tools: calls.get(seq) ?? [],
       },
     }];
   });
@@ -140,13 +153,12 @@ export const stepRepeats = (s: Step): boolean => s.tools.some((t) => t.repeatOf 
 export const stepTotalUs = (s: Step): number => s.durationUs + s.tools.reduce((a, t) => a + t.durationUs, 0);
 const stepsIn = (items: readonly Item[] | undefined): number => (items ?? []).filter((i) => i.type === 'step').length;
 
-/** The sub-agent branch a step started, if any. */
-export function childOf(tree: Tree, s: Step): Branch | null {
-  for (const t of s.tools) {
+/** The sub-agent branches a step started, in the order of their calls; a model call may start several at once. */
+export function childrenOf(tree: Tree, s: Step): Branch[] {
+  return s.tools.flatMap((t) => {
     const child = tree.children.get(callKey(s.sid, t.seq));
-    if (child) return child;
-  }
-  return null;
+    return child ? [child] : [];
+  });
 }
 
 interface Geometry {
@@ -163,13 +175,24 @@ interface Geometry {
 
 type Content =
   | { type: 'turn'; key: string; turn: Turn; open: boolean; /** Compactions inside the turn that have no row of their own. */ inner: number }
-  | { type: 'step'; key: string; step: Step; child: Branch | null; open: boolean; /** The row that holds this step: its turn, or its branch. */ owner: string }
+  | {
+    type: 'step'; key: string; step: Step;
+    /** The sub-agents the step started. */
+    children: Branch[];
+    /** The only one, when there is exactly one: it opens from the step's own row. */
+    child: Branch | null;
+    open: boolean;
+    /** The row that holds this step: its turn, or its branch. */
+    owner: string;
+  }
+  // One of several sub-agents a step started: the row where its lane begins. Its key is that of its first turn.
+  | { type: 'branch'; key: string; branch: Branch; open: boolean; owner: string }
   | { type: 'cut'; key: string; cut: Cut; before: number; after: number }
   | { type: 'more'; key: string; sid: string; turn: number; /** Steps read so far and still to read. */ loaded: number; left: number };
 
 export type LaneRow = Content & Geometry;
 
-interface Draft { content: Content; lane: number; from: number; at: number; to: number; through: number[] }
+interface Draft { content: Content; lane: number; from: number; at: number; to: number; through: number[]; /** The lane begins at this row. */ first: boolean }
 
 /** The visible rows in order. Each row knows its lane and the context size before, at and after it. */
 export function laneRows(tree: Tree, view: View): LaneRow[] {
@@ -179,16 +202,18 @@ export function laneRows(tree: Tree, view: View): LaneRow[] {
   for (const m of tree.marks) if (m.kind === 'compaction' && m.sid === tree.main.sid) cuts.set(m.turn, [...(cuts.get(m.turn) ?? []), m]);
   // The running context size of each lane; local to this walk.
   const cur: number[] = [tree.main.turns[0]?.ctxFirst ?? 0];
-  const add = (content: Content, lane: number, at: number, to: number) => {
-    out.push({ content, lane, from: cur[lane] ?? at, at, to, through: cur.slice(0, lane) });
+  const add = (content: Content, lane: number, at: number, to: number, first = false) => {
+    out.push({ content, lane, from: cur[lane] ?? at, at, to, through: cur.slice(0, lane), first });
     cur[lane] = to;
   };
   const cut = (c: Cut, lane: number, after: number | null) => {
     const before = cur[lane] ?? 0;
     add({ type: 'cut', key: cutKey(c.sid, c.seq), cut: c, before, after: after ?? before }, lane, before, after ?? before);
   };
+  // The turns of a sub-agent branch, one after another in its lane.
+  const branch = (b: Branch, lane: number) => b.turns.forEach((t, j) => items(t, lane, branchKey(b.sid), b.turns[j + 1]?.ctxFirst ?? null));
   // The steps and compactions of one turn; `next` is the context size after the turn, when known.
-  const items = (t: Turn, lane: number, owner: string, next: number | null) => {
+  const items = (t: Turn, lane: number, owner: string, next: number | null): number => {
     const list = view.items.get(itemsKey(t.sid, t.no));
     (list ?? []).forEach((item, i) => {
       if (item.type === 'cut') {
@@ -196,12 +221,23 @@ export function laneRows(tree: Tree, view: View): LaneRow[] {
         return cut(item.cut, lane, later?.type === 'step' ? later.step.ctx : next);
       }
       const s = item.step;
-      const child = childOf(tree, s);
-      const open = child !== null && view.open.has(branchKey(child.sid));
-      add({ type: 'step', key: stepKey(s.sid, s.seq), step: s, child, open, owner }, lane, s.ctx, s.ctx);
-      if (child && open) {
-        cur[lane + 1] = child.turns[0]?.ctxFirst ?? 0;
-        child.turns.forEach((ct, j) => items(ct, lane + 1, branchKey(child.sid), child.turns[j + 1]?.ctxFirst ?? null));
+      const kids = childrenOf(tree, s);
+      const only = kids.length === 1 ? kids[0]! : null;
+      const open = only !== null && view.open.has(branchKey(only.sid));
+      add({ type: 'step', key: stepKey(s.sid, s.seq), step: s, children: kids, child: only, open, owner }, lane, s.ctx, s.ctx);
+      if (only && open) {
+        cur[lane + 1] = only.turns[0]?.ctxFirst ?? 0;
+        branch(only, lane + 1);
+      }
+      // Several sub-agents of one step each get a row of their own, where their lane begins.
+      if (kids.length > 1) {
+        kids.forEach((kid) => {
+          const start = kid.turns[0]?.ctxFirst ?? 0;
+          const kidOpen = view.open.has(branchKey(kid.sid));
+          cur[lane + 1] = start;
+          add({ type: 'branch', key: turnKey(kid.sid, kid.turns[0]?.no ?? 1), branch: kid, open: kidOpen, owner }, lane + 1, start, start, true);
+          if (kidOpen) branch(kid, lane + 1);
+        });
       }
     });
     const loaded = stepsIn(list);
@@ -213,10 +249,11 @@ export function laneRows(tree: Tree, view: View): LaneRow[] {
     const open = view.open.has(key);
     const next = tree.main.turns[i + 1]?.ctxFirst ?? null;
     // A compaction after the turn's last model call ends the turn: it has a row even while the turn is closed.
-    const trailing = (cuts.get(t.no) ?? []).filter((m) => m.seq > t.lastCall && t.steps > 0);
+    // So has every compaction of a turn without a model call, which cannot open.
+    const trailing = (cuts.get(t.no) ?? []).filter((m) => t.steps === 0 || m.seq > t.lastCall);
     const start = cur[0] ?? 0;
     add({ type: 'turn', key, turn: t, open, inner: t.compactions - trailing.length }, 0, start, open || t.steps === 0 ? start : t.ctxLast);
-    const complete = open && items(t, 0, key, next) >= t.steps;
+    const complete = t.steps > 0 && open && items(t, 0, key, next) >= t.steps;
     if (!complete) trailing.forEach((m) => cut({ sid: m.sid, seq: m.seq, turn: m.turn }, 0, next));
   });
   // A lane is drawn through a row only while a later row still belongs to it.
@@ -224,16 +261,22 @@ export function laneRows(tree: Tree, view: View): LaneRow[] {
   const rows: LaneRow[] = new Array(out.length);
   for (let i = out.length - 1; i >= 0; i -= 1) {
     const d = out[i]!;
-    rows[i] = { ...d.content, lane: d.lane, from: d.from, at: d.at, to: d.to, above: i > 0, below: alive[d.lane] === true, pass: d.through.map((tok, lane) => (alive[lane] ? tok : null)) };
+    rows[i] = {
+      ...d.content, lane: d.lane, from: d.from, at: d.at, to: d.to, above: i > 0 && !d.first, below: alive[d.lane] === true,
+      pass: d.through.map((tok, lane) => (alive[lane] ? tok : null)),
+    };
     alive.length = d.lane;
-    alive[d.lane] = true;
+    // A lane that begins at this row does not reach the rows above it.
+    alive[d.lane] = !d.first;
   }
   return rows;
 }
 
-/** What opens and closes on a row: a turn's own key, or the branch of the sub-agent a step started. */
+/** What opens and closes on a row: a turn's own key, or the branch of the sub-agent the row stands for. */
 export function twistOf(r: LaneRow): string | null {
-  return r.type === 'turn' ? r.key : r.type === 'step' && r.child ? branchKey(r.child.sid) : null;
+  if (r.type === 'turn') return r.key;
+  if (r.type === 'branch') return branchKey(r.branch.sid);
+  return r.type === 'step' && r.child ? branchKey(r.child.sid) : null;
 }
 
 /** A link of a closed turn's chain: a tool, how many times in a row, and whether it failed. */
@@ -243,92 +286,28 @@ export const LINKS = 9;
 
 /** The tool calls of a turn as a chain: equal neighbours are counted, a failed call stands alone. */
 export function chain(tools: string): { links: Link[]; more: boolean } {
-  const all = tools.split(',').filter(Boolean).reduce<Link[]>((acc, raw) => {
+  // Only the first links are shown, so the walk stops once one more than those has begun.
+  const links: Link[] = [];
+  for (const raw of tools.split(',')) {
+    if (!raw) continue;
     const bad = raw.endsWith(' failed');
     const name = bad ? raw.slice(0, -' failed'.length) : raw;
-    const last = acc[acc.length - 1];
-    return last && last.name === name && !last.bad && !bad ? [...acc.slice(0, -1), { ...last, n: last.n + 1 }] : [...acc, { name, n: 1, bad }];
-  }, []);
-  return { links: all.slice(0, LINKS), more: all.length > LINKS };
+    const last = links[links.length - 1];
+    if (last && last.name === name && !last.bad && !bad) links[links.length - 1] = { ...last, n: last.n + 1 };
+    else links.push({ name, n: 1, bad });
+    if (links.length > LINKS) break;
+  }
+  return { links: links.slice(0, LINKS), more: links.length > LINKS };
 }
 
 /** What a step did, as one short line: its first call, or that it answered. */
-export function stepLabel(s: Step, child: Branch | null, main: boolean): { tool: string | null; text: string; extra: number } {
-  if (child) return { tool: 'Agent', text: child.name, extra: 0 };
+export function stepLabel(s: Step, children: readonly Branch[], main: boolean): { tool: string | null; text: string; extra: number } {
+  if (children.length === 1) return { tool: 'Agent', text: children[0]!.name, extra: 0 };
+  if (children.length > 1) return { tool: 'Agent', text: `${children.length} sub-agents`, extra: s.tools.length - children.length };
   const first = s.tools[0];
   // The last step of a sub-agent answers the agent that started it, not the user.
   if (!first) return { tool: null, text: main ? 'Reply to the user' : 'Return the result', extra: 0 };
   return { tool: first.name, text: first.resource, extra: s.tools.length - 1 };
-}
-
-// ---------- drawing
-
-export const X0 = 20;
-export const LANE = 20;
-/** Room to the right of a node for a branch, before the text of the row starts. */
-const TEXT = 28;
-export type RowKind = 'turn' | 'closed' | 'step' | 'cut' | 'more';
-export const HEIGHT: Record<RowKind, number> = { turn: 36, closed: 54, step: 28, cut: 34, more: 28 };
-export const NODE_Y: Record<RowKind, number> = { turn: 18, closed: 18, step: 14, cut: 17, more: 14 };
-
-/** A turn that is not open takes a taller row, for the chain of its steps. */
-export const kindOf = (r: Pick<LaneRow, 'type'> & { open?: boolean }): RowKind => (r.type === 'turn' && !r.open ? 'closed' : r.type);
-export const laneX = (lane: number): number => X0 + LANE * lane;
-/** Where the text of a row starts, to the right of its lane. */
-export const indent = (lane: number): number => laneX(lane) + TEXT;
-/** Half the width of a lane for a context of this many tokens. */
-export const half = (tok: number, scale: number): number => Math.max(1, Math.min(8, (8 * tok) / scale));
-const n1 = (v: number): number => Number(v.toFixed(1));
-
-/**
- * The lane of a row between its top and bottom edge, as the path of a filled shape. A compaction
- * narrows the lane as a funnel. A row that only says more steps follow has no shape (null).
- */
-export function bandPath(r: { kind: RowKind; lane: number; from: number; at: number; to: number; above: boolean; below: boolean }, scale: number): string | null {
-  const kind = r.kind;
-  if (kind === 'more') return null;
-  const h = HEIGHT[kind];
-  const cy = NODE_Y[kind];
-  const cx = laneX(r.lane);
-  const a = n1(half(r.from, scale));
-  const b = n1(half(r.at, scale));
-  const c = n1(half(r.to, scale));
-  if (kind === 'cut') {
-    const y1 = cy - 9;
-    const y2 = cy + 9;
-    return `M${cx - a},0V${y1}C${cx - a},${cy} ${cx - c},${cy} ${cx - c},${y2}V${h}H${cx + c}V${y2}C${cx + c},${cy} ${cx + a},${cy} ${cx + a},${y1}V0Z`;
-  }
-  // A closed turn that ends the session still shows a short tail for the steps inside it.
-  const end = r.below ? h : kind === 'closed' ? h - 10 : cy;
-  const top = r.above ? `M${cx - a},0L${cx - b},${cy}` : `M${cx - b},${cy}`;
-  const back = r.above ? `L${cx + b},${cy}L${cx + a},0Z` : `L${cx + b},${cy}Z`;
-  return `${top}${end > cy ? `L${cx - c},${end}L${cx + c},${end}` : ''}${back}`;
-}
-
-/** The top of each row of the list; the last entry is the height of the whole list. */
-export function rowTops(rows: readonly LaneRow[]): number[] {
-  const tops = new Array<number>(rows.length + 1);
-  tops[0] = 0;
-  for (let i = 0; i < rows.length; i += 1) tops[i + 1] = tops[i]! + HEIGHT[kindOf(rows[i]!)];
-  return tops;
-}
-
-/** The rows [start, end) that a window of the list touches, with a margin above and below it. */
-export function windowOf(tops: readonly number[], top: number, height: number, margin: number): [number, number] {
-  const n = tops.length - 1;
-  // The first index in [from, n] for which `past` holds; rows are in order, so it is found by halving.
-  const first = (from: number, past: (i: number) => boolean): number => {
-    let lo = from;
-    let hi = n;
-    while (lo < hi) {
-      const mid = Math.floor((lo + hi) / 2);
-      if (past(mid)) hi = mid;
-      else lo = mid + 1;
-    }
-    return lo;
-  };
-  const start = first(0, (i) => tops[i + 1]! > top - margin);
-  return [start, first(start, (i) => tops[i]! >= top + height + margin)];
 }
 
 // ---------- finding and visiting
@@ -346,7 +325,7 @@ export function reveal(tree: Tree, target: { sid: string; turn: number; stepNo: 
   const branch = tree.branches.get(target.sid);
   if (!branch) return { open: [], load: [] };
   // A sub-agent branch shows once the step that started it does, and the branch is open.
-  const spawn = branch.parent === null ? undefined : tree.marks.find((m) => m.child === branch.sid);
+  const spawn = branch.parent === null ? undefined : tree.spawns.get(branch.sid);
   const above: Reveal = spawn ? reveal(tree, { sid: spawn.sid, turn: spawn.turn, stepNo: spawn.step }) : { open: [], load: [] };
   const inner = branch.parent !== null;
   if (target.stepNo === null) return inner ? { open: [...above.open, branchKey(branch.sid)], load: above.load } : above;
@@ -368,7 +347,7 @@ export interface JumpTarget { key: string; sid: string; turn: number; stepNo: nu
 
 /** Where a mark sits in the order of the tree: a sub-agent's marks follow the call that started it. */
 function orderOf(tree: Tree, m: Pick<Mark, 'sid' | 'turn' | 'seq'>): number[] {
-  const spawn = tree.marks.find((x) => x.child === m.sid);
+  const spawn = tree.spawns.get(m.sid);
   return [...(spawn ? orderOf(tree, spawn) : []), m.turn, m.seq];
 }
 const byOrder = (a: number[], b: number[]): number => {
@@ -380,12 +359,15 @@ const byOrder = (a: number[], b: number[]): number => {
 export function jumpTargets(tree: Tree, kind: JumpKind): JumpTarget[] {
   const picked = tree.marks.filter((m) => (kind === 'compaction' ? m.kind === 'compaction'
     : m.kind === 'tool_call' && (kind === 'failed' ? m.failed : kind === 'repeated' ? m.repeated : m.child !== null)));
-  const sorted = [...picked].sort((a, b) => byOrder(orderOf(tree, a), orderOf(tree, b)));
-  const targets = sorted.map((m): JumpTarget => ({
-    key: m.kind === 'compaction' ? cutKey(m.sid, m.seq) : stepKey(m.sid, m.parentSeq ?? m.seq), sid: m.sid, turn: m.turn, stepNo: m.step,
-  }));
+  const sorted = picked.map((m) => ({ m, order: orderOf(tree, m) })).sort((a, b) => byOrder(a.order, b.order));
   // Two failed calls of one step are one place to visit.
-  return targets.filter((t, i) => targets.findIndex((x) => x.key === t.key) === i);
+  const seen = new Set<string>();
+  return sorted.flatMap(({ m }): JumpTarget[] => {
+    const key = m.kind === 'compaction' ? cutKey(m.sid, m.seq) : stepKey(m.sid, m.parentSeq ?? m.seq);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ key, sid: m.sid, turn: m.turn, stepNo: m.step }];
+  });
 }
 
 /** The target after the selected one, and back to the first at the end or from anywhere else. */

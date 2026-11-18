@@ -78,6 +78,8 @@ export interface TreeAnswer {
   turns: Row[];
   /** Failed and repeated calls, calls that started a sub-agent, and compactions. */
   marks: Row[];
+  /** The tree has more marks than were sent. */
+  marksCut: boolean;
   /** Every light step row when the tree is small; null otherwise. */
   steps: Row[] | null;
   openAll: boolean;

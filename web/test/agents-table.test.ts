@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { filterParams } from '../src/api/agents.ts';
 import { MESSAGES, openTarget, SESSIONS, sessionName, sessionUrl, shownColumns, STEPS } from '../src/lib/agents/pages.ts';
 import {
-  conditionFrom, conditionLabel, defaultState, filterText, opsOf, parseTableState, queryOf, resolveRange, serializeTableState, sortBy,
+  conditionFrom, conditionLabel, defaultState, filterText, opsOf, parseTableState, queryOf, resolveRange, serializeTableState, sortBy, syncDraft,
 } from '../src/lib/agents/table.ts';
 
 test('the pages list their columns in the order of the specification, the time first', () => {
@@ -23,7 +23,7 @@ test('a session without a title is called by its first input, then by its id', (
   assert.equal(sessionName({ session_id: 's1', title: null, first_input: '  Run the tests\nand more' }), 'Run the tests');
   assert.equal(sessionName({ session_id: 's1', title: '', first_input: null }), 's1');
   // A slash command arrives wrapped in tags; the name keeps the words.
-  assert.equal(sessionName({ session_id: 's1', title: null, first_input: '<command-message>jira-watch</command-message>\n<command-name>/jira-watch</command-name>' }), 'jira-watch');
+  assert.equal(sessionName({ session_id: 's1', title: null, first_input: '<command-message>review</command-message>\n<command-name>/review</command-name>' }), 'review');
 });
 
 test('what a row opens', () => {
@@ -94,4 +94,19 @@ test('sorting by a column: descending first, the other way on a second click', (
   assert.equal(sortBy(a, 'tokens').dir, 'asc');
   assert.equal(sortBy(sortBy(a, 'tokens'), 'tokens').dir, 'desc');
   assert.equal(sortBy(defaultState(SESSIONS), 'last_event_at').dir, 'asc');
+});
+
+test('a range outside what a date can hold falls back to the default, so no request is built from it', () => {
+  assert.deepEqual(parseTableState('?from=0&to=9000000000000000', SESSIONS).range, { preset: '7d' });
+  assert.deepEqual(parseTableState('?from=-9000000000000000&to=5', SESSIONS).range, { preset: '7d' });
+  assert.deepEqual(parseTableState('?from=1&to=8640000000000000', SESSIONS).range, { from: 1, to: 8_640_000_000_000_000 });
+});
+
+test('the search box keeps what is being typed when the address catches up with it', () => {
+  // The address stores the search trimmed; a space typed at the end must survive the search running.
+  assert.equal(syncDraft('public ', 'public'), 'public ');
+  assert.equal(syncDraft('public', 'public'), 'public');
+  // A search set from elsewhere (the address, another page) replaces the box.
+  assert.equal(syncDraft('public', 'other'), 'other');
+  assert.equal(syncDraft('typed', ''), '');
 });

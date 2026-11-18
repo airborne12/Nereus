@@ -28,6 +28,8 @@ import { applySchemaFile } from '../../server/test/schema-helper.ts';
 const shots = process.env.SHOTS;
 const db = `nereus_agent_e2e_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 const OTHER = 'fx-main-0002';
+const LONG_ID = 'fx-long-0003';
+const EMPTY_ID = 'fx-empty-0004';
 // The fixture runs on 2026-11-17 from 10:00 to 12:00 UTC.
 const NOW = new Date('2026-11-18T00:00:00Z');
 const errors: string[] = [];
@@ -37,6 +39,58 @@ let context: BrowserContext;
 let page: Page;
 let dir = '';
 let stop: () => Promise<void> = async () => {};
+
+/**
+ * A long session, written by a loop: 150 turns of one answer each, a turn of 121 steps that ends
+ * with a compaction, and a turn whose one model call starts two sub-agents. A second file holds a
+ * session without a turn. Both run on 2026-11-01, outside the default range of the table pages.
+ */
+function writeLong(dir: string): { long: string; empty: string } {
+  let clock = Date.parse('2026-11-01T08:00:00Z');
+  const row = (r: Record<string, unknown>) => {
+    clock += 1000;
+    return { timestamp: new Date(clock).toISOString(), version: '2.1.322', sessionId: LONG_ID, ...r };
+  };
+  const user = (uuid: string, content: unknown, extra: Record<string, unknown> = {}) => row({ type: 'user', uuid, message: { role: 'user', content }, ...extra });
+  const assistant = (id: string, index: number, item: Record<string, unknown>, stop: string) => row({
+    type: 'assistant', uuid: `${id}-${index}`, requestId: `req_${id}`, apiBlockIndex: index,
+    message: { id, role: 'assistant', model: 'claude-opus-5-5', content: [item], stop_reason: stop, usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 100, cache_creation_input_tokens: 5 } },
+  });
+  const say = (t: string) => ({ type: 'text', text: t });
+  const call = (id: string, name: string, input: Record<string, unknown>) => ({ type: 'tool_use', id, name, input });
+  const result = (id: string, content: string) => [{ type: 'tool_result', tool_use_id: id, content, is_error: false }];
+  const answers = Array.from({ length: 150 }, (_, i) => [user(`u${i + 1}`, `Question ${i + 1}`), assistant(`a${i + 1}`, 0, say(`Answer ${i + 1}`), 'end_turn')]).flat();
+  const task = Array.from({ length: 120 }, (_, i) => [
+    assistant(`b${i + 1}`, 0, call(`c${i + 1}`, 'Bash', { command: `echo ${i + 1}` }), 'tool_use'), user(`r${i + 1}`, result(`c${i + 1}`, String(i + 1))),
+  ]).flat();
+  const main = [
+    { type: 'ai-title', aiTitle: 'A long session', sessionId: LONG_ID },
+    ...answers,
+    user('u151', 'Run the long task'), ...task, assistant('b121', 0, say('The long task is done.'), 'end_turn'),
+    row({ type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger: 'manual', preTokens: 9000, postTokens: 400 } }),
+    user('sum', 'Summary: the long task ran.', { isCompactSummary: true, isVisibleInTranscriptOnly: true }),
+    user('u152', 'Now ask two helpers'),
+    // One message with two Agent calls: the helpers run side by side.
+    assistant('h', 0, call('h1', 'Agent', { description: 'first helper', prompt: 'Do the first half' }), 'tool_use'),
+    assistant('h', 1, call('h2', 'Agent', { description: 'second helper', prompt: 'Do the second half' }), 'tool_use'),
+    user('hr1', result('h1', 'First half done'), { toolUseResult: { agentId: 'h1' } }),
+    user('hr2', result('h2', 'Second half done'), { toolUseResult: { agentId: 'h2' } }),
+    assistant('done', 0, say('Both helpers are done.'), 'end_turn'),
+  ];
+  const sub = join(dir, LONG_ID, 'subagents');
+  mkdirSync(sub, { recursive: true });
+  for (const [id, type, half] of [['h1', 'Explore', 'first'], ['h2', 'Plan', 'second']] as const) {
+    const rows = [user(`${id}-u`, `Do the ${half} half`), assistant(`${id}-a`, 0, say(`${half} half done`), 'end_turn')].map((r) => ({ ...r, agentId: id, isSidechain: true }));
+    writeFileSync(join(sub, `agent-${id}.jsonl`), `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
+    writeFileSync(join(sub, `agent-${id}.meta.json`), JSON.stringify({ agentType: type, description: `${half} helper`, toolUseId: id }));
+  }
+  const long = join(dir, `${LONG_ID}.jsonl`);
+  writeFileSync(long, `${main.map((r) => JSON.stringify(r)).join('\n')}\n`);
+  // A session that holds an injected attachment and nothing else.
+  const empty = join(dir, `${EMPTY_ID}.jsonl`);
+  writeFileSync(empty, `${JSON.stringify({ ...row({ type: 'attachment', uuid: 'e1', attachment: { type: 'note', content: 'ready' } }), sessionId: EMPTY_ID })}\n`);
+  return { long, empty };
+}
 
 async function openPage(ctx: BrowserContext): Promise<Page> {
   const p = await ctx.newPage();
@@ -58,6 +112,9 @@ before(async () => {
   const other = join(dir, `${OTHER}.jsonl`);
   writeFileSync(other, readFileSync(main, 'utf8').replace('"is_error":true', '"is_error":false'));
   await importFile(other, { doris, db, load });
+  const more = writeLong(dir);
+  await importFile(more.long, { doris, db, load });
+  await importFile(more.empty, { doris, db, load });
   const meta = await freshMetaDb();
   const webDir = new URL('../dist', import.meta.url).pathname;
   const server = createApp({
@@ -93,6 +150,7 @@ const firstCell = (column: number, text: string) => rows().first().locator('td:n
 const lane = (key: string) => page.locator(`.ag-trow[data-key="${key}"]`);
 const pane = () => page.locator('.ag-pane');
 const main = (kind: 't' | 's' | 'c', n: number) => `${kind}:${MAIN_ID}:${n}`;
+const bottom = () => page.getByRole('tree').evaluate((el) => { el.scrollTop = el.scrollHeight; });
 
 async function addFilter(column: string, op: string, value: string) {
   await page.getByRole('button', { name: '+ Add filter' }).click();
@@ -131,6 +189,19 @@ test('Sessions: search, a condition, sort and columns, all kept in the address',
   await search.fill('"public API" unchanged');
   await total('2 sessions');
   assert.deepEqual(param('q'), ['"public API" unchanged']);
+  // A sort made while a search is still waiting to run survives it, and so does the search.
+  await search.fill('unchanged');
+  await page.locator('.ag-table thead th button', { hasText: 'Turns' }).click();
+  assert.deepEqual(param('q'), ['"public API" unchanged'], 'the search has not run yet');
+  await page.waitForURL((u) => u.searchParams.get('q') === 'unchanged' && u.searchParams.get('sort') === 'turns');
+  // A space typed at the end of a word is still there once the search has run, so the next word does not join it.
+  await search.fill('');
+  await page.waitForURL((u) => !u.searchParams.has('q'));
+  await search.pressSequentially('public ');
+  await page.waitForURL((u) => u.searchParams.get('q') === 'public');
+  await total('2 sessions');
+  await search.pressSequentially('API');
+  await page.waitForURL((u) => u.searchParams.get('q') === 'public API');
   await search.fill('');
   await page.waitForURL((u) => !u.searchParams.has('q'));
   await total('2 sessions');
@@ -338,7 +409,8 @@ test('a step: what the model saw, what it answered, and what its calls returned'
   await input.getByRole('button', { name: '2 earlier messages, the same as in the previous request' }).click();
   await input.locator('.ag-mark', { hasText: 'New in this request' }).waitFor();
   assert.equal(await input.locator('.ag-msg.user').count(), 1);
-  assert.match(await input.locator('.ag-notice', { hasText: 'Attachment' }).innerText(), /Today is 2026-11-17/);
+  assert.match(await input.locator('.ag-notice', { hasText: 'Attachment' }).innerText(), /<system-reminder>Today is 2026-11-17\.<\/system-reminder>/);
+  assert.equal(await page.locator('system-reminder').count(), 0);
   const results = pane().getByRole('region', { name: 'Tool results' });
   assert.match(await results.locator('.ag-sig').innerText(), /^Read tests\/clock_test\.py\s*ok · 1\.0s$/);
   assert.match(await results.locator('.ag-foot').innerText(), /The same call was made before\. That result was still in the context\./);
@@ -438,6 +510,77 @@ test('Compare: two ticked sessions as two rows of facts, then their lanes side b
   await page.getByRole('button', { name: 'SQL', exact: true }).click();
   assert.deepEqual(await page.getByRole('dialog', { name: 'Generated SQL' }).locator('.ag-stmt h4 > span:first-child').allInnerTexts(), ['Sessions', 'Turns', 'Steps of turn 2']);
   await page.keyboard.press('Escape');
+});
+
+test('a long session: only the rows near the window are drawn, and a long turn comes 100 steps at a time', async () => {
+  await page.goto(`${base}/agents/sessions/${LONG_ID}`);
+  await page.getByRole('heading', { name: 'A long session', level: 1 }).waitFor();
+  await lane(`t:${LONG_ID}:1`).waitFor();
+  assert.match(await page.locator('.ag-sfacts').innerText(), /152 turns · 275 steps/);
+  // 152 closed turns of 54 px each in a window 900 px high: a few are drawn, the rest are room to scroll.
+  assert.ok(await page.getByRole('tree').evaluate((el) => el.scrollHeight) > 152 * 54);
+  const drawn = await page.locator('.ag-trow').count();
+  assert.ok(drawn >= 15 && drawn < 60, `${drawn} rows drawn`);
+  assert.equal(await lane(`t:${LONG_ID}:152`).count(), 0);
+  await bottom();
+  await lane(`t:${LONG_ID}:152`).waitFor();
+  assert.equal(await lane(`t:${LONG_ID}:1`).count(), 0);
+
+  // A compaction that ends a closed turn is a row of its own. Selecting it leaves the turn closed.
+  await page.locator('.ag-trow.cut').click();
+  await sel(new RegExp(`^c:${LONG_ID}:\\d+$`));
+  await pane().getByRole('heading', { name: 'Compaction' }).waitFor();
+  await pane().getByRole('region', { name: 'Summary' }).locator('.ag-sumcard', { hasText: 'the long task ran' }).waitFor();
+  assert.equal(await lane(`t:${LONG_ID}:151`).getAttribute('aria-expanded'), 'false');
+  assert.equal(await page.locator('.ag-trow.cut.sel').count(), 1);
+
+  // The turn of 121 steps opens on its first hundred; the rest is one click away.
+  await lane(`t:${LONG_ID}:151`).locator('.ag-tw').click();
+  await page.locator('.ag-trow.step').first().waitFor();
+  await bottom();
+  await page.getByRole('button', { name: 'Show 21 more of 21 steps' }).click();
+  await page.getByRole('button', { name: /^Show \d+ more/ }).waitFor({ state: 'detached' });
+  await bottom();
+  // Steps are numbered through the session: 150 answers, then the 121 steps of this turn.
+  await page.locator('.ag-trow.step', { hasText: /^271\s*Reply to the user/ }).waitFor();
+});
+
+test('a model call that starts two sub-agents: each has its own row and opens on its own', async () => {
+  await page.goto(`${base}/agents/sessions/${LONG_ID}`);
+  await lane(`t:${LONG_ID}:1`).waitFor();
+  await bottom();
+  await lane(`t:${LONG_ID}:152`).locator('.ag-tw').click();
+  await bottom();
+  await page.locator('.ag-trow.step', { hasText: /Agent 2 sub-agents/ }).waitFor();
+  const branches = page.locator('.ag-trow.branch');
+  assert.deepEqual((await branches.allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim().replace(/ \d.*$/, '')), ['Explore first helper', 'Plan second helper']);
+  // The first sub-agent's row reads what it was asked and what it returned.
+  await branches.first().click();
+  await sel('t:agent-h1:1');
+  await pane().getByRole('heading', { name: 'Explore: turn 1' }).waitFor();
+  assert.match(await pane().getByRole('region', { name: 'Input' }).innerText(), /what the sub-agent was asked[\s\S]*Do the first half/);
+  // The second opens without the first; its step leads back through the step that started it.
+  await branches.nth(1).locator('.ag-tw').click();
+  const inner = page.locator('.ag-trow.step', { hasText: 'Return the result' });
+  await inner.waitFor();
+  assert.equal(await inner.count(), 1);
+  await inner.click();
+  await sel(/^s:agent-h2:\d+$/);
+  await pane().getByRole('heading', { name: /^Step 1/ }).waitFor();
+  assert.match(await pane().locator('.ag-crumbs').innerText(), /^Turn 152 › Step \d+ · Plan$/);
+  // Under each sub-agent's answer on the right, its steps open the same branch.
+  await page.locator('.ag-trow.step', { hasText: /Agent 2 sub-agents/ }).click();
+  const answers = pane().getByRole('region', { name: 'Tool results' }).locator('.ag-msg.agent');
+  await answers.first().waitFor();
+  assert.equal(await answers.count(), 2);
+  await answers.first().getByRole('button', { name: 'Show its steps' }).click();
+  await page.locator('.ag-trow.step', { hasText: 'Return the result' }).nth(1).waitFor();
+});
+
+test('a session without a turn says so', async () => {
+  await page.goto(`${base}/agents/sessions/${EMPTY_ID}`);
+  await pane().getByText('This session has no turns.').waitFor({ timeout: 5000 });
+  assert.equal(await page.locator('.ag-trow').count(), 0);
 });
 
 test('the dark theme and a 400 px window', async () => {

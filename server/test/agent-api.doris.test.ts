@@ -131,10 +131,11 @@ test('session page: tree, turns, all steps of a small tree; a sub-agent id opens
   assert.deepEqual([Number(t2.first_step), Number(t2.last_call)], [5, 13]);
   const sub1 = s.body.turns.find((t: any) => t.session_id === AGENT_FILE_ID);
   assert.equal(Number(sub1.ctx_exact), 0, 'the sub-agent file has no request log');
-  // The failed Bash call, the repeated Read, the call that started the sub-agent, and the compaction.
+  // The call that started the sub-agent and the compaction come first; then the failed Bash call and the repeated Read.
   assert.deepEqual(s.body.marks.map((m: any) => [Number(m.seq), m.kind, Number(m.failed), Number(m.repeated), m.child, m.parent_seq === null ? null : Number(m.parent_seq), Number(m.turn)]), [
-    [4, 'tool_call', 1, 0, null, 2, 1], [6, 'tool_call', 0, 1, null, 5, 1], [8, 'tool_call', 0, 0, AGENT_FILE_ID, 7, 1], [12, 'compaction', 0, 0, null, null, 2],
+    [8, 'tool_call', 0, 0, AGENT_FILE_ID, 7, 1], [12, 'compaction', 0, 0, null, null, 2], [4, 'tool_call', 1, 0, null, 2, 1], [6, 'tool_call', 0, 1, null, 5, 1],
   ]);
+  assert.equal(s.body.marksCut, false);
   assert.equal(s.body.openAll, true);
   assert.equal(s.body.steps.length, 13);
   const sub = await get(`/api/agents/sessions/${AGENT_FILE_ID}`);

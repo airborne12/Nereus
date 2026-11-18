@@ -130,3 +130,13 @@ test('Compare with a turn answers both sides, their pairs and their compactions'
     cuts: { a: [{ seq: 4, after: 0 }], b: [] },
   });
 });
+
+test('a tree with more marks than the limit answers the first 2000 and says they were cut', async () => {
+  const many = Array.from({ length: 2001 }, (_, i) => ({ session_id: 's', kind: 'main', steps: 41, seq: i }));
+  const cut = call(stub(0, many).doris, '/api/agents/sessions/s');
+  await cut.done;
+  assert.deepEqual([cut.answers[0]!.body.marks.length, cut.answers[0]!.body.marksCut], [2000, true]);
+  const whole = call(stub(0, [{ session_id: 's', kind: 'main', steps: 41 }]).doris, '/api/agents/sessions/s');
+  await whole.done;
+  assert.equal(whole.answers[0]!.body.marksCut, false);
+});

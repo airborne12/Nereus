@@ -1,8 +1,7 @@
 import { type CSSProperties, type KeyboardEvent, memo, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { duration, plainLine, plural, tokens } from '../../lib/agents/format.ts';
-import {
-  chain, half, HEIGHT, indent, kindOf, type LaneRow, rowTops, stepFailed, stepLabel, stepRepeats, stepTotalUs, STEPS_PAGE, twistOf, windowOf,
-} from '../../lib/agents/lanes.ts';
+import { half, HEIGHT, indent, kindOf, rowTops, windowOf } from '../../lib/agents/lane-draw.ts';
+import { type Branch, chain, type LaneRow, stepFailed, stepLabel, stepRepeats, stepTotalUs, STEPS_PAGE, twistOf } from '../../lib/agents/lanes.ts';
 import { LaneGraph } from './LaneGraph.tsx';
 
 /** Characters of a user's input shown on its turn's row. */
@@ -27,7 +26,7 @@ function Graph({ row, selected, scale }: { row: LaneRow; selected: boolean; scal
   const dot = row.type !== 'step' ? '' : stepFailed(row.step) ? 'bad' : stepRepeats(row.step) ? 'warn' : row.step.tools.length === 0 ? 'reply' : '';
   return (
     <LaneGraph kind={kindOf(row)} lane={row.lane} from={row.from} at={row.at} to={row.to} above={row.above} below={row.below} pass={row.pass} scale={scale}
-      node={row.type === 'turn' ? { turn: row.turn.no, selected } : row.type === 'step' ? { dot } : null}
+      node={row.type === 'turn' ? { turn: row.turn.no, selected } : row.type === 'step' ? { dot } : row.type === 'branch' ? { bud: true } : null}
       branch={child && row.type === 'step' ? { open: row.open, width: Math.max(2, 2 * half(child.turns[0]?.ctxFirst ?? 0, scale)) } : null} />
   );
 }
@@ -40,8 +39,21 @@ function Twist({ open, label, onClick }: { open: boolean; label: string; onClick
   );
 }
 
-/** The words of a turn, a step or a compaction beside its drawing. */
+const stepsOf = (b: Branch): number => b.turns.reduce((n, t) => n + t.steps, 0);
+
+/** The words of a turn, a step, a sub-agent or a compaction beside its drawing. */
 function words(row: LaneRow, main: string, a: Actions): ReactNode {
+  if (row.type === 'branch') {
+    const b = row.branch;
+    const title = String(b.row.title ?? '');
+    return (
+      <>
+        <span className="ag-tl"><code>{b.name}</code>{title && title !== b.name ? ` ${title}` : ''}</span>
+        <span className="ag-tm"><Twist open={row.open} label={plural(stepsOf(b), 'step')} onClick={() => a.onTwist(twistOf(row)!)} /></span>
+        <span className="ag-td">{duration(b.turns.reduce((n, t) => n + t.activeUs, 0))}</span>
+      </>
+    );
+  }
   if (row.type === 'cut') {
     return <><span className="ag-tl">Compaction</span><span className="ag-tm">{tokens(row.before)} → {tokens(row.after)} tokens</span></>;
   }
@@ -74,7 +86,7 @@ function words(row: LaneRow, main: string, a: Actions): ReactNode {
   }
   if (row.type === 'step') {
     const s = row.step;
-    const label = stepLabel(s, row.child, s.sid === main);
+    const label = stepLabel(s, row.children, s.sid === main);
     const twist = twistOf(row);
     return (
       <>
@@ -86,7 +98,7 @@ function words(row: LaneRow, main: string, a: Actions): ReactNode {
         <span className="ag-tm">
           {stepFailed(s) && <b className="bad">failed</b>}
           {stepRepeats(s) && <b className="warn">repeated</b>}
-          {row.child && twist && <Twist open={row.open} label={plural(row.child.turns.reduce((n, t) => n + t.steps, 0), 'step')} onClick={() => a.onTwist(twist)} />}
+          {row.child && twist && <Twist open={row.open} label={plural(stepsOf(row.child), 'step')} onClick={() => a.onTwist(twist)} />}
         </span>
         <span className="ag-td">{duration(stepTotalUs(s))}</span>
       </>
@@ -98,14 +110,18 @@ function words(row: LaneRow, main: string, a: Actions): ReactNode {
 
 interface RowProps extends Actions { row: LaneRow; selected: boolean; scale: number; main: string }
 
-/** A row is drawn again only when its lane, its content or its selection changes. */
+/**
+ * A row is drawn again only when its lane, its content or its selection changes. The callbacks are
+ * left out of the comparison, so they must not close over anything that changes between renders.
+ */
 function sameRow(a: RowProps, b: RowProps): boolean {
   const x = a.row;
   const y = b.row;
   if (a.selected !== b.selected || a.scale !== b.scale || x.type !== y.type || x.key !== y.key || x.lane !== y.lane) return false;
   if (x.from !== y.from || x.at !== y.at || x.to !== y.to || x.above !== y.above || x.below !== y.below || x.pass.join() !== y.pass.join()) return false;
   if (x.type === 'turn' && y.type === 'turn') return x.turn === y.turn && x.open === y.open && x.inner === y.inner;
-  if (x.type === 'step' && y.type === 'step') return x.step === y.step && x.open === y.open && x.child === y.child;
+  if (x.type === 'step' && y.type === 'step') return x.step === y.step && x.open === y.open && x.child === y.child && x.children.length === y.children.length;
+  if (x.type === 'branch' && y.type === 'branch') return x.branch === y.branch && x.open === y.open;
   if (x.type === 'cut' && y.type === 'cut') return x.before === y.before && x.after === y.after;
   if (x.type === 'more' && y.type === 'more') return x.loaded === y.loaded && x.left === y.left;
   return false;
@@ -193,7 +209,7 @@ export function Lanes({ rows, selected, scale, main, onSelect, onTwist, onMore }
     const empty = row.type === 'turn' && row.turn.steps === 0;
     if (twist && !empty && (e.key === 'ArrowRight') !== open) return onTwist(twist);
     // Left on a closed row goes to the row that holds it.
-    const owner = row.type === 'step' && e.key === 'ArrowLeft' ? list.find((r) => twistOf(r) === row.owner) : undefined;
+    const owner = (row.type === 'step' || row.type === 'branch') && e.key === 'ArrowLeft' ? list.find((r) => twistOf(r) === row.owner) : undefined;
     if (owner) onSelect(owner);
   };
 

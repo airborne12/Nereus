@@ -498,7 +498,7 @@ A CSV export holds at most 200,000 rows and 128 MiB of text, a conversations exp
 | Steps | `llm_call` events with their tool calls; search joins a derived table of assistant blocks per word | `GET /api/agents/steps` |
 | Messages | Blocks with role and kind; `MATCH_PHRASE` on `text` per word | `GET /api/agents/messages` |
 | Risks | `agent_risks` with the latest judgment | `GET /api/agents/risks` |
-| Session tree and lanes | `WHERE root_id = ?`; one row per turn; the marks (failed and repeated calls, calls that started a sub-agent, compactions; at most 2,000); per step one light row (kind, status, repeat, context size, compaction) when the tree has at most 40 steps | `GET /api/agents/sessions/<id>` |
+| Session tree and lanes | `WHERE root_id = ?`; one row per turn; the marks (calls that started a sub-agent and compactions first, then failed and repeated calls; at most 2,000, and the answer says when there were more); per step one light row (kind, status, repeat, context size, compaction) when the tree has at most 40 steps | `GET /api/agents/sessions/<id>` |
 | Turn | The user's input and the text of the turn's last model call | `GET /api/agents/sessions/<id>/turns/<n>` |
 | Steps of a turn | One page of 100 steps of one turn | `GET /api/agents/sessions/<id>/turns/<n>/steps` |
 | Step | Input: context ranges joined with blocks, new blocks first, earlier ones on request; output; tool results | `GET /api/agents/sessions/<id>/steps/<seq>` |
@@ -590,8 +590,11 @@ that started it.
 
 Left: the trajectory drawn after the paper's Figure 1. One lane per session; a numbered node per
 turn; a small node per step (filled when it answers, red when a call failed, amber when it repeats
-a lookup); a sub-agent as a branch leaving the step that started it; the lane's width is the
-context size of each request, so a compaction shows as a funnel and is a selectable row. A session
+a lookup); a sub-agent as a branch leaving the step that started it (when one step started several,
+each has a row of its own under the step, where its lane begins); the lane's width is the
+context size of each request, so a compaction shows as a funnel and is a selectable row; a
+compaction that ends a turn, or sits in a turn without a model call, has its row even while the turn
+is closed. A session
 of at most 40 steps opens fully; a longer one opens with turns closed, each closed turn showing its
 steps as a chain of tool names (`Read ×2 → Bash failed → …`). Long turns show 100 steps at a time.
 Arrow keys move the selection; the page opens on the first turn.
@@ -608,6 +611,11 @@ rule.
 
 Measured on the prototype with a 2,712-step session: about 20 ms to open and to select a step,
 1,340 elements on the page.
+
+The built page draws only the rows near the window. Measured in headless Chromium on a real session
+of 7,449 model calls in 1,255 turns, with every turn open: 48 rows on the page; a selected step is
+marked in 14 ms (median) and its content shows in 52 ms, the API call included; the page opens in
+118 ms from the start of navigation, 24 ms of it the slowest API call.
 
 ### 8.4 Compare and export
 

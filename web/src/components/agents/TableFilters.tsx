@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { plural, stamp, timeZone } from '../../lib/agents/format.ts';
 import type { PageDef } from '../../lib/agents/pages.ts';
 import {
-  conditionFrom, conditionLabel, type Op, OP_SIGN, opsOf, PRESET_LABEL, RANGE_PRESETS, type RangePreset, resolveRange, type TableState, unitOf,
+  conditionFrom, conditionLabel, type Op, OP_SIGN, opsOf, PRESET_LABEL, RANGE_PRESETS, type RangePreset, resolveRange, syncDraft, type TableState, unitOf,
 } from '../../lib/agents/table.ts';
 import { parseLocalTime } from '../../lib/time.ts';
 
@@ -81,7 +81,7 @@ export function TableFilters({ def, state, total, onChange }: Props) {
   const [draft, setDraft] = useState(state.q);
   const [adding, setAdding] = useState(false);
   const [custom, setCustom] = useState(!('preset' in state.range));
-  useEffect(() => setDraft(state.q), [state.q]);
+  useEffect(() => setDraft((d) => syncDraft(d, state.q)), [state.q]);
   // The search runs a moment after the typing stops, on the state the page has by then.
   const latest = useRef({ state, onChange });
   latest.current = { state, onChange };

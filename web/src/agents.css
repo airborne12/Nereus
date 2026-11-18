@@ -196,7 +196,7 @@
 .ag-cc { flex: none; font-family: var(--font); }
 .ag-chain i { margin: 0 5px; font-style: normal; opacity: 0.55; }
 .ag-chain .bad { color: var(--ag-bad); }
-.ag-trow.step .ag-tl { font: 12px/20px var(--mono); }
+.ag-trow.step .ag-tl, .ag-trow.branch .ag-tl { font: 12px/20px var(--mono); }
 .ag-tl code { font: inherit; font-weight: 500; }
 .ag-sn { display: inline-block; min-width: 18px; margin-right: 6px; font-size: 11px; color: var(--text-2); }
 .ag-dim { font-family: var(--font); color: var(--text-2); }

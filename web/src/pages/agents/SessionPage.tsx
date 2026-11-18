@@ -54,6 +54,8 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
   const [showSql, setShowSql] = useState(false);
   // What the callbacks of the lanes read; the rows keep one identity, so they are not drawn again.
   const live = useRef({ tree, rows: rowsByTurn, reading: new Map<string, Promise<void>>(), places: new Map<string, Place>() });
+  // The items of each turn, kept until that turn's rows change, so reading one turn does not rebuild the others.
+  const built = useRef(new WeakMap<api.Row[], Item[]>());
   live.current.tree = tree;
 
   useEffect(() => {
@@ -92,7 +94,12 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
     return next;
   }, []);
 
-  const items = useMemo(() => new Map<string, Item[]>([...rowsByTurn].map(([k, rows]) => [k, itemsOf(rows)])), [rowsByTurn]);
+  const items = useMemo(() => new Map<string, Item[]>([...rowsByTurn].map(([k, rows]) => {
+    const known = built.current.get(rows) ?? itemsOf(rows);
+    built.current.set(rows, known);
+    return [k, known];
+  })), [rowsByTurn]);
+  const targets = useMemo(() => new Map(JUMPS.map((j) => [j.kind, tree ? jumpTargets(tree, j.kind) : []])), [tree]);
   const rows = useMemo(() => (tree ? laneRows(tree, { items, open }) : []), [tree, items, open]);
   const param = new URLSearchParams(search).get('sel');
   const sel: Selection | null = useMemo(() => {
@@ -144,16 +151,22 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
   // A selection opens the way to itself once, when it is made; closing a row afterwards is left alone.
   const shown = useRef<string | null>(null);
   useEffect(() => {
-    if (!tree || !key || !place || shown.current === key) return;
+    if (!tree || !key || shown.current === key) return;
+    // A selection that already has a row needs no way opened: opening its turn would push it out of the window.
+    if (rows.some((r) => r.key === key)) {
+      shown.current = key;
+      return;
+    }
+    if (!place) return;
     shown.current = key;
     const way = reveal(tree, place);
     if (way.open.length) setOpen((prev) => new Set([...prev, ...way.open]));
     way.load.forEach((l) => void ensure(l.sid, l.turn, l.steps));
-  }, [tree, key, place, ensure]);
+  }, [tree, key, place, rows, ensure]);
 
   const jump = (kind: JumpKind) => {
     if (!tree) return;
-    const target = nextTarget(jumpTargets(tree, kind), key);
+    const target = nextTarget(targets.get(kind) ?? [], key);
     if (!target) return;
     live.current.places.set(target.key, { sid: target.sid, turn: target.turn, stepNo: target.stepNo });
     select(target.key);
@@ -180,7 +193,7 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
   };
   const branch = sel ? tree.branches.get(sel.sid) : undefined;
   const inner = branch !== undefined && branch.parent !== null;
-  const spawn = inner ? tree.marks.find((x) => x.child === branch.sid) : undefined;
+  const spawn = inner ? tree.spawns.get(branch.sid) : undefined;
   const fresh = detail?.key === key ? detail : null;
   const stepNo = fresh?.kind === 'step' ? num(fresh.answer.step.step) : null;
   const turnNo = sel?.kind === 'turn' ? sel.turn : place?.turn ?? null;
@@ -202,7 +215,7 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
         {JUMPS.some((j) => counts[j.kind] > 0) && (
           <p className="ag-jump">Jump to{JUMPS.filter((j) => counts[j.kind] > 0).map((j) => (
             <button type="button" key={j.kind} onClick={() => jump(j.kind)}>{plural(counts[j.kind], j.noun)}</button>
-          ))}</p>
+          ))}{tree.marksCut && <span>Only the first 2,000 of these places are known to this page.</span>}</p>
         )}
       </header>
       {error && <div className="error" role="alert">{error}</div>}
@@ -216,11 +229,12 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
             </p>
           )}
           <h2>
-            {sel?.kind === 'turn' ? `${inner ? `${branch?.name}: turn` : 'Turn'} ${sel.turn}` : sel?.kind === 'cut' ? 'Compaction' : `Step${stepNo === null ? '' : ` ${stepNo}`}`}
+            {!sel ? 'No turns' : sel.kind === 'turn' ? `${inner ? `${branch?.name}: turn` : 'Turn'} ${sel.turn}` : sel.kind === 'cut' ? 'Compaction' : `Step${stepNo === null ? '' : ` ${stepNo}`}`}
             {output.some((b) => b.role === 'tool' && b.failed) && <b className="bad">failed</b>}
             {output.some((b) => b.call?.repeatOf !== null && b.call?.repeatOf !== undefined) && <b className="warn">repeated</b>}
           </h2>
-          {!fresh && <div className="ag-notice">Loading…</div>}
+          {!sel && <div className="ag-notice">This session has no turns.</div>}
+          {sel && !fresh && <div className="ag-notice">Loading…</div>}
           {fresh?.kind === 'error' && <div className="error" role="alert">{fresh.message}</div>}
           {fresh?.kind === 'turn' && sel?.kind === 'turn' && (
             <TurnPane turn={branch?.turns.find((t) => t.no === sel.turn)} answer={fresh.answer} inner={inner} open={open.has(turnKey(sel.sid, sel.turn))}

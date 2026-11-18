@@ -3,9 +3,10 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { bandPath, half, indent, kindOf, rowTops, windowOf } from '../src/lib/agents/lane-draw.ts';
 import {
-  bandPath, branchKey, buildTree, chain, childOf, half, indent, itemsKey, itemsOf, jumpTargets, kindOf, laneRows, nextTarget, pagesToRead, reveal,
-  rowTops, stepFailed, stepLabel, stepRepeats, stepTotalUs, twistOf, windowOf, type Item, type LaneRow, type Step, type Tree,
+  branchKey, buildTree, chain, childrenOf, itemsKey, itemsOf, jumpTargets, laneRows, nextTarget, pagesToRead, reveal,
+  stepFailed, stepLabel, stepRepeats, stepTotalUs, twistOf, type Item, type LaneRow, type Step, type Tree,
 } from '../src/lib/agents/lanes.ts';
 
 // A main session of two turns: turn 1 reads, fails a command, reads again, starts a sub-agent and
@@ -66,6 +67,9 @@ test('the tree: branches with their turns, the main session, marks, and a scale 
   assert.deepEqual(tree.main.turns.map((t) => [t.no, t.steps, t.firstStep, t.lastCall, t.exact]), [[1, 4, 1, 10, true], [2, 1, 5, 13, true]]);
   assert.deepEqual([tree.branches.get('a')!.name, tree.branches.get('a')!.parent, tree.branches.get('a')!.parentSeq], ['Explore', 'm', 8]);
   assert.equal(tree.marks.length, 4);
+  assert.deepEqual([...tree.spawns].map(([child, m]) => [child, m.seq]), [['a', 8]]);
+  assert.equal(tree.marksCut, false);
+  assert.equal(buildTree({ sessions: SESSIONS, turns: TURNS, marks: MARKS, marksCut: true }).marksCut, true);
   assert.equal(tree.scale, 200_000);
   assert.equal(buildTree({ sessions: [session('m', 'main', { peak_ctx_tokens: '962272' })], turns: [], marks: [] }).scale, 962_272);
   assert.throws(() => buildTree({ sessions: [], turns: [], marks: [] }), /needs a session/);
@@ -80,8 +84,8 @@ test('light rows become steps with their tool calls, and compactions, in order',
   assert.deepEqual([stepFailed(first), stepRepeats(first), stepTotalUs(first)], [true, false, 6_000_000]);
   assert.deepEqual([stepFailed(second), stepRepeats(second), second.tools[0]!.repeatVisible], [false, true, true]);
   assert.deepEqual(itemsOf(M2 as never).map((i) => i.type), ['cut', 'step']);
-  assert.equal(childOf(tree, stepAt(list, 2))?.sid, 'a');
-  assert.equal(childOf(tree, first), null);
+  assert.deepEqual(childrenOf(tree, stepAt(list, 2)).map((b) => b.sid), ['a']);
+  assert.deepEqual(childrenOf(tree, first), []);
 });
 
 test('closed turns: one row each; a compaction inside a turn is counted, not drawn', () => {
@@ -141,10 +145,10 @@ test('the chain of a closed turn: equal neighbours are counted, a failed call st
 
 test('what a step did, in one line', () => {
   const list = itemsOf(M1 as never);
-  assert.deepEqual(stepLabel(stepAt(list, 0), null, true), { tool: 'Read', text: 'tests/clock_test.py', extra: 1 });
-  assert.deepEqual(stepLabel(stepAt(list, 2), tree.branches.get('a')!, true), { tool: 'Agent', text: 'Explore', extra: 0 });
-  assert.deepEqual(stepLabel(stepAt(list, 3), null, true), { tool: null, text: 'Reply to the user', extra: 0 });
-  assert.equal(stepLabel(stepAt(list, 3), null, false).text, 'Return the result');
+  assert.deepEqual(stepLabel(stepAt(list, 0), [], true), { tool: 'Read', text: 'tests/clock_test.py', extra: 1 });
+  assert.deepEqual(stepLabel(stepAt(list, 2), [tree.branches.get('a')!], true), { tool: 'Agent', text: 'Explore', extra: 0 });
+  assert.deepEqual(stepLabel(stepAt(list, 3), [], true), { tool: null, text: 'Reply to the user', extra: 0 });
+  assert.equal(stepLabel(stepAt(list, 3), [], false).text, 'Return the result');
 });
 
 test('drawing: row kinds, the width of a lane, and the shape of a lane through a row', () => {
@@ -224,4 +228,57 @@ test('the next target follows the selected one and returns to the first', () => 
   assert.equal(nextTarget(targets, 's:m:10')!.key, 's:m:2');
   assert.equal(nextTarget(targets, 't:m:1')!.key, 's:m:2');
   assert.equal(nextTarget([], 's:m:2'), null);
+});
+
+// The same session with a second sub-agent started by the same step, as when helpers run side by side.
+const TWO_SESSIONS = [...SESSIONS, session('b', 'subagent', { parent_id: 'm', parent_seq: '9', agent_name: 'Plan', title: 'second helper' })];
+const TWO_TURNS = [...TURNS, turn('b', 1, { steps: '1', ctx_first: '700', ctx_last: '700', first_step: 1, last_call: '2', ctx_exact: 0 })];
+const TWO_MARKS = [...MARKS, mark(9, 'tool_call', 1, 3, { parent_seq: '7', child: 'b' })];
+const M1_TWO = [...M1.slice(0, 7), ev('m', 9, 'tool_call', 1, 3, { parent_seq: '7', name: 'Agent' }), M1[7]!];
+const B1 = [ev('b', 2, 'llm_call', 1, 1, { ctx_tokens: '700', stop_reason: 'end_turn' })];
+
+test('a step that started several sub-agents: each has a row of its own under the step and opens on its own', () => {
+  const two = buildTree({ sessions: TWO_SESSIONS, turns: TWO_TURNS, marks: TWO_MARKS });
+  const all = items(['m', 1, M1_TWO], ['m', 2, M2], ['a', 1, A1], ['b', 1, B1]);
+  const closed = laneRows(two, { items: all, open: new Set(['t:m:1']) });
+  assert.deepEqual(shape(closed), ['turn:t:m:1@0', 'step:s:m:2@0', 'step:s:m:5@0', 'step:s:m:7@0', 'branch:t:a:1@1', 'branch:t:b:1@1', 'step:s:m:10@0', 'turn:t:m:2@0']);
+  const spawn = closed[3]!;
+  assert.deepEqual(spawn.type === 'step' && [spawn.child, spawn.children.map((b) => b.sid), twistOf(spawn)], [null, ['a', 'b'], null]);
+  assert.deepEqual(spawn.type === 'step' && stepLabel(spawn.step, spawn.children, true), { tool: 'Agent', text: '2 sub-agents', extra: 0 });
+  assert.deepEqual([twistOf(closed[4]!), twistOf(closed[5]!)], ['b:a', 'b:b']);
+  // Each sub-agent's lane starts at its own row; a closed one ends there.
+  assert.deepEqual(closed.slice(4, 6).map((r) => [r.from, r.to, r.above, r.below, r.pass]), [[1000, 1000, false, false, [6000]], [700, 700, false, false, [6000]]]);
+
+  const open = laneRows(two, { items: all, open: new Set(['t:m:1', 'b:b']) });
+  assert.deepEqual(shape(open).slice(3, 8), ['step:s:m:7@0', 'branch:t:a:1@1', 'branch:t:b:1@1', 'step:s:b:2@1', 'step:s:m:10@0']);
+  assert.deepEqual(open.slice(4, 7).map((r) => [r.above, r.below]), [[false, false], [false, true], [true, false]]);
+  const inner = open[6]!;
+  assert.equal(inner.type === 'step' && inner.owner, 'b:b');
+  // The way to a step of the second sub-agent opens the turn and that branch.
+  assert.deepEqual(reveal(two, { sid: 'b', turn: 1, stepNo: 1 }), { open: ['t:m:1', 'b:b'], load: [{ sid: 'm', turn: 1, steps: 3 }, { sid: 'b', turn: 1, steps: 1 }] });
+  assert.deepEqual(jumpTargets(two, 'subagent').map((t) => t.key), ['s:m:7']);
+});
+
+test('a compaction in a turn without a model call has a row, since the turn cannot open', () => {
+  const turns = [...TURNS, turn('m', 3, { compactions: '1', ctx_first: '0', ctx_last: '0' })];
+  const t = buildTree({ sessions: SESSIONS, turns, marks: [...MARKS, mark(15, 'compaction', 3, 5)] });
+  const rows = laneRows(t, { items: new Map(), open: new Set() });
+  assert.deepEqual(shape(rows), ['turn:t:m:1@0', 'turn:t:m:2@0', 'turn:t:m:3@0', 'cut:c:m:15@0']);
+  const third = rows[2]!;
+  assert.equal(third.type === 'turn' && third.inner, 0);
+});
+
+test('long turns, long chains and many marks are read in one pass', () => {
+  const n = 20_000;
+  const rows = Array.from({ length: n }, (_, i) => [ev('m', 2 * i + 2, 'llm_call', 1, i + 1), ev('m', 2 * i + 3, 'tool_call', 1, i + 1, { parent_seq: String(2 * i + 2), name: 'Bash' })]).flat();
+  const marks = Array.from({ length: n }, (_, i) => mark(2 * i + 3, 'tool_call', 1, i + 1, { parent_seq: String(2 * i + 2), failed: 1 }));
+  const big = buildTree({ sessions: SESSIONS, turns: TURNS, marks: [...MARKS, ...marks] });
+  const started = performance.now();
+  const list = itemsOf(rows as never);
+  const links = chain(Array.from({ length: n }, (_, i) => `T${i}`).join(','));
+  const targets = jumpTargets(big, 'failed');
+  const took = performance.now() - started;
+  assert.deepEqual([list.length, stepAt(list, n - 1).tools.map((t) => t.name), links.links.length, links.more, targets.length], [n, ['Bash'], 9, true, n]);
+  // Work that grows with the square of the size takes many seconds here.
+  assert.ok(took < 1500, `took ${Math.round(took)} ms`);
 });

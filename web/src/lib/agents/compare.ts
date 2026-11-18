@@ -4,7 +4,8 @@
 
 import type { Row, StepFacts, TurnPair } from '../../api/agents.ts';
 import { duration, num, stamp, text, timeOf, tokens } from './format.ts';
-import type { RowKind, Turn } from './lanes.ts';
+import type { RowKind } from './lane-draw.ts';
+import type { Turn } from './lanes.ts';
 
 /** An open pair of turns shows this many rows at first; the rest come a hundred at a time. */
 export const PAIRS_PAGE = 100;

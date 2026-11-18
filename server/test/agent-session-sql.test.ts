@@ -78,6 +78,8 @@ test('marks: failed and repeated calls, calls that started a sub-agent, and comp
   assert.match(sql, /LEFT JOIN otel\.agent_sessions c ON c\.parent_id = e\.session_id AND c\.parent_seq = e\.seq/);
   assert.match(sql, /WHERE e\.session_id IN \('m', 'a'\)/);
   assert.match(sql, /e\.kind = 'compaction' OR \(e\.kind = 'tool_call' AND \(e\.status = 'error' OR e\.repeat_of IS NOT NULL OR c\.session_id IS NOT NULL\)\)/);
-  assert.match(sql, /ORDER BY e\.session_id, e\.seq\nLIMIT 2000$/);
+  // The calls that started a sub-agent and the compactions hold the structure of the page: they come first.
+  // One row more than the limit is read, so a cut shows.
+  assert.match(sql, /ORDER BY if\(e\.kind = 'compaction' OR c\.session_id IS NOT NULL, 0, 1\), e\.session_id, e\.seq\nLIMIT 2001$/);
   assert.throws(() => marksSql('otel', ["m'"]), /bad session id/);
 });
