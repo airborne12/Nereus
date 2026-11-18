@@ -2,14 +2,17 @@
 // paired in order here. Pairing is an alignment, not a set operation (spec 2, exception to rule 1).
 
 import { CompileError, sqlString } from '../search/compile.ts';
+import { CTX_TOKENS } from './pages.ts';
 import type { Statement } from './query.ts';
 import { sessionId, treeSqlFor, turnsSql } from './session.ts';
 
 /** Two turns whose step counts multiply to more than this are paired by position. */
 export const ALIGN_LIMIT = 4_000_000;
 
-/** What a step did, as Compare pairs it. */
-export interface StepFacts { seq: number; step: number; tools: string; targets: string; failed: boolean }
+/** What a step did, as Compare pairs it; `ctx` is the size of its request in tokens, for the lane. */
+export interface StepFacts { seq: number; step: number; tools: string; targets: string; failed: boolean; ctx: number }
+/** A compaction of a turn: `after` is the index of the step it follows, -1 before the first. */
+export interface CutFacts { seq: number; after: number }
 /** One row of a pair of turns: an index into each side, or null where that side has no step. */
 export interface PairRow { a: number | null; b: number | null; differs: boolean }
 
@@ -21,8 +24,9 @@ export function compareSql(db: string, a: string, b: string, turn: number | null
   if (!Number.isSafeInteger(turn) || turn < 0) throw new CompileError("'turn' must be a whole number from 0");
   return [...head, {
     title: `Steps of turn ${turn}`,
-    sql: `SELECT e.session_id, e.seq, e.step,
-       coalesce(t.tools, 'reply') AS tools, coalesce(t.targets, '') AS targets, coalesce(t.failed, 0) AS failed
+    sql: `SELECT e.session_id, e.seq, e.step, e.kind,
+       coalesce(t.tools, 'reply') AS tools, coalesce(t.targets, '') AS targets, coalesce(t.failed, 0) AS failed,
+       ${CTX_TOKENS} AS ctx_tokens
 FROM ${db}.agent_events e
 LEFT JOIN (
   SELECT session_id, parent_seq, group_concat(name, ' ' ORDER BY seq) AS tools,
@@ -32,9 +36,20 @@ LEFT JOIN (
   WHERE session_id IN (${list}) AND turn = ${turn} AND kind = 'tool_call'
   GROUP BY session_id, parent_seq
 ) t ON t.session_id = e.session_id AND t.parent_seq = e.seq
-WHERE e.session_id IN (${list}) AND e.turn = ${turn} AND e.kind = 'llm_call'
+WHERE e.session_id IN (${list}) AND e.turn = ${turn} AND e.kind IN ('llm_call', 'compaction')
 ORDER BY e.session_id, e.seq`,
   }];
+}
+
+/** The steps of one session in the rows of a pair of turns, and its compactions with the step each follows. */
+export function turnSide(rows: readonly Record<string, unknown>[], id: string): { steps: StepFacts[]; cuts: CutFacts[] } {
+  const mine = rows.filter((r) => r.session_id === id);
+  const steps = mine.filter((r) => r.kind !== 'compaction').map((r) => ({
+    seq: Number(r.seq), step: Number(r.step), tools: String(r.tools), targets: String(r.targets), failed: Number(r.failed) > 0, ctx: Number(r.ctx_tokens ?? 0),
+  }));
+  const cuts = mine.filter((r) => r.kind === 'compaction')
+    .map((r) => ({ seq: Number(r.seq), after: steps.filter((s) => s.seq < Number(r.seq)).length - 1 }));
+  return { steps, cuts };
 }
 
 /**

@@ -2,14 +2,15 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { align, ALIGN_LIMIT, compareSql, matches, type StepFacts } from '../src/semantics/trajectory/compare.ts';
+import { align, ALIGN_LIMIT, compareSql, matches, type StepFacts, turnSide } from '../src/semantics/trajectory/compare.ts';
 
-const step = (tools: string, targets = '', failed = false): StepFacts => ({ seq: 0, step: 0, tools, targets, failed });
+const step = (tools: string, targets = '', failed = false): StepFacts => ({ seq: 0, step: 0, tools, targets, failed, ctx: 0 });
 
 test('statements: both trees and their turns; the steps of a turn only when one is asked for', () => {
   assert.deepEqual(compareSql('otel', 'a', 'b', null).map((s) => s.title), ['Sessions', 'Turns']);
   const [, , steps] = compareSql('otel', 'a', 'b', 2);
-  assert.match(steps!.sql, /e\.session_id IN \('a', 'b'\) AND e\.turn = 2 AND e\.kind = 'llm_call'/);
+  assert.match(steps!.sql, /e\.session_id IN \('a', 'b'\) AND e\.turn = 2 AND e\.kind IN \('llm_call', 'compaction'\)/);
+  assert.match(steps!.sql, /coalesce\(e\.cache_write_tokens, 0\) AS ctx_tokens/);
   assert.throws(() => compareSql('otel', 'a', "b'", 1), /bad session id/);
 });
 
@@ -69,4 +70,24 @@ test('turns too long to align are paired by position', () => {
   const rows = align(a, b);
   assert.equal(rows.length, n);
   assert.deepEqual(rows[5], { a: 5, b: 5, differs: true });
+});
+
+test('one side of a pair of turns: its steps with their context, its compactions by the step they follow', () => {
+  const row = (session_id: string, seq: number, kind: string, tools: string, targets: string, failed: number, ctx_tokens: number | null) =>
+    ({ session_id, seq, step: 0, kind, tools, targets, failed, ctx_tokens });
+  const rows = [
+    row('a', 3, 'compaction', 'reply', '', 0, 0),
+    row('a', 4, 'llm_call', 'Read', 'x.py', 0, 1200),
+    row('b', 4, 'llm_call', 'Bash', 'ls', 1, null),
+    row('a', 6, 'llm_call', 'reply', '', 0, 1500),
+    row('a', 7, 'compaction', 'reply', '', 0, 0),
+  ];
+  assert.deepEqual(turnSide(rows, 'a'), {
+    steps: [
+      { seq: 4, step: 0, tools: 'Read', targets: 'x.py', failed: false, ctx: 1200 },
+      { seq: 6, step: 0, tools: 'reply', targets: '', failed: false, ctx: 1500 },
+    ],
+    cuts: [{ seq: 3, after: -1 }, { seq: 7, after: 1 }],
+  });
+  assert.deepEqual(turnSide(rows, 'b'), { steps: [{ seq: 4, step: 0, tools: 'Bash', targets: 'ls', failed: true, ctx: 0 }], cuts: [] });
 });

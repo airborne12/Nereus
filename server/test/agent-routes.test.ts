@@ -91,3 +91,42 @@ test('a conversations export over the byte cap is refused before its lines are b
 test('the conversations export cap is at most 128 MiB', () => {
   assert.ok(MAX_EXPORT_BYTES <= 128 * 1024 * 1024);
 });
+
+test('the size of a CSV export: rows, bytes, a preview and the statements, without reading the file', async () => {
+  const { doris, seen } = stub(7, [{ session_id: 's', title: '=x' }], 99);
+  const c = call(doris, `/api/agents/sessions?${RANGE}&format=csv&size=1`);
+  assert.equal(await c.done, true);
+  const a = c.answers[0]!;
+  assert.deepEqual([a.status, a.body.size, a.body.sql.map((s: any) => s.title)], [200, { rows: 7, bytes: 99 }, ['Rows', 'Total']]);
+  assert.ok(a.body.preview.startsWith('last_event_at,session_id,title,'));
+  assert.match(a.body.preview, /\n,s,'=x,/);
+  assert.ok(seen.some((s) => /LIMIT 5 OFFSET 0$/.test(s)), 'the preview reads five rows');
+  assert.ok(!seen.some((s) => /LIMIT 200001$/.test(s)), 'the file itself is not read');
+});
+
+test('a session tree answers sessions, turns and marks; every step only when the tree is small', async () => {
+  const big = call(stub(0, [{ session_id: 's', kind: 'main', steps: 41 }]).doris, '/api/agents/sessions/s');
+  assert.equal(await big.done, true);
+  const a = big.answers[0]!;
+  assert.deepEqual([a.status, a.body.openAll, a.body.steps, a.body.sql.map((s: any) => s.title)], [200, false, null, ['Session', 'Turns', 'Marks']]);
+  assert.equal(a.body.marks.length, 1);
+  const small = call(stub(0, [{ session_id: 's', kind: 'main', steps: 40 }]).doris, '/api/agents/sessions/s');
+  await small.done;
+  assert.deepEqual(small.answers[0]!.body.sql.map((s: any) => s.title), ['Session', 'Turns', 'Marks', 'Steps']);
+});
+
+test('Compare with a turn answers both sides, their pairs and their compactions', async () => {
+  const rows = [
+    { session_id: 'x', seq: 2, step: 1, kind: 'llm_call', tools: 'Read', targets: 'a', failed: 0, ctx_tokens: 10 },
+    { session_id: 'x', seq: 4, step: 1, kind: 'compaction', tools: 'reply', targets: '', failed: 0, ctx_tokens: 0 },
+    { session_id: 'y', seq: 2, step: 1, kind: 'llm_call', tools: 'Read', targets: 'a', failed: 1, ctx_tokens: 20 },
+  ];
+  const c = call(stub(0, rows).doris, '/api/agents/compare?a=x&b=y&turn=1');
+  await c.done;
+  assert.deepEqual(c.answers[0]!.body.steps, {
+    a: [{ seq: 2, step: 1, tools: 'Read', targets: 'a', failed: false, ctx: 10 }],
+    b: [{ seq: 2, step: 1, tools: 'Read', targets: 'a', failed: true, ctx: 20 }],
+    rows: [{ a: 0, b: 0, differs: true }],
+    cuts: { a: [{ seq: 4, after: 0 }], b: [] },
+  });
+});

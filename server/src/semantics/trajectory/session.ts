@@ -30,7 +30,7 @@ function count(n: number, name: string): number {
 
 const TREE = ['session_id', 'root_id', 'parent_id', 'parent_seq', 'kind', 'agent_name', 'title', 'model', 'runtime', 'runtime_version',
   'user_id', 'started_at', 'last_event_at', 'last_seq', 'turns', 'steps', 'tool_calls', 'tool_errors', 'subagents', 'compactions',
-  'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'peak_ctx_tokens', 'active_us', 'safety_risks'];
+  'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'peak_ctx_tokens', 'active_us', 'safety_risks', 'first_input', 'last_output'];
 
 /** The tree of the session `id` belongs to; a sub-agent id opens its whole tree. */
 export function treeSql(db: string, id: string): Statement {
@@ -50,7 +50,7 @@ export function turnsSql(db: string, ids: readonly string[]): Statement {
   return {
     title: 'Turns',
     sql: `SELECT t.session_id, t.turn, t.started_at, t.ended_at, u.text AS user_input, t.steps, t.failed_calls, t.compactions,
-       t.active_us, t.ctx_first, t.ctx_last, t.tools
+       t.active_us, t.ctx_first, t.ctx_last, t.tools, t.first_step, t.last_call, t.ctx_exact
 FROM (
   SELECT e.session_id, e.turn, min(e.ts) AS started_at, max(coalesce(e.end_ts, e.ts)) AS ended_at,
          max(if(e.kind = 'user_input', e.msg_seq, NULL)) AS asked,
@@ -60,13 +60,38 @@ FROM (
          sum(if(e.kind IN ('llm_call', 'tool_call'), coalesce(e.duration_us, 0), 0)) AS active_us,
          min_by(${CTX_TOKENS}, if(e.kind = 'llm_call', e.seq, NULL)) AS ctx_first,
          max_by(${CTX_TOKENS}, if(e.kind = 'llm_call', e.seq, NULL)) AS ctx_last,
-         group_concat(if(e.kind = 'tool_call', concat(e.name, if(e.status = 'error', ' failed', '')), NULL), ',' ORDER BY e.seq) AS tools
+         group_concat(if(e.kind = 'tool_call', concat(e.name, if(e.status = 'error', ' failed', '')), NULL), ',' ORDER BY e.seq) AS tools,
+         min(if(e.kind = 'llm_call', e.step, NULL)) AS first_step,
+         max(if(e.kind = 'llm_call', e.seq, NULL)) AS last_call,
+         min(if(e.kind = 'llm_call', if(e.ctx_exact, 1, 0), NULL)) AS ctx_exact
   FROM ${db}.agent_events e
   WHERE e.session_id IN (${list})
   GROUP BY e.session_id, e.turn
 ) t
 LEFT JOIN ${db}.agent_messages u ON u.session_id = t.session_id AND u.msg_seq = t.asked
 ORDER BY t.session_id, t.turn`,
+  };
+}
+
+/** Most rows the marks of a tree carry. */
+export const MARKS_LIMIT = 2000;
+
+/**
+ * What the Jump to buttons visit, and where each sub-agent branch leaves its parent: the failed
+ * and repeated tool calls, the calls that started a sub-agent, and the compactions of the branches.
+ */
+export function marksSql(db: string, ids: readonly string[]): Statement {
+  const list = ids.map((id) => sqlString(sessionId(id))).join(', ');
+  return {
+    title: 'Marks',
+    sql: `SELECT e.session_id, e.seq, e.turn, e.step, e.kind, e.parent_seq,
+       if(e.status = 'error', 1, 0) AS failed, if(e.repeat_of IS NOT NULL, 1, 0) AS repeated, c.session_id AS child
+FROM ${db}.agent_events e
+LEFT JOIN ${db}.agent_sessions c ON c.parent_id = e.session_id AND c.parent_seq = e.seq
+WHERE e.session_id IN (${list})
+  AND (e.kind = 'compaction' OR (e.kind = 'tool_call' AND (e.status = 'error' OR e.repeat_of IS NOT NULL OR c.session_id IS NOT NULL)))
+ORDER BY e.session_id, e.seq
+LIMIT ${MARKS_LIMIT}`,
   };
 }
 

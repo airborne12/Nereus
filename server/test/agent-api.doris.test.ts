@@ -93,12 +93,18 @@ test('Steps and Messages: rows, search on what the assistant wrote, role retriev
   assert.deepEqual(steps.body.rows.map((r: any) => [Number(r.seq), r.status, r.repeated_call, Number(r.retries)]),
     [[2, 'failed', '', 0], [5, 'ok', 'still in context', 0], [7, 'ok', '', 0], [10, 'ok', '', 1], [13, 'ok', '', 0]]);
   assert.equal(steps.body.rows[0].calls, 'Read tests/clock_test.py, Bash pytest tests/clock_test.py');
+  // The first step wrote text before its calls; the second only called a tool.
+  assert.deepEqual(steps.body.rows.slice(0, 2).map((r: any) => r.output_kind), ['text', 'tool_use']);
   assert.equal((await get(`/api/agents/steps?${RANGE}`)).body.total, 12);
   assert.equal((await get(`/api/agents/steps?${RANGE}&f=session_id:eq:${MAIN_ID}&q=read`)).body.total, 2);
   const msgs = await get(`/api/agents/messages?${RANGE}&f=session_id:eq:${MAIN_ID}&f=msg_role:eq:assistant`);
   assert.equal(msgs.body.total, 7);
   assert.equal((await get(`/api/agents/messages?${RANGE}&f=session_id:ne:${OTHER}&q=utc`)).body.total, 6);
   assert.equal((await get(`/api/agents/messages?${RANGE}&f=session_id:eq:${MAIN_ID}&q=${encodeURIComponent('😀')}`)).body.total, 1);
+  // A tool result opens the model call that issued its tool call.
+  const results = await get(`/api/agents/messages?${RANGE}&f=session_id:eq:${MAIN_ID}&f=kind:eq:tool_result&sort=msg_seq&dir=asc`);
+  assert.deepEqual(results.body.rows.map((r: any) => [Number(r.msg_seq), r.event_kind, Number(r.step_seq)]),
+    [[6, 'tool_call', 2], [7, 'tool_call', 2], [9, 'tool_call', 5], [11, 'tool_call', 7]]);
 });
 
 test('bad requests answer 400', { skip: !enabled }, async () => {
@@ -118,6 +124,17 @@ test('session page: tree, turns, all steps of a small tree; a sub-agent id opens
   const t1 = s.body.turns.find((t: any) => t.session_id === MAIN_ID && Number(t.turn) === 1);
   assert.deepEqual([Number(t1.steps), Number(t1.failed_calls), t1.tools], [4, 1, 'Read,Bash failed,Read,Agent']);
   assert.equal(s.body.turns.length, 3);
+  assert.deepEqual([s.body.sessions[0].first_input, s.body.sessions[0].last_output],
+    ['Fix the failing test in tests/clock_test.py 😀', 'Noted: the public API stays unchanged.']);
+  assert.deepEqual([Number(t1.first_step), Number(t1.last_call), Number(t1.ctx_exact)], [1, 10, 1]);
+  const t2 = s.body.turns.find((t: any) => t.session_id === MAIN_ID && Number(t.turn) === 2);
+  assert.deepEqual([Number(t2.first_step), Number(t2.last_call)], [5, 13]);
+  const sub1 = s.body.turns.find((t: any) => t.session_id === AGENT_FILE_ID);
+  assert.equal(Number(sub1.ctx_exact), 0, 'the sub-agent file has no request log');
+  // The failed Bash call, the repeated Read, the call that started the sub-agent, and the compaction.
+  assert.deepEqual(s.body.marks.map((m: any) => [Number(m.seq), m.kind, Number(m.failed), Number(m.repeated), m.child, m.parent_seq === null ? null : Number(m.parent_seq), Number(m.turn)]), [
+    [4, 'tool_call', 1, 0, null, 2, 1], [6, 'tool_call', 0, 1, null, 5, 1], [8, 'tool_call', 0, 0, AGENT_FILE_ID, 7, 1], [12, 'compaction', 0, 0, null, null, 2],
+  ]);
   assert.equal(s.body.openAll, true);
   assert.equal(s.body.steps.length, 13);
   const sub = await get(`/api/agents/sessions/${AGENT_FILE_ID}`);
@@ -161,6 +178,11 @@ test('compare: steps paired by tool; the fixed call differs in outcome', { skip:
   assert.deepEqual(c.body.steps.rows, [
     { a: 0, b: 0, differs: true }, { a: 1, b: 1, differs: false }, { a: 2, b: 2, differs: false }, { a: 3, b: 3, differs: false },
   ]);
+  // Every request of the fixture carries 10 input, 100 cached and 5 cache-write tokens.
+  assert.deepEqual(c.body.steps.a.map((x: any) => x.ctx), [115, 115, 115, 115]);
+  assert.deepEqual(c.body.steps.cuts, { a: [], b: [] });
+  const second = await get(`/api/agents/compare?a=${MAIN_ID}&b=${OTHER}&turn=2`);
+  assert.deepEqual(second.body.steps.cuts, { a: [{ seq: 12, after: -1 }], b: [{ seq: 12, after: -1 }] });
   assert.equal((await get(`/api/agents/compare?a=${MAIN_ID}&b=${OTHER}`)).body.steps, null);
   assert.equal((await get(`/api/agents/compare?a=${MAIN_ID}&b=nobody`)).status, 404);
 });
@@ -171,6 +193,9 @@ test('exports: CSV of a table page, conversations as JSON lines, and the size wi
   const lines = csv.text.trim().split('\n');
   assert.equal(lines.length, 3);
   assert.ok(lines[0]!.startsWith('last_event_at,session_id,title,'));
+  const peek = await get(`/api/agents/sessions?${RANGE}&format=csv&size=1&sort=session_id&dir=asc`);
+  assert.deepEqual([peek.body.size.rows, peek.body.sql.map((x: any) => x.title)], [2, ['Rows', 'Total']]);
+  assert.deepEqual(peek.body.preview.trim().split('\n').map((l: string) => l.split(',')[1]), ['session_id', MAIN_ID, OTHER]);
   const conv = await get(`/api/agents/sessions?${RANGE}&f=session_id:eq:${MAIN_ID}&format=jsonl`);
   const parts = conv.text.trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(parts.map((p) => [p.session_id, p.part, p.messages.length]), [[MAIN_ID, 1, 11], [MAIN_ID, 2, 4], [AGENT_FILE_ID, 1, 4]]);

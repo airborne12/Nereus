@@ -3,6 +3,7 @@
 //
 //   GET /api/agents/sessions|steps|messages?from=&to=&q=&f=col:op:value&sort=&dir=&limit=&offset=
 //   GET /api/agents/sessions|steps|messages?...&format=csv
+//   GET /api/agents/sessions|steps|messages?...&format=csv&size=1   rows, bytes, a preview and the SQL, for the export dialog
 //   GET /api/agents/sessions?...&format=jsonl            conversations
 //   GET /api/agents/sessions?...&format=jsonl&size=1     size, a preview and the SQL, for the export dialog
 
@@ -10,7 +11,7 @@ import type { ServerResponse } from 'node:http';
 import type { Doris } from '../../db/doris.ts';
 import { CompileError } from '../../semantics/search/compile.ts';
 import {
-  conversationSql, conversations, exportName, MAX_EXPORT_BYTES, MAX_EXPORT_ROWS, PREVIEW_MESSAGES, toCsv,
+  conversationSql, conversations, exportName, MAX_EXPORT_BYTES, MAX_EXPORT_ROWS, PREVIEW_MESSAGES, PREVIEW_ROWS, toCsv,
 } from '../../semantics/trajectory/export.ts';
 import { messagesPage, sessionsPage, stepsPage } from '../../semantics/trajectory/pages.ts';
 import { type Page, type TableRequest, tableSql } from '../../semantics/trajectory/query.ts';
@@ -31,8 +32,18 @@ function rowCap(n: number): string {
   return `${n} rows match; an export holds at most ${MAX_EXPORT_ROWS}. Narrow the range or the filter.`;
 }
 
-async function csv(doris: Doris, res: ServerResponse, page: Page, req: TableRequest): Promise<void> {
+async function csv(doris: Doris, send: Send, res: ServerResponse, page: Page, req: TableRequest, sizeOnly: boolean): Promise<void> {
   const { rows, total } = tableSql(page, req, 'export', MAX_EXPORT_ROWS);
+  const names = page.columns.map((c) => c.name);
+  const text = new Set(page.columns.filter((c) => c.kind === 'text').map((c) => c.name));
+  if (sizeOnly) {
+    const peek = tableSql(page, { ...req, limit: PREVIEW_ROWS, offset: 0 }, 'list').rows;
+    const { results: [sized, first], elapsedMs } = await run(doris, [total, peek]);
+    send(res, 200, {
+      size: { rows: Number(sized![0]?.total ?? 0), bytes: Number(sized![0]?.bytes ?? 0) }, preview: toCsv(names, first!, text), sql: [rows, total], elapsedMs,
+    });
+    return;
+  }
   const { results: [counted] } = await run(doris, [total]);
   const n = Number(counted![0]?.total ?? 0);
   if (n > MAX_EXPORT_ROWS) throw new CompileError(rowCap(n));
@@ -40,7 +51,7 @@ async function csv(doris: Doris, res: ServerResponse, page: Page, req: TableRequ
   const { results: [all] } = await run(doris, [rows]);
   // Rows ingested after the count must not silently cut the file.
   if (all!.length > MAX_EXPORT_ROWS) throw new CompileError(rowCap(all!.length));
-  sendFile(res, exportName(page.name, 'csv'), 'text/csv', toCsv(page.columns.map((c) => c.name), all!));
+  sendFile(res, exportName(page.name, 'csv'), 'text/csv', toCsv(names, all!, text));
 }
 
 async function jsonl(doris: Doris, send: Send, res: ServerResponse, db: string, req: TableRequest, sizeOnly: boolean): Promise<void> {
@@ -68,9 +79,10 @@ export async function tables(doris: Doris, db: string, send: Send, res: ServerRe
   const page = PAGES[m[1]!]!(db);
   const req = tableRequest(url);
   const format = url.searchParams.get('format');
+  const sizeOnly = url.searchParams.get('size') === '1';
   if (format === null) await list(doris, send, res, page, req);
-  else if (format === 'csv') await csv(doris, res, page, req);
-  else if (format === 'jsonl' && page.name === 'sessions') await jsonl(doris, send, res, db, req, url.searchParams.get('size') === '1');
+  else if (format === 'csv') await csv(doris, send, res, page, req, sizeOnly);
+  else if (format === 'jsonl' && page.name === 'sessions') await jsonl(doris, send, res, db, req, sizeOnly);
   else throw new CompileError(`format must be csv${page.name === 'sessions' ? ' or jsonl' : ''}`);
   return true;
 }

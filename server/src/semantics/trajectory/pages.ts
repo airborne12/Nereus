@@ -98,6 +98,8 @@ export function stepsPage(db: string): Page {
       col('calls', 't.calls', 'text', { long: true }),
       col('status', "if(t.failed > 0, 'failed', 'ok')", 'text'),
       col('output', 'm.text', 'text', { indexed: true, long: true }),
+      // The block a model call produced first: its text, or a tool call when it wrote none.
+      col('output_kind', 'm.kind', 'text'),
       col('ctx_tokens', CTX_TOKENS, 'number'),
       col('duration_us', 'e.duration_us', 'number'),
       col('repeated_call', "CASE WHEN t.repeats_seen > 0 THEN 'still in context' WHEN t.repeats > 0 THEN 'no longer in context' ELSE '' END", 'text'),
@@ -140,6 +142,9 @@ export function messagesPage(db: string): Page {
       // Only a model call or a tool call gives a block a step.
       col('step', "CASE WHEN e.kind IN ('llm_call', 'tool_call') THEN e.step END", 'number'),
       col('event_seq', 'm.event_seq', 'number'),
+      col('event_kind', 'e.kind', 'text'),
+      // The model call a row opens: the block's own call, or the call that issued its tool call.
+      col('step_seq', "CASE WHEN e.kind = 'llm_call' THEN e.seq WHEN e.kind = 'tool_call' THEN e.parent_seq END", 'number'),
       col('msg_role', 'm.msg_role', 'text'),
       col('kind', 'm.kind', 'text'),
       col('tool_name', 'm.tool_name', 'text'),

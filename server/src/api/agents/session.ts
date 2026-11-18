@@ -1,7 +1,7 @@
 // The session page (spec 7, 8.3): the tree with its turns, a turn's steps one page at a time, and
 // what the right side reads for a turn, a step or a compaction.
 //
-//   GET /api/agents/sessions/<id>                                 tree, turns; every step when the tree is small
+//   GET /api/agents/sessions/<id>                                 tree, turns, marks; every step when the tree is small
 //   GET /api/agents/sessions/<id>/turns/<n>                       the user's input and the final answer
 //   GET /api/agents/sessions/<id>/turns/<n>/steps?offset=         100 steps of a turn
 //   GET /api/agents/sessions/<id>/steps/<seq>?inputOffset=        input, output and prompt of a model call
@@ -11,7 +11,7 @@ import type { ServerResponse } from 'node:http';
 import type { Doris } from '../../db/doris.ts';
 import { CompileError } from '../../semantics/search/compile.ts';
 import {
-  compactionSql, OPEN_ALL_STEPS, sessionId, STEPS_PAGE, stepSql, treeSql, treeStepsSql, turnSql, turnStepsSql, turnsSql,
+  compactionSql, marksSql, OPEN_ALL_STEPS, sessionId, STEPS_PAGE, stepSql, treeSql, treeStepsSql, turnSql, turnStepsSql, turnsSql,
 } from '../../semantics/trajectory/session.ts';
 import { intParam, parsed, run, type Send } from './request.ts';
 
@@ -22,10 +22,10 @@ async function tree(doris: Doris, db: string, send: Send, res: ServerResponse, i
   const ids = sessions!.map((s) => String(s.session_id));
   const main = sessions!.find((s) => s.kind === 'main') ?? sessions![0]!;
   const openAll = Number(main.steps ?? 0) <= OPEN_ALL_STEPS;
-  const statements = [turnsSql(db, ids), ...(openAll ? [treeStepsSql(db, ids)] : [])];
+  const statements = [turnsSql(db, ids), marksSql(db, ids), ...(openAll ? [treeStepsSql(db, ids)] : [])];
   const { results, elapsedMs: more } = await run(doris, statements);
   send(res, 200, {
-    sessions: parsed(sessions!), turns: results[0], steps: openAll ? results[1] : null, openAll,
+    sessions: parsed(sessions!), turns: results[0], marks: results[1], steps: openAll ? results[2] : null, openAll,
     sql: [head, ...statements], elapsedMs: elapsedMs + more,
   });
 }
