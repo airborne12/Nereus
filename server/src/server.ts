@@ -17,6 +17,7 @@
 //   GET /api/trace/<trace id>?from=&to=
 //   GET /api/fields?source=                  search bar fields (cached for a minute)
 //   GET /api/values?source=&field=&q=&from=&to=&limit=   top values of a field
+//   GET /api/agents/...                      agent trajectories: see api/agents/routes.ts
 //
 // Times are UTC (ISO 8601 or "YYYY-MM-DD HH:MM:SS"). Query errors answer 400 with a message.
 
@@ -33,10 +34,13 @@ import {
   traceSql, valuesSql, type Field,
 } from './semantics/search/build.ts';
 import { CompileError, unknownFields } from './semantics/search/compile.ts';
-import { logsSource, metricsSource, rumSource, tracesSource, type Source } from './semantics/search/source.ts';
+import {
+  agentEventsSource, agentMessagesSource, agentSessionsSource, logsSource, metricsSource, rumSource, tracesSource, type Source,
+} from './semantics/search/source.ts';
 import { Doris, configFromEnv } from './db/doris.ts';
 import { type AuthContext, authRoutes, authenticate } from './control/auth/http.ts';
 import { type IngestLimits, IngestKeys, rumRoutes } from './rum/http.ts';
+import { agentRoutes } from './api/agents/routes.ts';
 import { AuthError, AuthStore } from './control/auth/store.ts';
 import { metaPoolFromEnv, migrate } from './db/meta.ts';
 
@@ -107,13 +111,17 @@ function send(res: ServerResponse, status: number, body: unknown, headers: Recor
 }
 
 export function sourcesFor(db: string): Record<string, Source> {
-  return { logs: logsSource(db), traces: tracesSource(db), metrics: metricsSource(db) };
+  return {
+    logs: logsSource(db), traces: tracesSource(db), metrics: metricsSource(db),
+    agent_sessions: agentSessionsSource(db), agent_events: agentEventsSource(db), agent_messages: agentMessagesSource(db),
+  };
 }
 
 export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, fetchImpl, webDir }: AppOptions): Server {
   const account = authRoutes(auth, send);
   const rum = rumRoutes({ doris, keys: ingestKeys, source: rumSource(db), send, limits: ingestLimits });
   const contentApi = contentRoutes(content, send, fetchImpl);
+  const agents = agentRoutes({ doris, db, send });
   const sources = sourcesFor(db);
   const sourceParam = (url: URL): Source => {
     const name = param(url, 'source')!;
@@ -176,6 +184,7 @@ export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, 
     if (await account.handleAccount(req, res, path, user)) return;
     if (await contentApi(req, res, url, user)) return;
     if (await rum.handle(req, res, url, user, () => searchSpec(url))) return;
+    if (await agents.handle(req, res, url)) return;
     if (path === '/api/chart' && req.method === 'POST') {
       const b = await readJson(req);
       const source = sources[String(b.source)];
