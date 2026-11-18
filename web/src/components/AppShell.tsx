@@ -2,7 +2,14 @@ import { type ReactNode, useEffect, useState } from 'react';
 import type * as api from '../api.ts';
 import { Icon, type IconName } from './Icon.tsx';
 
-export type Page = 'search' | 'saved' | 'chart' | 'alerts' | 'sessions' | 'service-map' | 'dashboards' | 'settings';
+export type Page = 'agent-sessions' | 'agent-steps' | 'agent-messages'
+  | 'search' | 'saved' | 'chart' | 'alerts' | 'sessions' | 'service-map' | 'dashboards' | 'settings';
+
+/** The pages under Sessions in the Agent trajectories area. */
+const AGENT_SUBS: { page: Page; label: string }[] = [
+  { page: 'agent-steps', label: 'Steps' },
+  { page: 'agent-messages', label: 'Messages' },
+];
 
 const ITEMS: { page: Page; label: string; icon: IconName; beta?: boolean }[] = [
   { page: 'search', label: 'Search', icon: 'table' },
@@ -31,6 +38,9 @@ interface Props {
   page: Page;
   user: api.User;
   favorites: Favorites;
+  /** Whether the Agent trajectories area is offered. */
+  agents: boolean;
+  onHome: () => void;
   onNavigate: (p: Page) => void;
   onOpen: (url: string) => void;
   onLogout: () => void;
@@ -38,7 +48,7 @@ interface Props {
 }
 
 /** Left navigation (collapsible to icons) and the page beside it. */
-export function AppShell({ page, user, favorites, onNavigate, onOpen, onLogout, children }: Props) {
+export function AppShell({ page, user, favorites, agents, onHome, onNavigate, onOpen, onLogout, children }: Props) {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [menu, setMenu] = useState(false);
   const [showFav, setShowFav] = useState<Record<string, boolean>>({ saved: true, dashboards: true });
@@ -53,11 +63,36 @@ export function AppShell({ page, user, favorites, onNavigate, onOpen, onLogout, 
     <div className={`shell${collapsed ? ' nav-collapsed' : ''}`}>
       <nav className="nav" aria-label="Main">
         <div className="nav-head">
-          <button type="button" className="logo" onClick={() => onNavigate('search')} aria-label="Nereus home">
+          <button type="button" className="logo" onClick={onHome} aria-label="Nereus home">
             <span className="logo-mark">◆</span>{!collapsed && <span className="logo-text">Nereus</span>}
           </button>
           {!collapsed && <span className="tz" title={`Showing time in ${tz}`}>{tz.split('/').at(-1)}</span>}
         </div>
+        {agents && (
+          <>
+            {!collapsed && <div className="nav-section">Agent trajectories</div>}
+            <ul className="nav-items" aria-label="Agent trajectories">
+              <li>
+                <button type="button" className={`nav-item${page === 'agent-sessions' ? ' active' : ''}`} title="Sessions"
+                  aria-label="Sessions" aria-current={page === 'agent-sessions' ? 'page' : undefined} onClick={() => onNavigate('agent-sessions')}>
+                  <Icon name="route" />
+                  {!collapsed && <span>Sessions</span>}
+                </button>
+                {!collapsed && (
+                  <ul className="nav-subs">
+                    {AGENT_SUBS.map((s) => (
+                      <li key={s.page}>
+                        <button type="button" className={page === s.page ? 'active' : ''} aria-current={page === s.page ? 'page' : undefined}
+                          onClick={() => onNavigate(s.page)}>{s.label}</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            </ul>
+            {!collapsed && <div className="nav-section">Observability</div>}
+          </>
+        )}
         <ul className="nav-items">
           {ITEMS.map((it) => (
             <li key={it.page}>

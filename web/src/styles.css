@@ -298,7 +298,7 @@ button, input, select { font: inherit; color: inherit; }
 @media (max-width: 720px) {
   .nav { width: 50px; }
   .nav .nav-item > span:not(.avatar), .nav .logo-text, .nav .tz, .nav .user-name, .nav-item .badge { display: none; }
-  .nav .nav-favs, .nav .fav-toggle { display: none; }
+  .nav .nav-favs, .nav .fav-toggle, .nav .nav-subs, .nav .nav-section { display: none; }
   .search-head .row { flex-wrap: wrap; }
   .search-head .sql-field.grow { display: none; }
   .where { flex-basis: 100%; order: 10; }
@@ -330,6 +330,13 @@ body.demo #root { flex: 1; min-height: 0; }
 .nav-favs button:hover { background: var(--hover); color: var(--text); }
 .nav-favs button span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-fav-empty { padding: 2px 6px; }
+
+/* ---------- nav areas: a label per area, and the pages under an item as a short tree */
+.nav-section { padding: 10px 14px 2px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.nav-subs { list-style: none; margin: 1px 0 4px 17px; padding: 0 0 0 10px; border-left: 1px solid var(--border); display: flex; flex-direction: column; gap: 1px; }
+.nav-subs button { display: block; width: 100%; border: 0; background: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; color: var(--text-2); text-align: left; }
+.nav-subs button:hover { background: var(--hover); color: var(--text); }
+.nav-subs button.active { background: var(--selected); color: var(--text); font-weight: 600; }
 
 /* ---------- list pages */
 .list-page { overflow: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
