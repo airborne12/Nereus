@@ -280,6 +280,7 @@ export function searchRowsSql(source: Source, req: SearchRowsRequest): { sql: st
 
 /** The table's columns when SELECT is empty, as ClickStack's OTel sources show them. */
 export function defaultSelect(source: Source): string {
+  if (source.defaultSelect) return source.defaultSelect;
   return source.name === 'traces'
     ? 'timestamp, service_name, status_code, round(duration / 1000, 1), span_name'
     : 'timestamp, service_name, severity_text, body';

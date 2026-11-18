@@ -33,7 +33,9 @@ import {
   traceSql, valuesSql, type Field,
 } from './semantics/search/build.ts';
 import { CompileError, unknownFields } from './semantics/search/compile.ts';
-import { logsSource, metricsSource, rumSource, tracesSource, type Source } from './semantics/search/source.ts';
+import {
+  agentEventsSource, agentMessagesSource, agentSessionsSource, logsSource, metricsSource, rumSource, tracesSource, type Source,
+} from './semantics/search/source.ts';
 import { Doris, configFromEnv } from './db/doris.ts';
 import { type AuthContext, authRoutes, authenticate } from './control/auth/http.ts';
 import { type IngestLimits, IngestKeys, rumRoutes } from './rum/http.ts';
@@ -107,7 +109,10 @@ function send(res: ServerResponse, status: number, body: unknown, headers: Recor
 }
 
 export function sourcesFor(db: string): Record<string, Source> {
-  return { logs: logsSource(db), traces: tracesSource(db), metrics: metricsSource(db) };
+  return {
+    logs: logsSource(db), traces: tracesSource(db), metrics: metricsSource(db),
+    agent_sessions: agentSessionsSource(db), agent_events: agentEventsSource(db), agent_messages: agentMessagesSource(db),
+  };
 }
 
 export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, fetchImpl, webDir }: AppOptions): Server {

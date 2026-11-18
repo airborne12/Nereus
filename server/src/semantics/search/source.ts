@@ -38,6 +38,8 @@ export interface Source {
   /** A bare term that looks like an id also matches this column (pasted trace or span ids). */
   idColumns?: { pattern: RegExp; column: string }[];
   columns: Column[];
+  /** The SELECT list of a search with none; the log columns when absent. */
+  defaultSelect?: string;
 }
 
 const col = (name: string, type: ColumnType, index: IndexKind = 'none', extra: Partial<Column> = {}): Column =>
@@ -186,6 +188,120 @@ export function rumSource(db = 'otel'): Source {
       col('user_agent', 'string'),
       col('message', 'string', 'fulltext'),
       col('attributes', 'variant', 'keyword'),
+    ],
+  };
+}
+
+/**
+ * agent_sessions (schema/003_agent_tables.sql): one row per branch of an agent session; a main
+ * row's counts cover its tree. Its time is the last activity.
+ */
+export function agentSessionsSource(db = 'otel'): Source {
+  return {
+    name: 'agent_sessions',
+    defaultSelect: 'last_event_at, title, steps, tool_errors, first_input',
+    table: `${db}.agent_sessions`,
+    timestampColumn: 'last_event_at',
+    defaultFields: ['title', 'first_input', 'last_output'],
+    attributeColumns: ['config'],
+    aliases: { session: 'session_id', root: 'root_id', parent: 'parent_id', agent: 'agent_name', user: 'user_id', service: 'service_name' },
+    idColumns: [],
+    columns: [
+      col('session_id', 'string'),
+      col('root_id', 'string', 'keyword'),
+      col('parent_id', 'string', 'keyword'),
+      col('parent_seq', 'number'),
+      col('kind', 'string', 'keyword'),
+      col('title', 'string', 'fulltext'),
+      col('agent_name', 'string'),
+      col('runtime', 'string', 'keyword'),
+      col('runtime_version', 'string'),
+      col('service_name', 'string', 'keyword'),
+      col('user_id', 'string', 'keyword'),
+      col('model', 'string', 'keyword'),
+      col('config', 'variant'),
+      col('started_at', 'datetime'),
+      col('last_event_at', 'datetime'),
+      ...['last_seq', 'last_msg_seq', 'turns', 'steps', 'tool_calls', 'tool_errors', 'subagents', 'compactions', 'input_tokens',
+        'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'peak_ctx_tokens', 'safety_risks'].map((n) => col(n, 'number')),
+      col('active_us', 'number', 'none', { unit: 'us' }),
+      col('first_input', 'string', 'fulltext'),
+      col('last_output', 'string', 'fulltext'),
+      col('source', 'string'),
+    ],
+  };
+}
+
+/** agent_events: user inputs, model calls, tool calls, compactions and errors of agent sessions. */
+export function agentEventsSource(db = 'otel'): Source {
+  return {
+    name: 'agent_events',
+    defaultSelect: 'ts, session_id, kind, name, status, resource',
+    table: `${db}.agent_events`,
+    timestampColumn: 'ts',
+    defaultFields: ['name', 'resource'],
+    attributeColumns: ['args', 'attrs'],
+    aliases: { session: 'session_id', tool: 'name', trace: 'trace_id', span: 'span_id' },
+    idColumns: [{ pattern: /^[0-9a-fA-F]{32}$/, column: 'trace_id' }],
+    columns: [
+      col('session_id', 'string'),
+      col('seq', 'number'),
+      col('ts', 'datetime'),
+      col('turn', 'number'),
+      col('step', 'number'),
+      col('kind', 'string', 'keyword'),
+      col('parent_seq', 'number'),
+      col('name', 'string', 'keyword'),
+      col('status', 'string', 'keyword'),
+      col('error', 'string'),
+      col('end_ts', 'datetime'),
+      col('duration_us', 'number', 'none', { unit: 'us' }),
+      col('ttft_us', 'number', 'none', { unit: 'us' }),
+      col('gap_us', 'number', 'none', { unit: 'us' }),
+      col('model', 'string', 'keyword'),
+      col('stop_reason', 'string'),
+      col('request_id', 'string', 'keyword'),
+      ...['attempt', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'ctx_msgs', 'ctx_prefix', 'msg_seq',
+        'result_msg', 'repeat_of'].map((n) => col(n, 'number')),
+      col('ctx_change', 'string'),
+      col('prompt_hash', 'string'),
+      col('tool_call_id', 'string'),
+      col('resource', 'string', 'keyword'),
+      col('args', 'variant', 'keyword'),
+      col('args_hash', 'string'),
+      col('trace_id', 'string', 'keyword'),
+      col('span_id', 'string'),
+      col('attrs', 'variant', 'keyword'),
+    ],
+  };
+}
+
+/** agent_messages: the content blocks of agent sessions, each stored once. */
+export function agentMessagesSource(db = 'otel'): Source {
+  return {
+    name: 'agent_messages',
+    defaultSelect: 'ts, session_id, msg_role, kind, tool_name, text',
+    table: `${db}.agent_messages`,
+    timestampColumn: 'ts',
+    defaultFields: ['text'],
+    attributeColumns: ['payload'],
+    aliases: { session: 'session_id', role: 'msg_role', tool: 'tool_name' },
+    idColumns: [],
+    columns: [
+      col('session_id', 'string'),
+      col('msg_seq', 'number'),
+      col('ts', 'datetime'),
+      col('content_hash', 'string', 'keyword'),
+      col('msg_role', 'string', 'keyword'),
+      col('kind', 'string', 'keyword'),
+      col('api_msg', 'number'),
+      col('event_seq', 'number'),
+      col('tool_name', 'string', 'keyword'),
+      col('tool_call_id', 'string'),
+      col('bytes', 'number'),
+      col('tokens', 'number'),
+      col('text', 'string', 'fulltext'),
+      col('payload', 'variant'),
     ],
   };
 }
