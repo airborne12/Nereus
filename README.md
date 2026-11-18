@@ -228,6 +228,23 @@ Privacy and security:
 - Replays render the recorded DOM in rrweb's iframe sandbox without `allow-scripts`, so recorded
   scripts do not run. The viewer's browser does load the recorded page's images and styles.
 
+## Agent trajectories: importing Claude Code transcripts
+
+Create the agent tables (`schema/apply.sh` applies `schema/003_agent_tables.sql`; `-a` sets their
+retention in days, 365 by default), then import transcripts:
+
+    cd server
+    DORIS_HOST=127.0.0.1 DORIS_PORT=9030 DORIS_DB=otel DORIS_BE_HTTP_URL=http://127.0.0.1:8040 \
+      node src/cli/import-transcripts.ts ~/.claude/projects
+
+Each `<session>.jsonl` becomes a main session; files under `<session>/subagents/` become its
+sub-agent sessions. A file is imported again only when its size or modification time changed
+(`--force` imports regardless). The importer should use its own Doris account that can only load
+the agent tables:
+
+    GRANT LOAD_PRIV ON otel.agent_sessions TO 'nereus_import'@'%';
+    -- likewise agent_events, agent_messages, agent_contexts, agent_prompts; plus SELECT_PRIV on them
+
 ## Scale
 
 On 103M logs and 69M spans (7 days, one BE with 32 cores) the UI's queries take a median of 31 ms
