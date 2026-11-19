@@ -373,6 +373,22 @@ agent's sessions before the memory was updated, and a session holding more than 
 its inferred source, with that share as its score. A memory of fewer than five words is not
 matched. The pages always say whether a source is recorded, inferred or not recorded.
 
+### Trajectory tools for agents (MCP)
+
+An agent that writes memories can read the trajectories itself through two read-only MCP tools on
+the API service: `trajectory_search` (sessions, steps or messages by search words, conditions and a
+time range, as the table pages find them) and `trajectory_read` (one session's turns, one turn, or
+one step). They are served at `/api/agents/mcp` over the Streamable HTTP transport, one JSON-RPC
+message per POST and no stream, and take an API key made on the Team settings page:
+
+    claude mcp add --transport http nereus http://<host>:8090/api/agents/mcp --header "Authorization: Bearer <API key>"
+
+Times without a zone are UTC, as the rows give them. Long text in an answer is shortened with how
+much was left out, and an answer too long for one call comes back as whole rows, turns, model calls
+or output blocks, with `cut.next_offset` to pass as `offset` for the rest.
+
+The agent's calls of these tools are recorded in its own trajectory like any other tool call.
+
 ### Agent trajectory API
 
 Routes under `/api/agents/` (any signed-in user or API key; the Judges writes and tries are for
@@ -400,6 +416,7 @@ query error answers 400.
 | `GET /api/agents/judges/<id>/steps/<session>/<seq>` | Every verdict the judge gave one step, newest version first, and what the model reads for it now |
 | `POST /api/agents/judges/preview` | For a draft `{pick, reads, criterion, model}`: how many steps and sessions it picks, five of them spread over the picked steps with what the model reads, and the estimated input tokens of a run; with `try: true` (admins) the model judges the five, and nothing is stored |
 | `GET /api/agents/memories/<agent>/<scope>/<name>` | One memory, each part encoded as a URI component: its latest version with its fields and sections, its versions (at most 50, without their content), the calls that read or wrote its file (at most 100) and its state: `unjudged` (read since it was written), `unused`, `unrecorded` (a format whose reads are not recorded) or `removed` |
+| `POST /api/agents/mcp` | The MCP endpoint of `trajectory_search` and `trajectory_read`: one JSON-RPC message in, one out (`initialize`, `tools/list`, `tools/call`, `ping`); a notification gets 202, a GET 405 |
 | `POST /api/agents/judges` | Saves a judge `{name, pick, reads, criterion, model, runsOnNew, budget?}` as version 1 and queues a run (admins) |
 | `POST /api/agents/judges/<id>/versions`, `POST /api/agents/judges/<id>/reruns` | A new version `{criterion, model}`, which judges nothing; a rerun `{only, budget?}` (admins): `all` or `violates` for the out-of-date verdicts, `unjudged` for the steps no run of the current version has judged, `failed` for those whose model call failed. A rerun while a run of the judge is open answers 409 |
 
