@@ -1,11 +1,23 @@
 // The events a sequence is made of (spec 8.5), as a common table expression: the user inputs, tool
-// calls, replies that end a turn and compactions of a time range, numbered in the order of their
-// session. `what` names an event as the page does; `target` is what a tool call acts on, or the
-// text of an input or reply.
+// calls, replies that end a turn and compactions of a time range or of some sessions, numbered in
+// the order of their session. `what` names an event as the page does; `target` is what a tool call
+// acts on, or the text of an input or reply.
 
+import { CompileError, sqlString } from '../search/compile.ts';
+import { sessionId } from '../trajectory/session.ts';
 import type { StepKind } from './pattern.ts';
 
-export interface Range { cond: (col: string) => string }
+/** Which events a statement reads, as a condition on `agent_events e`. */
+export interface Scope { events: string }
+
+/** The events of a time range. */
+export const rangeScope = (range: { cond: (col: string) => string }): Scope => ({ events: range.cond('e.ts') });
+
+/** Every event of some sessions, whatever its time. */
+export function sessionScope(ids: readonly string[]): Scope {
+  if (!ids.length) throw new CompileError('no session to read');
+  return { events: `e.session_id IN (${ids.map((id) => sqlString(sessionId(id))).join(', ')})` };
+}
 
 /** The value of `agent_events.kind` for each kind of step. */
 export const EVENT_KIND: Record<StepKind, string> = { call: 'tool_call', user: 'user_input', reply: 'llm_call', compaction: 'compaction' };
@@ -16,11 +28,11 @@ const CALL_TARGET = "coalesce(e.resource, CAST(e.args AS STRING), '')";
 const IN_SEQUENCE = "(e.kind IN ('user_input', 'tool_call', 'compaction') OR (e.kind = 'llm_call' AND e.stop_reason = 'end_turn'))";
 
 /**
- * The expression that numbers the events, named `name`.
+ * The expression that numbers the events of a scope, named `name`.
  * `target` says how much of the target is read: none, that of tool calls, or the text of inputs
  * and replies too, which joins the message blocks.
  */
-export function eventsCtes(db: string, range: Range, name: string, target: 'none' | 'calls' | 'text'): string[] {
+export function eventsCtes(db: string, scope: Scope, name: string, target: 'none' | 'calls' | 'text'): string[] {
   const text = target === 'text';
   const targetSql = target === 'none' ? [] : [text
     ? `CASE e.kind WHEN 'tool_call' THEN ${CALL_TARGET} WHEN 'compaction' THEN '' ELSE coalesce(if(m.kind = 'text', m.text, NULL), '') END AS target`
@@ -34,7 +46,7 @@ export function eventsCtes(db: string, range: Range, name: string, target: 'none
     `  FROM ${db}.agent_events e`,
     ...joins,
     `  WHERE ${IN_SEQUENCE}`,
-    `    AND ${range.cond('e.ts')}`,
+    `    AND ${scope.events}`,
     ')',
   ].join('\n')];
 }

@@ -20,6 +20,8 @@ export interface Step {
   same?: number;
   /** How the event follows the step before; absent on the first step. */
   link?: 'next' | 'later';
+  /** A regular expression the lower-case target matches. Safety rules write it; a request cannot carry one. */
+  re?: string;
 }
 
 export const MAX_STEPS = 6;
