@@ -383,6 +383,10 @@ message per POST and no stream, and take an API key made on the Team settings pa
 
     claude mcp add --transport http nereus http://<host>:8090/api/agents/mcp --header "Authorization: Bearer <API key>"
 
+Times without a zone are UTC, as the rows give them. Long text in an answer is shortened with how
+much was left out, and an answer too long for one call comes back as whole rows, turns, model calls
+or output blocks, with `cut.next_offset` to pass as `offset` for the rest.
+
 The agent's calls of these tools are recorded in its own trajectory like any other tool call.
 
 ### Agent trajectory API

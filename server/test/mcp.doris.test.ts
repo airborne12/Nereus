@@ -82,7 +82,8 @@ test('a search finds a session by its words, and a read answers its turns, a tur
   const whole = await tool('trajectory_read', { session_id: READER_ID });
   assert.deepEqual([whole.sessions.length, whole.turns.length, whole.turns[0].user_input], [1, 1, 'Why does the deploy pipeline take so long on the staging machines?']);
   const turn = await tool('trajectory_read', { session_id: READER_ID, turn: 1 });
-  assert.ok(turn.steps.length >= 2, JSON.stringify(turn.steps).slice(0, 200));
+  assert.ok(turn.steps.length >= 1 && turn.steps.every((g: any) => g.events[0].kind === 'llm_call'), JSON.stringify(turn.steps).slice(0, 300));
+  assert.ok(turn.steps.flatMap((g: any) => g.events).some((e: any) => e.kind === 'tool_call' && e.name === 'Read'), 'each model call comes with its tool calls');
   const steps = await tool('trajectory_search', { table: 'steps', conditions: [`session_id:eq:${READER_ID}`], from: '2026-11-17T00:00:00Z', to: '2026-11-18T00:00:00Z' });
   const step = await tool('trajectory_read', { session_id: READER_ID, seq: Number(steps.rows.at(-1).seq) });
   assert.equal(step.seq, Number(steps.rows.at(-1).seq));

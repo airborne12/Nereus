@@ -557,10 +557,13 @@ As built (MCP tools): the tools are served by the API service at `POST /api/agen
 Streamable HTTP transport without a stream: one JSON-RPC message per request, answered with one
 (`initialize`, `tools/list`, `tools/call`, `ping`) or with 202 for a notification; the server keeps
 no session. Like every route under /api it takes an API key or a session cookie. `trajectory_search`
-runs the statement of the Sessions, Steps or Messages page (7 days ending now unless given, at most
-50 rows); `trajectory_read` answers a session's sessions and turns (at most 200), a turn's request,
-final answer and first 100 steps, or a step's event and output. A wrong argument is a tool error
-whose text says why. A memory's source is still the session its agent recorded or the one inferred;
+runs the statement of the Sessions, Steps or Messages page (7 days ending now unless given, a time
+without a zone in UTC, at most 50 rows); `trajectory_read` answers a session's sessions and turns
+(the main session's first, 200 at a time), a turn's request, final answer and steps (100 model calls
+at a time, each with its tool calls), or a step's event and output, from an `offset`. A string is
+shortened past 4,000 characters with how many were left out, and an answer past 60,000 characters
+is cut by whole items with `cut` giving the offset of the rest. A wrong argument (an unknown one,
+one of the wrong kind, a turn with a seq) is a tool error whose text says why. A memory's source is still the session its agent recorded or the one inferred;
 reading which sessions a memory-writing agent read with these tools is not done yet.
 
 ## 8. Pages
