@@ -1,45 +1,8 @@
+import { get, parse, send } from './api/http.ts';
 import type { Row, Span } from './lib/rows.ts';
 import type { Filter, Language, SourceName } from './lib/state.ts';
 
-export class ApiError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
-/** Called when any request answers 401, so the app can show the login page. */
-let onUnauthorized: () => void = () => {};
-export function setUnauthorizedHandler(f: () => void): void {
-  onUnauthorized = f;
-}
-
-async function parse<T>(res: Response): Promise<T> {
-  // Only a body that is not JSON is tolerated; an abort while reading must stay an abort, or a
-  // superseded request would "succeed" with an empty object.
-  const body = await res.json().catch((e: unknown) => {
-    if (e instanceof Error && e.name === 'AbortError') throw e;
-    return {};
-  });
-  if (res.status === 401) onUnauthorized();
-  if (!res.ok) throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
-  return body as T;
-}
-
-async function get<T>(path: string, params: Record<string, string | number | undefined>, signal?: AbortSignal): Promise<T> {
-  const qs = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) if (v !== undefined) qs.set(k, String(v));
-  return parse<T>(await fetch(`${path}?${qs}`, { signal }));
-}
-
-async function send<T>(method: 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
-  return parse<T>(await fetch(path, {
-    method,
-    headers: body === undefined ? {} : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  }));
-}
+export { ApiError, setUnauthorizedHandler } from './api/http.ts';
 
 export interface User {
   id: number;

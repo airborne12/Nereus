@@ -48,7 +48,7 @@ before(async () => {
   page = await context.newPage();
   secure = await context.newPage();
   await secure.goto(local);
-  await page.goto(base);
+  await page.goto(`${base}/search`);
   await page.getByLabel('Email', { exact: true }).fill('repairs@example.com');
   await page.getByLabel('Password', { exact: true }).fill('repairpass1');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();

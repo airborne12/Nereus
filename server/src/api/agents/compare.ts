@@ -4,14 +4,10 @@
 //   GET /api/agents/compare?a=<session id>&b=<session id>&turn=<n>
 
 import type { ServerResponse } from 'node:http';
-import type { Doris, Row } from '../../db/doris.ts';
+import type { Doris } from '../../db/doris.ts';
 import { CompileError } from '../../semantics/search/compile.ts';
-import { align, compareSql, type StepFacts } from '../../semantics/trajectory/compare.ts';
+import { align, compareSql, turnSide } from '../../semantics/trajectory/compare.ts';
 import { intParam, parsed, run, type Send } from './request.ts';
-
-const facts = (rows: readonly Row[], id: string): StepFacts[] => rows.filter((r) => r.session_id === id).map((r) => ({
-  seq: Number(r.seq), step: Number(r.step), tools: String(r.tools), targets: String(r.targets), failed: Number(r.failed) > 0,
-}));
 
 export async function compare(doris: Doris, db: string, send: Send, res: ServerResponse, url: URL): Promise<boolean> {
   if (url.pathname !== '/api/agents/compare') return false;
@@ -26,9 +22,10 @@ export async function compare(doris: Doris, db: string, send: Send, res: ServerR
     send(res, 404, { error: 'no such session' });
     return true;
   }
-  const pair = steps ? { a: facts(steps, a), b: facts(steps, b) } : null;
+  const pair = steps ? { a: turnSide(steps, a), b: turnSide(steps, b) } : null;
   send(res, 200, {
-    sessions: parsed(sessions!), turns, steps: pair ? { ...pair, rows: align(pair.a, pair.b) } : null, sql: statements, elapsedMs,
+    sessions: parsed(sessions!), turns, sql: statements, elapsedMs,
+    steps: pair ? { a: pair.a.steps, b: pair.b.steps, rows: align(pair.a.steps, pair.b.steps), cuts: { a: pair.a.cuts, b: pair.b.cuts } } : null,
   });
   return true;
 }

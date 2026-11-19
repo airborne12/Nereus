@@ -2,12 +2,16 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compactionSql, sessionId, stepSql, treeSql, turnStepsSql, turnSql, turnsSql } from '../src/semantics/trajectory/session.ts';
+import { compactionSql, marksSql, sessionId, stepSql, treeSql, turnStepsSql, turnSql, turnsSql } from '../src/semantics/trajectory/session.ts';
 
 test('session ids: refused before they reach SQL', () => {
   assert.equal(sessionId('agent-a1b2c3'), 'agent-a1b2c3');
   assert.equal(sessionId('0f0e0d0c-0b0a-4908-8706-050403020100'), '0f0e0d0c-0b0a-4908-8706-050403020100');
   for (const bad of ["x'", 'a b', '', 'x'.repeat(129)]) assert.throws(() => sessionId(bad), /bad session id/);
+});
+
+test('the tree carries what a session is called by and what it ended with', () => {
+  assert.match(treeSql('otel', 'm').sql, /'?safety_risks, first_input, last_output\nFROM otel\.agent_sessions/);
 });
 
 test('the tree of any branch is the tree of its root', () => {
@@ -59,4 +63,23 @@ test('numeric arguments: whole numbers from 0 only, refused before they reach SQ
 
 test('a bad session id is refused on the turns path too', () => {
   assert.throws(() => turnsSql('otel', ["x'"]), /bad session id/);
+});
+
+test('turns also say where their steps start and end and whether every context is exact', () => {
+  const sql = turnsSql('otel', ['m']).sql;
+  assert.match(sql, /min\(if\(e\.kind = 'llm_call', e\.step, NULL\)\) AS first_step/);
+  assert.match(sql, /max\(if\(e\.kind = 'llm_call', e\.seq, NULL\)\) AS last_call/);
+  assert.match(sql, /min\(if\(e\.kind = 'llm_call', if\(e\.ctx_exact, 1, 0\), NULL\)\) AS ctx_exact/);
+  assert.match(sql, /t\.tools, t\.first_step, t\.last_call, t\.ctx_exact\nFROM/);
+});
+
+test('marks: failed and repeated calls, calls that started a sub-agent, and compactions, at most 2000', () => {
+  const sql = marksSql('otel', ['m', 'a']).sql;
+  assert.match(sql, /LEFT JOIN otel\.agent_sessions c ON c\.parent_id = e\.session_id AND c\.parent_seq = e\.seq/);
+  assert.match(sql, /WHERE e\.session_id IN \('m', 'a'\)/);
+  assert.match(sql, /e\.kind = 'compaction' OR \(e\.kind = 'tool_call' AND \(e\.status = 'error' OR e\.repeat_of IS NOT NULL OR c\.session_id IS NOT NULL\)\)/);
+  // The calls that started a sub-agent and the compactions hold the structure of the page: they come first.
+  // One row more than the limit is read, so a cut shows.
+  assert.match(sql, /ORDER BY if\(e\.kind = 'compaction' OR c\.session_id IS NOT NULL, 0, 1\), e\.session_id, e\.seq\nLIMIT 2001$/);
+  assert.throws(() => marksSql('otel', ["m'"]), /bad session id/);
 });

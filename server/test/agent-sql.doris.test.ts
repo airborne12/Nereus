@@ -10,7 +10,7 @@ import { compareSql } from '../src/semantics/trajectory/compare.ts';
 import { conversationSql } from '../src/semantics/trajectory/export.ts';
 import { messagesPage, sessionsPage, stepsPage } from '../src/semantics/trajectory/pages.ts';
 import { type Condition, type Page, type Statement, tableSql, type TableRequest } from '../src/semantics/trajectory/query.ts';
-import { compactionSql, stepSql, treeSql, treeStepsSql, turnSql, turnStepsSql, turnsSql } from '../src/semantics/trajectory/session.ts';
+import { compactionSql, marksSql, stepSql, treeSql, treeStepsSql, turnSql, turnStepsSql, turnsSql } from '../src/semantics/trajectory/session.ts';
 import { applySchemaFile } from './schema-helper.ts';
 
 const enabled = process.env.DORIS_TEST === '1';
@@ -56,7 +56,7 @@ test('session page, compare and exports', { skip: !enabled }, async () => {
   const conv = conversationSql(db, req(), false);
   const peek = conversationSql(db, req(), true);
   await planned([
-    treeSql(db, 'm'), turnsSql(db, ['m', 'a']), treeStepsSql(db, ['m', 'a']), turnStepsSql(db, 'm', 1, 100), turnSql(db, 'm', 1),
+    treeSql(db, 'm'), turnsSql(db, ['m', 'a']), marksSql(db, ['m', 'a']), treeStepsSql(db, ['m', 'a']), turnStepsSql(db, 'm', 1, 100), turnSql(db, 'm', 1),
     s.event, s.input, s.output, s.prompt, c.event, c.blocks, ...compareSql(db, 'm', 'n', 1),
     conv.size, conv.parts, conv.blocks, peek.size, peek.parts, peek.blocks,
   ]);

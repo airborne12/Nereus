@@ -71,3 +71,9 @@ test('conversations: a part of 30000 blocks, each listed twice, de-duplicates in
   assert.equal(lines[0]!.messages.some((m) => m.role === 'system'), false);
   assert.ok(elapsed < 1000, `took ${elapsed.toFixed(0)} ms`);
 });
+
+test('CSV: free text a spreadsheet would run as a formula gets a leading apostrophe; other columns stay raw', () => {
+  const rows = [{ t: '=1+1', n: -5 }, { t: '@x', n: 1 }, { t: '+1,2', n: 2 }, { t: '-rf', n: 3 }, { t: '\tx', n: 4 }, { t: 'a = b', n: 5 }];
+  assert.equal(toCsv(['t', 'n'], rows, new Set(['t'])), "t,n\n'=1+1,-5\n'@x,1\n\"'+1,2\",2\n'-rf,3\n'\tx,4\na = b,5\n");
+  assert.equal(toCsv(['t'], [{ t: '=1+1' }]), 't\n=1+1\n');
+});

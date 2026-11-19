@@ -83,7 +83,7 @@ async function open(qs: string) {
 }
 
 test('first run asks for an admin account, then opens search on Live Tail', async () => {
-  await page.goto(`${base}/`);
+  await page.goto(`${base}/search`);
   await page.getByRole('button', { name: 'Create admin account' }).waitFor();
   await page.getByLabel('Email').fill('admin@example.com');
   await page.getByLabel('Name').fill('Ada Admin');

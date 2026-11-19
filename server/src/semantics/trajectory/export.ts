@@ -16,14 +16,25 @@ export const MAX_EXPORT_BYTES = 128 * 1024 * 1024;
 export const PREVIEW_SESSIONS = 3;
 export const PREVIEW_MESSAGES = 6;
 
-/** One CSV field: quoted when it holds a comma, a quote or a line break; objects as JSON. */
-function field(v: unknown): string {
-  const s = v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+/** Rows in the preview of a CSV export. */
+export const PREVIEW_ROWS = 5;
+
+/** The start of a value a spreadsheet would run as a formula. */
+const FORMULA = /^[=+\-@\t\r]/;
+
+/**
+ * One CSV field: quoted when it holds a comma, a quote or a line break; objects as JSON. Free text
+ * that a spreadsheet would run as a formula gets a leading apostrophe.
+ */
+function field(v: unknown, text: boolean): string {
+  const raw = v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  const s = text && FORMULA.test(raw) ? `'${raw}` : raw;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-export function toCsv(names: readonly string[], rows: readonly Row[]): string {
-  return [names.join(','), ...rows.map((r) => names.map((n) => field(r[n])).join(','))].join('\n') + '\n';
+/** Rows as CSV under their column names; `text` names the columns that hold free text. */
+export function toCsv(names: readonly string[], rows: readonly Row[], text: ReadonlySet<string> = new Set()): string {
+  return [names.join(','), ...rows.map((r) => names.map((n) => field(r[n], text.has(n))).join(','))].join('\n') + '\n';
 }
 
 /**

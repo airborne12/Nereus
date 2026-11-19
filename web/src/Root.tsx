@@ -3,6 +3,7 @@ import * as api from './api.ts';
 import { AppShell, type Favorites, type Page } from './components/AppShell.tsx';
 import { LoginPage } from './components/LoginPage.tsx';
 import { SettingsPage } from './components/SettingsPage.tsx';
+import { AgentsArea } from './pages/agents/AgentsArea.tsx';
 import { AlertsPage } from './pages/AlertsPage.tsx';
 import { ChartExplorerPage } from './pages/ChartExplorerPage.tsx';
 import { DashboardPage, DashboardsPage } from './pages/DashboardsPage.tsx';
@@ -13,7 +14,12 @@ import { SearchPage } from './SearchPage.tsx';
 
 type Auth = { state: 'loading' } | { state: 'setup' } | { state: 'login' } | { state: 'in'; user: api.User };
 
+/** The offline demo has no agent data yet, so it leaves the area out and opens on Search. */
+const AGENTS = import.meta.env.MODE !== 'demo';
+const HOME: Page = AGENTS ? 'agent-sessions' : 'search';
+
 export const PATHS: Record<Page, string> = {
+  'agent-sessions': '/agents/sessions', 'agent-steps': '/agents/steps', 'agent-messages': '/agents/messages',
   search: '/search', saved: '/search/list', chart: '/chart', alerts: '/alerts', sessions: '/sessions',
   'service-map': '/service-map', dashboards: '/dashboards/list', settings: '/team',
 };
@@ -21,9 +27,14 @@ export const PATHS: Record<Page, string> = {
 function route(path: string): { page: Page; dashboard: number | null } {
   const d = /^\/dashboards\/(\d+)$/.exec(path);
   if (d) return { page: 'dashboards', dashboard: Number(d[1]) };
+  // A session and a comparison are opened from the Sessions page and stay under it.
+  if (/^\/agents\/(sessions\/[^/]+|compare)$/.test(path)) return { page: 'agent-sessions', dashboard: null };
   const hit = (Object.entries(PATHS) as [Page, string][]).find(([, p]) => p === path);
-  return { page: hit ? hit[0] : 'search', dashboard: null };
+  return { page: hit ? hit[0] : HOME, dashboard: null };
 }
+
+/** How a page moves to another address: a new history entry, or the current one replaced. */
+export type Go = (url: string, opts?: { replace?: boolean; state?: unknown }) => void;
 
 /** Setup, login, or the app with its navigation, depending on the session and the path. */
 export function Root() {
@@ -56,9 +67,10 @@ export function Root() {
   useEffect(() => { if (auth.state === 'in') loadFavorites(); }, [auth.state, loadFavorites]);
 
   const { page, dashboard } = route(loc.path);
-  const go = (url: string) => {
+  const go: Go = (url, opts) => {
     if (page === 'search') lastSearch.current = window.location.search;
-    window.history.pushState(null, '', url);
+    if (opts?.replace) window.history.replaceState(opts.state ?? window.history.state, '', url);
+    else window.history.pushState(opts?.state ?? null, '', url);
     const u = new URL(url, window.location.origin);
     setLoc({ path: u.pathname, search: u.search });
   };
@@ -70,7 +82,8 @@ export function Root() {
     return <LoginPage key={auth.state} mode={auth.state} onDone={(user) => setAuth({ state: 'in', user })} />;
   }
   let body;
-  if (page === 'search') body = <SearchPage key={loc.search.includes('saved=') ? loc.search : 'search'} go={go} onChanged={loadFavorites} />;
+  if (page.startsWith('agent-')) body = <AgentsArea path={loc.path} search={loc.search} go={go} />;
+  else if (page === 'search') body = <SearchPage key={loc.search.includes('saved=') ? loc.search : 'search'} go={go} onChanged={loadFavorites} />;
   else if (page === 'saved') body = <SavedSearchesPage go={go} onChanged={loadFavorites} />;
   else if (page === 'alerts') body = <AlertsPage go={go} />;
   else if (page === 'chart') body = <ChartExplorerPage key={loc.search} go={go} />;
@@ -80,7 +93,7 @@ export function Root() {
   else if (page === 'sessions') body = <SessionsPage key={loc.search} go={go} />;
   else body = <SettingsPage me={auth.user} />;
   return (
-    <AppShell page={page} user={auth.user} favorites={favorites} onNavigate={navigate} onOpen={go}
+    <AppShell page={page} user={auth.user} favorites={favorites} agents={AGENTS} onHome={() => navigate(HOME)} onNavigate={navigate} onOpen={go}
       onLogout={() => api.auth.logout().finally(() => setAuth({ state: 'login' }))}>
       {body}
     </AppShell>

@@ -3,7 +3,7 @@
 export type IconName =
   | 'table' | 'floppy' | 'chart' | 'bell' | 'laptop' | 'sitemap' | 'grid' | 'settings' | 'collapse' | 'expand'
   | 'play' | 'bolt' | 'code' | 'close' | 'filter' | 'search' | 'copy' | 'plus' | 'minus' | 'columns' | 'wrap' | 'download' | 'pause'
-  | 'chevron-down' | 'chevron-right' | 'pin' | 'maximize' | 'link';
+  | 'chevron-down' | 'chevron-right' | 'pin' | 'maximize' | 'link' | 'route';
 
 const PATHS: Record<IconName, string> = {
   table: 'M3 5h18v14H3zM3 10h18M9 10v9',
@@ -34,6 +34,7 @@ const PATHS: Record<IconName, string> = {
   pin: 'M15 4l5 5-4 1-4 4 1 5-3-3-5 5 5-5-3-3 5 1 4-4z',
   maximize: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   link: 'M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1',
+  route: 'M6 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM18 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6 7v6a4 4 0 0 0 4 4h6M6 12h5',
 };
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {

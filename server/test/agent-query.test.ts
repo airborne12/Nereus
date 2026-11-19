@@ -110,3 +110,13 @@ test('comparisons ne, lt and le and a time-kind condition', () => {
   assert.match(sql, /s\.steps <= 5/);
   assert.match(sql, /s\.started_at >= '2026-11-17 10:00:00\.000'/);
 });
+
+test('Steps rows say what kind of block their output is', () => {
+  assert.match(tableSql(stepsPage('otel'), req(), 'list').rows.sql, /left\(m\.text, 1000\) AS `output`,\n\s+m\.kind AS `output_kind`/);
+});
+
+test('Messages rows say which model call opens them', () => {
+  const sql = tableSql(messagesPage('otel'), req(), 'list').rows.sql;
+  assert.match(sql, /e\.kind AS `event_kind`/);
+  assert.match(sql, /CASE WHEN e\.kind = 'llm_call' THEN e\.seq WHEN e\.kind = 'tool_call' THEN e\.parent_seq END AS `step_seq`/);
+});
