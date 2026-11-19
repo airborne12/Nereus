@@ -2,18 +2,21 @@
 // statements that ran and the elapsed time. Query errors are CompileError and answer 400.
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { User } from '../../control/auth/store.ts';
 import type { Doris } from '../../db/doris.ts';
 import { compare } from './compare.ts';
+import { type JudgeAccess, judgeRoutes } from './judges.ts';
 import type { Send } from './request.ts';
 import { sequenceMatch, sequences } from './sequences.ts';
 import { session } from './session.ts';
 import { tables } from './tables.ts';
 
-export function agentRoutes(o: { doris: Doris; db: string; send: Send }) {
-  async function handle(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
+export function agentRoutes(o: { doris: Doris; db: string; send: Send; judges?: JudgeAccess }) {
+  async function handle(req: IncomingMessage, res: ServerResponse, url: URL, user?: User): Promise<boolean> {
     if (!url.pathname.startsWith('/api/agents/')) return false;
     const { doris, db, send } = o;
-    // The one post: a pattern arrives as a body. It reads only.
+    if (await judgeRoutes(o, req, res, url, user)) return true;
+    // The other post: a pattern arrives as a body. It reads only.
     if (req.method === 'POST') return sequenceMatch(doris, db, send, req, res, url);
     if (req.method !== 'GET') return false;
     if (await tables(doris, db, send, res, url)) return true;
