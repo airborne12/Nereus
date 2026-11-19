@@ -487,9 +487,14 @@ fails is named and stays due; the job goes on with the others and exits with 1. 
 runs from the command line: `node src/cli/run-rules.ts`, with `--all` to run the rules on every
 tree again.
 
+The judge runs keep their own queue, the rows of `judge_runs`, and run from
+`node src/cli/run-judges.ts`, which first queues a run of the new steps of every judge that
+follows new sessions.
+
 A model call that fails is retried with backoff; after the last attempt the step gets `unsure`
-with the error as reason. Every run records its token counts. Model access is configured in
-PostgreSQL; the default model is `claude-haiku-5-5`.
+with the error as reason. Every run records its token counts. The default model is
+`claude-haiku-5-5`. As built, the key is not kept in PostgreSQL: the Anthropic SDK reads it from
+the environment of the command and of the API service.
 
 Memory adapters: Claude Code auto memory (`~/.claude/projects/*/memory/*.md`: frontmatter `name`,
 `description`, `metadata.type`, `originSessionId`, `modified`; `MEMORY.md` is the index and not a
@@ -747,6 +752,45 @@ versions are then marked out of date and still counted, with two actions: rerun 
 rerun only the violating ones, each with its token estimate; the page says that the second finds
 verdicts that no longer hold but not steps that now violate. New sessions are judged with the
 current version.
+
+As built (server side):
+
+- A judged step is a model call, and its subject is `<session_id>:<seq>` of that call. A step is
+  picked when one of its tool calls meets the pick; the target is the call's resource or, failing
+  that, its arguments, and "target contains" is any of its words inside the lower-case target.
+- What the model reads: the user's request of the turn, then the steps near the judged one, each
+  with the assistant's text, its tool calls (tool, target, the arguments when they say more than
+  the target, failed or not) and their results. A text said before is stored once, so a block is
+  found by the event's own `msg_seq` and `result_msg` as well as by `event_seq`. The turn reads at
+  most 30 steps before the judged one; a block is cut at 2,000 characters and the whole at 40,000,
+  the earliest steps going first. The record is wrapped as data the model must not take
+  instructions from, its text is escaped so that it cannot open or close the record's tags, and
+  the criterion is repeated after it. The model answers with a JSON schema: verdict and reason.
+- The current version, the saved versions and the runs are in PostgreSQL; a run copies the versions
+  to `agent_judges` before it judges. A run is also the queue: a runner takes the oldest queued run,
+  or a running one whose runner has been quiet for ten minutes, which then goes on from its counts.
+  A judge has at most one open run, and only the runner that holds a run writes to it; a call ends
+  within about three minutes, so a live runner is not taken over.
+- A run reads 20 steps at a time and judges them four at a time, storing each chunk, and stops
+  before a chunk would take it over its budget of input tokens, estimated from the text and from
+  what calls have taken so far. A refusal, a cut answer, an answer that is not a verdict, a refused
+  request and a call that still fails after the SDK's retries give `unsure` with the reason; a key,
+  permission or model that is wrong fails the run, and so does a chunk in which no call reached the
+  model. A rerun can take the out-of-date verdicts (all or the violating ones), the steps no run of
+  the current version has judged, or those whose model call failed. A judge keeps the budget it
+  was saved with for its runs of new sessions.
+- Saving, changing, rerunning and trying judges are for admins, since they spend model tokens.
+
+As built (pages): Judges is a page of the navigation after Sequences. Its list adds Last verdict
+(the time of the newest verdict) and marks a judge whose last run is queued, running, stopped or
+failed. The form counts the picked steps again shortly after a change and keeps the draft in the
+page, not the address; its templates, models and run budget come from
+`GET /api/agents/judges/templates`, and a count or a try is shown only while the draft still asks
+what it answered. A judge's page keeps its view and its open row in the address; the row opens
+under it, and a view cut at 500 rows says so. The three views are always offered; "Changed by a
+rerun" says so when nothing changed. A run is taken by the command, so the page says when a run is
+queued and that the command takes it. Members see the actions that spend model tokens disabled,
+with the reason; the server still refuses them.
 
 ### 8.8 Memories
 

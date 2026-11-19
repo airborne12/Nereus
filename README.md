@@ -278,10 +278,49 @@ after a rule changed. Two runners can work at once: each takes a lease on a tree
 (`job_leases`) before it works on it, and leaves a tree that another runner finished meanwhile. A
 tree whose run fails is named and stays due; the others still run, and the command exits with 1.
 
+### Judges
+
+A judge asks a model one question about the steps it picks. It picks a step by its tool calls:
+the tool (`any`, `change` for Edit or Write, or a tool's name), words of the target (`a | b` for
+either) and the result. The model reads the user's request of the turn and either the step alone,
+the step and the N steps before it, or the turn up to the step (at most 30 steps before it), and
+answers `violates`, `ok` or `unsure` with a reason. Two criteria ship as templates: a test changed
+to pass instead of fixing the code, and an irreversible command without the user's agreement. The
+models are `claude-haiku-5-5` (the default) and `claude-sonnet-5-5`.
+
+Judges, their versions and their runs are kept in PostgreSQL (`judges`, `judge_versions`,
+`judge_runs`); the verdicts are rows of `agent_judgments` with the events the model read and the
+version that made them, and the runs copy each version to `agent_judges`. Saving a judge queues a
+run of the steps it picks. Changing its criterion or model saves a new version and judges nothing:
+the verdicts of older versions are out of date until a rerun, of all of them or only of the
+violating ones. A rerun can also judge the steps a stopped or failed run left, or judge again the
+steps whose model call failed. A judge can follow new sessions: each run of the command then
+queues a run of the steps it has not judged yet, with the budget the judge was saved with. Runs
+are taken by a command:
+
+    cd server
+    DORIS_HOST=127.0.0.1 DORIS_PORT=9030 DORIS_DB=otel DORIS_BE_HTTP_URL=http://127.0.0.1:8040 \
+      META_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/nereus ANTHROPIC_API_KEY=... node src/cli/run-judges.ts
+
+The key is read by the Anthropic SDK from the environment of the command and of the API service,
+which uses it for a try on a few steps. The model is called four steps at a time, and a run stops
+before such a chunk would take it over its budget of input tokens (2,000,000 unless the request
+gives another), estimated from the text and from what calls have taken so far. A call that still
+fails after the SDK's retries gives an `unsure` verdict that says why; a key, permission or model
+that is wrong fails the run, and so does a chunk of calls none of which reached the model. A call
+ends within about three minutes (60 s an attempt, two retries), well within the ten quiet minutes
+after which another runner may take a run over; a judge has at most one open run, and only the
+runner that holds a run writes to it. For one step the model reads at most 40,000 characters, each
+block cut at 2,000, with the arguments of a call when they say more than its target. The record
+is marked as data, not instructions, and its text is escaped so that it cannot open or close the
+record's own tags. Saving, changing, rerunning and trying judges are for admins. `npm test` skips
+the one test that calls the real model unless `MODEL_TEST=1`.
+
 ### Agent trajectory API
 
-Read-only routes under `/api/agents/` (any signed-in user or API key). Every answer carries the
-statements that ran (`sql`: title and text) and `elapsedMs`; a query error answers 400.
+Routes under `/api/agents/` (any signed-in user or API key; the Judges writes and tries are for
+admins). Every answer carries the statements that ran (`sql`: title and text) and `elapsedMs`; a
+query error answers 400.
 
 | Route | Answers |
 | --- | --- |
@@ -298,6 +337,13 @@ statements that ran (`sql`: title and text) and `elapsedMs`; a query error answe
 | `GET /api/agents/sequences/next?from=&to=&start=&depth=` | What happens next: from every event of one kind (`failed`, `user` or `tool:<name>`), the events that came after it as a tree of at most `depth` columns (2 to 4), each node with how often its path occurs |
 | `GET /api/agents/sequences/tools?from=&to=` | The tools called in the range, most called first |
 | `POST /api/agents/sequences/match` | The places where the steps of a pattern follow one another. The body is `{from, to, pattern, sort, dir, limit, offset}`: `sort` is `time` (the default), `session`, `agent`, `turn`, `span` or `step<n>` for the time of a step, `dir` is `desc` (the default) or `asc`. The answer holds `rows`, one per match with the events of its `steps`, and the counts `matches` and `sessions` |
+| `GET /api/agents/judges` | Every judge with its current version, its last run and the counts of its latest verdicts: steps judged, violations, sessions, out of date |
+| `GET /api/agents/judges/templates` | The criteria a new judge starts from, the models it can use, the default model, and the budget of input tokens of a judge's runs |
+| `GET /api/agents/judges/<id>?view=first\|all\|changed` | One judge: its versions and runs, the counts with `tokensPerStep` to estimate a rerun, and at most 500 rows of the view, with `cut` when it has more: the first violation in each session (the default), the latest verdict of every step, or the steps whose latest verdict differs from the one before it |
+| `GET /api/agents/judges/<id>/steps/<session>/<seq>` | Every verdict the judge gave one step, newest version first, and what the model reads for it now |
+| `POST /api/agents/judges/preview` | For a draft `{pick, reads, criterion, model}`: how many steps and sessions it picks, five of them spread over the picked steps with what the model reads, and the estimated input tokens of a run; with `try: true` (admins) the model judges the five, and nothing is stored |
+| `POST /api/agents/judges` | Saves a judge `{name, pick, reads, criterion, model, runsOnNew, budget?}` as version 1 and queues a run (admins) |
+| `POST /api/agents/judges/<id>/versions`, `POST /api/agents/judges/<id>/reruns` | A new version `{criterion, model}`, which judges nothing; a rerun `{only, budget?}` (admins): `all` or `violates` for the out-of-date verdicts, `unjudged` for the steps no run of the current version has judged, `failed` for those whose model call failed. A rerun while a run of the judge is open answers 409 |
 
 `agent_sessions`, `agent_events`, `agent_messages` and `agent_risks` are also sources of search, charts and alerts
 (`/api/search?source=agent_messages&q=role:assistant AND timeout`).
@@ -364,8 +410,25 @@ each of which can be changed, added or removed, with the three example patterns 
 start from. Below it is a table with one row per match and one column per step. A row opens the
 session with the events of the match marked on its lanes.
 
+**Judges** (`/agents/judges`) lists every judge: Last verdict, Judge, Judges (what it picks),
+Model, Version, Runs on (once, or new sessions too), Steps judged, Violations, Sessions and Out of
+date. **New judge** (`/agents/judges/new`) is a form in five stages: the steps to pick, with a
+live count; what the model reads; the criterion, from a template or one's own, with the model and
+a name; a try on five steps, which shows what the model read and its verdict and stores nothing;
+and the run, with its model calls and estimated input tokens, and where the run would stop when
+the estimate is over its budget. A count or a try is shown only while the draft still asks what it
+answered. A judge's page
+(`/agents/judges/<id>?view=&row=`) shows the same five stages, each tagged "SQL in Doris" or
+"Model, called by Nereus": the criterion with "Change criterion or model" and the versions; the
+stored verdicts with the last run and, when an older version made some, the reruns of all of them
+or of the violating ones, each with its token estimate, and the offers to judge what the last run
+left or the steps whose model call failed; and the three views of the verdicts, which say when they
+are cut at 500 rows. A row opens, right under it, what the model read and every verdict of that
+step, and opens the step in its session. Members see the judges; the actions that spend model
+tokens are disabled for them, with the reason, and the server refuses them.
+
 Browser tests of these pages: `cd web && npm run build && node --test e2e/agents.e2e.ts
-e2e/sequences.e2e.ts e2e/risks.e2e.ts`. They create and drop their own Doris database and need `DORIS_BE_HTTP_URL` and a PostgreSQL for the
+e2e/sequences.e2e.ts e2e/risks.e2e.ts e2e/judges.e2e.ts`. They create and drop their own Doris database and need `DORIS_BE_HTTP_URL` and a PostgreSQL for the
 metadata database, as the server's Doris tests do.
 
 Times of the session page on a large session, taken in headless Chromium against a running

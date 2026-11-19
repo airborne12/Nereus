@@ -41,6 +41,9 @@ import { Doris, configFromEnv } from './db/doris.ts';
 import { type AuthContext, authRoutes, authenticate } from './control/auth/http.ts';
 import { type IngestLimits, IngestKeys, rumRoutes } from './rum/http.ts';
 import { agentRoutes } from './api/agents/routes.ts';
+import type { JudgeAccess } from './api/agents/judges.ts';
+import { JudgeStore } from './control/judges/store.ts';
+import { claudeClient, claudeJudge } from './semantics/judges/model.ts';
 import { AuthError, AuthStore } from './control/auth/store.ts';
 import { metaPoolFromEnv, migrate } from './db/meta.ts';
 
@@ -59,6 +62,8 @@ export interface AppOptions {
   fetchImpl?: typeof fetch;
   /** Directory of the built web UI (web/dist); other paths than /api are served from it. */
   webDir?: string;
+  /** The judges' store and model; without them the Judges routes answer 503. */
+  judges?: JudgeAccess;
 }
 
 const MIME: Record<string, string> = {
@@ -117,11 +122,11 @@ export function sourcesFor(db: string): Record<string, Source> {
   };
 }
 
-export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, fetchImpl, webDir }: AppOptions): Server {
+export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, fetchImpl, webDir, judges }: AppOptions): Server {
   const account = authRoutes(auth, send);
   const rum = rumRoutes({ doris, keys: ingestKeys, source: rumSource(db), send, limits: ingestLimits });
   const contentApi = contentRoutes(content, send, fetchImpl);
-  const agents = agentRoutes({ doris, db, send });
+  const agents = agentRoutes({ doris, db, send, judges });
   const sources = sourcesFor(db);
   const sourceParam = (url: URL): Source => {
     const name = param(url, 'source')!;
@@ -184,7 +189,7 @@ export function createApp({ doris, db, auth, content, ingestKeys, ingestLimits, 
     if (await account.handleAccount(req, res, path, user)) return;
     if (await contentApi(req, res, url, user)) return;
     if (await rum.handle(req, res, url, user, () => searchSpec(url))) return;
-    if (await agents.handle(req, res, url)) return;
+    if (await agents.handle(req, res, url, user)) return;
     if (path === '/api/chart' && req.method === 'POST') {
       const b = await readJson(req);
       const source = sources[String(b.source)];
@@ -304,7 +309,9 @@ if (import.meta.main) {
   const content = new ContentStore(meta);
   const db = process.env.DORIS_DB ?? 'otel';
   new AlertRunner({ store: content, doris, sources: sourcesFor(db), baseUrl: process.env.PUBLIC_URL ?? null }).start();
-  createApp({ doris, db, auth, content, ingestKeys: new IngestKeys(meta), webDir }).listen(port, () => {
+  // The model's key comes from the environment (ANTHROPIC_API_KEY), as the SDK reads it.
+  const judges = { store: new JudgeStore(meta), model: claudeJudge(claudeClient()) };
+  createApp({ doris, db, auth, content, ingestKeys: new IngestKeys(meta), webDir, judges }).listen(port, () => {
     console.log(`nereus server listening on :${port}`);
   });
 }

@@ -23,10 +23,18 @@ after(async () => {
 
 const columns = async (table: string) => (await doris.query(`DESC ${db}.${table}`)).map((r) => String(r.Field));
 
-test('six unique-key tables with the spec columns', { skip: !enabled }, async () => {
+test('eight unique-key tables with the spec columns', { skip: !enabled }, async () => {
   assert.deepEqual((await doris.query(`SHOW TABLES FROM ${db}`)).map((r) => String(Object.values(r)[0])).sort(),
-    ['agent_contexts', 'agent_events', 'agent_messages', 'agent_prompts', 'agent_risks', 'agent_sessions']);
+    ['agent_contexts', 'agent_events', 'agent_judges', 'agent_judgments', 'agent_messages', 'agent_prompts', 'agent_risks', 'agent_sessions']);
   assert.deepEqual((await columns('agent_risks')), ['session_id', 'rule', 'first_seq', 'rule_version', 'rule_name', 'root_id', 'ts', 'turn', 'events', 'steps', 'what', 'why', 'found_at']);
+  assert.deepEqual((await columns('agent_judges')), ['judge', 'version', 'name', 'form', 'pick', 'reads', 'criterion', 'model', 'created_at', 'created_by']);
+  assert.deepEqual((await columns('agent_judgments')), [
+    'judge', 'subject', 'judge_version', 'version', 'session_id', 'seq', 'verdict', 'state', 'evidence', 'prev_version',
+    'reason', 'input_seqs', 'input_hash', 'model', 'input_tokens', 'output_tokens', 'judged_at',
+  ]);
+  const judgments = String(Object.values((await doris.query(`SHOW CREATE TABLE ${db}.agent_judgments`))[0]!)[1]);
+  assert.match(judgments, /UNIQUE KEY\(`judge`, `subject`, `judge_version`, `version`\)/);
+  assert.match(judgments, /DISTRIBUTED BY HASH\(`subject`\)/);
   assert.deepEqual((await columns('agent_contexts')), ['session_id', 'seq', 'rel', 'pos', 'ts', 'from_msg', 'to_msg']);
   assert.ok((await columns('agent_messages')).includes('msg_role'));
   assert.ok((await columns('agent_prompts')).includes('system_text'));
