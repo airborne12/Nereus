@@ -1,4 +1,4 @@
-// An independent computation for the sequence tests on Doris (spec 11). The events are read back
+// An independent computation for the sequence and rule tests on Doris (spec 11). The events are read back
 // with a plain statement and matched here by a loop. What an input or a reply says is taken from
 // the transcript files themselves, not from the stored blocks, so a text that the import lost or
 // attached to the wrong event shows as a difference.
@@ -8,7 +8,7 @@ import { basename, join } from 'node:path';
 import type { Doris } from '../src/db/doris.ts';
 import type { Step, StepKind } from '../src/semantics/sequences/pattern.ts';
 
-export interface Ev { session_id: string; seq: number; ts: string; kind: StepKind; name: string; status: string; target: string }
+export interface Ev { session_id: string; seq: number; ts: string; turn: number; kind: StepKind; name: string; status: string; target: string }
 /** What a session says in its transcript, in order: the user's inputs and the texts of the replies that end a turn. */
 export interface Spoken { inputs: string[]; replies: string[] }
 
@@ -39,7 +39,7 @@ export function spoken(dir: string): Map<string, Spoken> {
 
 /** The events of every session in order. A call's target comes from its event; an input's and a reply's from the transcript. */
 export async function readEvents(doris: Doris, db: string, said: ReadonlyMap<string, Spoken>): Promise<Ev[]> {
-  const rows = (await doris.query(`SELECT session_id, seq, ts, kind, name, status, resource, CAST(args AS STRING) AS args, stop_reason FROM ${db}.agent_events ORDER BY session_id, seq`))
+  const rows = (await doris.query(`SELECT session_id, seq, ts, turn, kind, name, status, resource, CAST(args AS STRING) AS args, stop_reason FROM ${db}.agent_events ORDER BY session_id, seq`))
     .filter((e) => e.kind === 'user_input' || e.kind === 'tool_call' || e.kind === 'compaction' || (e.kind === 'llm_call' && e.stop_reason === 'end_turn'));
   const sessions = [...new Set(rows.map((e) => String(e.session_id)))];
   return sessions.flatMap((id) => {
@@ -51,7 +51,7 @@ export async function readEvents(doris: Doris, db: string, said: ReadonlyMap<str
     return mine.map((e): Ev => {
       const target = e.kind === 'tool_call' ? String(e.resource ?? e.args ?? '') : e.kind === 'compaction' ? ''
         : e.kind === 'user_input' ? words.inputs[inputs.indexOf(e)]! : words.replies[replies.indexOf(e)]!;
-      return { session_id: id, seq: Number(e.seq), ts: String(e.ts), kind: KIND[String(e.kind)]!, name: String(e.name ?? ''), status: String(e.status ?? ''), target };
+      return { session_id: id, seq: Number(e.seq), ts: String(e.ts), turn: Number(e.turn), kind: KIND[String(e.kind)]!, name: String(e.name ?? ''), status: String(e.status ?? ''), target };
     });
   });
 }
@@ -66,6 +66,7 @@ export const meets = (s: Step, e: Ev, taken: readonly Ev[]): boolean => s.kind =
   && (!s.status || e.status === (s.status === 'failed' ? 'error' : 'ok'))
   && (!s.has || e.target.toLowerCase().includes(s.has))
   && (!s.any || s.any.some((w) => e.target.toLowerCase().includes(w)))
+  && (!s.re || new RegExp(s.re).test(e.target.toLowerCase()))
   && (!s.same || (e.target !== '' && e.target === taken[s.same - 1]!.target));
 
 /** The matches in one session: every event that meets step 1 starts at most one, each further step takes the nearest event. */

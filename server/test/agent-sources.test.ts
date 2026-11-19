@@ -7,8 +7,14 @@ import { sourcesFor } from '../src/server.ts';
 
 const range = { from: '2026-11-17 00:00:00', to: '2026-11-18 00:00:00' };
 
-test('sessions, events and messages are registered beside logs, traces and metrics', () => {
-  assert.deepEqual(Object.keys(sourcesFor('otel')), ['logs', 'traces', 'metrics', 'agent_sessions', 'agent_events', 'agent_messages']);
+test('sessions, events, messages and risks are registered beside logs, traces and metrics', () => {
+  assert.deepEqual(Object.keys(sourcesFor('otel')), ['logs', 'traces', 'metrics', 'agent_sessions', 'agent_events', 'agent_messages', 'agent_risks']);
+});
+
+test('risks: a bare word searches what happened and the rule', () => {
+  const { sql } = searchRowsSql(sourcesFor('otel').agent_risks!, { ...range, where: 'curl AND rule:exfil' });
+  assert.match(sql, /FROM otel\.agent_risks WHERE ts >= /);
+  assert.match(sql, /search\('\(\(what:curl OR rule_name:curl\) AND rule:exfil\)'\)/);
 });
 
 test('the search language on agent messages: role is msg_role, a bare word searches the text', () => {

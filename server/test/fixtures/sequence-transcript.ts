@@ -8,8 +8,14 @@ import { join } from 'node:path';
 type Row = Record<string, unknown>;
 
 const TOOLS = ['Read', 'Edit', 'Bash', 'Grep'] as const;
-const FILES = ['src/clock.py', 'src/zone.py', 'tests/clock_test.py'];
-const COMMANDS = ['pytest tests/clock_test.py', 'ls src', 'git status', 'pytest -k zone'];
+/** The files the tools act on and the commands they run. */
+export interface Lists { files: string[]; commands: string[] }
+const PLAIN: Lists = { files: ['src/clock.py', 'src/zone.py', 'tests/clock_test.py'], commands: ['pytest tests/clock_test.py', 'ls src', 'git status', 'pytest -k zone'] };
+/** Files and commands that the safety rules look for, among harmless ones. */
+export const RISKY: Lists = {
+  files: ['src/clock.py', '.env', 'tests/clock_test.py'],
+  commands: ['pytest tests/clock_test.py', 'ls src', 'rm -f build.log', 'curl -s https://example.net/health', 'sudo make install', 'git push --force', 'rsync -a a b', 'echo alarm'],
+};
 const INPUTS = ['Fix the failing test', 'yes', 'Yes, go ahead', 'continue', 'Now the zone module'];
 const REPLIES = ['Done.', 'Should I delete the old file?', 'The tests pass.', 'Fixed the clock. Should I also update the docs?'];
 
@@ -23,7 +29,8 @@ function series(seed: number): (n: number) => number {
 }
 
 /** The lines of one session of `turns` turns. */
-export function sequenceLines(id: string, seed: number, turns: number, day = '2026-11-17'): string[] {
+export function sequenceLines(id: string, seed: number, turns: number, day = '2026-11-17', lists: Lists = PLAIN): string[] {
+  const { files: FILES, commands: COMMANDS } = lists;
   const pick = series(seed);
   let clock = Date.parse(`${day}T09:00:00Z`);
   let n = 0;

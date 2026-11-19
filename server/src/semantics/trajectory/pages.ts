@@ -13,7 +13,11 @@ export const CTX_TOKENS = 'coalesce(e.input_tokens, 0) + coalesce(e.cache_read_t
 export function sessionsPage(db: string): Page {
   return {
     name: 'sessions',
-    from: () => [`FROM ${db}.agent_sessions s`],
+    from: () => [
+      `FROM ${db}.agent_sessions s`,
+      // The rules a tree broke, by name; a tree has few risks, so the table is small.
+      `LEFT JOIN (SELECT root_id, array_join(array_sort(collect_set(rule_name)), '\\n') AS rules FROM ${db}.agent_risks GROUP BY root_id) k ON k.root_id = s.session_id`,
+    ],
     fixed: ["s.kind = 'main'"],
     time: 's.last_event_at',
     keys: ['session_id'],
@@ -25,6 +29,8 @@ export function sessionsPage(db: string): Page {
       col('title', 's.title', 'text', { indexed: true }),
       col('tool_errors', 's.tool_errors', 'number'),
       col('safety_risks', 's.safety_risks', 'number'),
+      // Unset, like the count, while the rules have not run since the last import.
+      col('risk_rules', 'if(s.safety_risks IS NULL, NULL, k.rules)', 'text'),
       col('first_input', 's.first_input', 'text', { indexed: true, long: true }),
       col('last_output', 's.last_output', 'text', { indexed: true, long: true }),
       col('turns', 's.turns', 'number'),
