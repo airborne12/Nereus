@@ -3,11 +3,12 @@
 export type IconName =
   | 'table' | 'floppy' | 'chart' | 'bell' | 'laptop' | 'sitemap' | 'grid' | 'settings' | 'collapse' | 'expand'
   | 'play' | 'bolt' | 'code' | 'close' | 'filter' | 'search' | 'copy' | 'plus' | 'minus' | 'columns' | 'wrap' | 'download' | 'pause'
-  | 'chevron-down' | 'chevron-right' | 'pin' | 'maximize' | 'link' | 'route' | 'sequence';
+  | 'chevron-down' | 'chevron-right' | 'pin' | 'maximize' | 'link' | 'route' | 'sequence' | 'judge';
 
 const PATHS: Record<IconName, string> = {
   table: 'M3 5h18v14H3zM3 10h18M9 10v9',
   sequence: 'M3 7h4v4H3zM10 13h4v4h-4zM17 7h4v4h-4zM7 9h2l1 4M14 15h2l1-4',
+  judge: 'M12 4v16M5 20h14M6 7h12M6 7l-3 6a3 3 0 0 0 6 0zM18 7l-3 6a3 3 0 0 0 6 0z',
   floppy: 'M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6',
   chart: 'M4 19h16M7 16l3-5 3 3 4-7',
   bell: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0',

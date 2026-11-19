@@ -19,7 +19,7 @@ const AGENTS = import.meta.env.MODE !== 'demo';
 const HOME: Page = AGENTS ? 'agent-sessions' : 'search';
 
 export const PATHS: Record<Page, string> = {
-  'agent-sessions': '/agents/sessions', 'agent-steps': '/agents/steps', 'agent-messages': '/agents/messages', 'agent-risks': '/agents/risks', 'agent-sequences': '/agents/sequences',
+  'agent-sessions': '/agents/sessions', 'agent-steps': '/agents/steps', 'agent-messages': '/agents/messages', 'agent-risks': '/agents/risks', 'agent-sequences': '/agents/sequences', 'agent-judges': '/agents/judges',
   search: '/search', saved: '/search/list', chart: '/chart', alerts: '/alerts', sessions: '/sessions',
   'service-map': '/service-map', dashboards: '/dashboards/list', settings: '/team',
 };
@@ -29,6 +29,8 @@ function route(path: string): { page: Page; dashboard: number | null } {
   if (d) return { page: 'dashboards', dashboard: Number(d[1]) };
   // A session and a comparison are opened from the Sessions page and stay under it.
   if (/^\/agents\/(sessions\/[^/]+|compare)$/.test(path)) return { page: 'agent-sessions', dashboard: null };
+  // A judge and the form of a new one stay under Judges.
+  if (/^\/agents\/judges\/[^/]+$/.test(path)) return { page: 'agent-judges', dashboard: null };
   const hit = (Object.entries(PATHS) as [Page, string][]).find(([, p]) => p === path);
   return { page: hit ? hit[0] : HOME, dashboard: null };
 }

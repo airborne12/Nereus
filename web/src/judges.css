@@ -1,0 +1,78 @@
+/* Judges: a list of judges, a judge's plan as five stages with its verdicts, and the form of a new judge.
+   Colours come from the tokens of styles.css and agents.css, and two of their own for "does not violate". */
+:root { --jg-ok: #1f7a43; --jg-ok-soft: #e6f4ec; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --jg-ok: #6fcf97; --jg-ok-soft: #17301f; }
+}
+:root[data-theme="dark"] { --jg-ok: #6fcf97; --jg-ok-soft: #17301f; }
+
+.jg-th { display: block; padding: 6px 10px; color: var(--text-2); font-size: 11.5px; font-weight: 500; }
+.jg-row { cursor: pointer; }
+.jg-row:hover td { background: var(--selected); }
+.jg-row.sel td { background: var(--selected); box-shadow: inset 0 0 0 0 var(--accent); }
+.jg-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.jg-note { margin-left: 8px; color: var(--ag-warn); font-size: 11.5px; }
+.jg-stale, .jg-ver.stale { color: var(--ag-warn); font-weight: 600; }
+.jg-ver { font: 11.5px var(--mono); color: var(--text-2); white-space: nowrap; }
+
+.jg-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px 24px; }
+.jg-plan { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 10px; max-width: 980px; }
+.jg-stage { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.jg-no { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--panel); border: 1px solid var(--border); font-size: 12px; font-weight: 600; }
+.jg-stage h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 2px 0 6px; font-size: 13px; font-weight: 600; }
+.jg-stage p { margin: 4px 0; }
+.jg-where { padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; }
+.jg-where.doris { background: var(--ag-only); color: var(--ag-ctx); }
+.jg-where.model { background: var(--ag-warn-soft); color: var(--ag-warn); }
+.jg-criterion { font-size: 13px; line-height: 1.5; }
+
+.jg-verdict { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.jg-verdict.violates { background: var(--ag-bad-soft); color: var(--ag-bad); }
+.jg-verdict.ok { background: var(--jg-ok-soft); color: var(--jg-ok); }
+.jg-verdict.unsure { background: var(--panel); color: var(--text-2); border: 1px solid var(--border); }
+
+.jg-row label, .jg-form label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); }
+.jg-stage .jg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 4px 0; }
+.jg-full { display: flex !important; flex-direction: column; align-items: stretch !important; gap: 4px; margin-top: 8px; }
+.jg-full input, .jg-full textarea { width: 100%; box-sizing: border-box; font: inherit; }
+.jg-radio { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.jg-radio input[type="number"] { width: 48px; }
+.jg-count { font-weight: 600; color: var(--text); }
+.jg-stage button, .jg-link { padding: 3px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); font-size: 12.5px; cursor: pointer; }
+.jg-stage button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.jg-stage button.go { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+.jg-stage button:disabled { opacity: 0.5; cursor: not-allowed; }
+.jg-link, .jg-stage .jg-link { border: 0; padding: 0; background: none; color: var(--accent); }
+.jg-link:hover, .jg-stage .jg-link:hover:not(:disabled) { text-decoration: underline; color: var(--accent); }
+/* On a narrow window a field takes the room its stage has, never more. */
+.jg-stage .jg-row label { flex-wrap: wrap; max-width: 100%; }
+.jg-stage .jg-row label > input:not([type]), .jg-stage .jg-row label > select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
+.jg-seg { display: inline-flex; flex-wrap: wrap; gap: 0; }
+.jg-seg button { border-radius: 0; margin-left: -1px; }
+.jg-seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.jg-seg button:last-child { border-radius: 0 6px 6px 0; }
+.jg-seg button[aria-pressed="true"] { background: var(--selected); border-color: var(--accent); color: var(--accent); }
+
+.jg-staled { margin-top: 8px; padding: 8px 12px; border: 1px solid var(--ag-warn); border-radius: 6px; background: var(--ag-warn-soft); }
+.jg-staled p { margin: 4px 0; }
+.jg-opt { display: inline-flex; align-items: center; gap: 8px; }
+.jg-run b { color: var(--text); }
+.jg-note-bar { margin: 8px 16px 0; padding: 6px 12px; border-radius: 6px; background: var(--ag-only); color: var(--text); }
+.jg-versions { margin-top: 8px; max-width: 760px; }
+.jg-verdicts td.jg-reason { white-space: normal; min-width: 260px; max-width: 640px; }
+.jg-verdicts td.jg-step { white-space: normal; min-width: 200px; max-width: 420px; }
+.jg-verdicts td.jg-step code { overflow-wrap: anywhere; }
+.jg-hint { padding: 12px 0; }
+
+.jg-detail { margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); max-width: 980px; }
+.jg-detail h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.jg-why { margin: 6px 0; line-height: 1.5; }
+.jg-record { margin: 6px 0; }
+.jg-asked { margin: 0 0 6px; white-space: pre-wrap; }
+.jg-asked b { display: block; color: var(--text-2); font-size: 11.5px; font-weight: 500; }
+.jg-record ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.jg-record li { padding: 4px 8px; border-radius: 6px; }
+.jg-record li.judged { background: var(--ag-hit); }
+.jg-record code { display: block; font: 12px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.jg-mark { float: right; font-size: 11px; color: var(--ag-warn); font-weight: 600; }
+.jg-try { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }

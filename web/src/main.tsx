@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Root } from './Root.tsx';
 import './styles.css';
 import './agents.css';
+import './judges.css';
 
 function render() {
   createRoot(document.getElementById('root')!).render(
