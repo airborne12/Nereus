@@ -331,6 +331,15 @@ does not reach the model is not stored: the command names it and the risk is tri
 next pass. Each judge is taken under a lease that is renewed after every few calls, so two runners
 do not judge the same rule.
 
+Last, the command judges whether the memories still hold (the validity fold). Each later session
+that read a memory's file with the Read tool is one more piece of evidence; the model reads the
+memory, what was known of it before, and the turn of that session from the step that read it, and
+answers whether the session supports it, conflicts with it or has no bearing on it, and the state
+after: holds, doubt or outdated. The reads of a memory are judged one after another, oldest first,
+under a lease per memory; a new version of a memory starts again from "holds as written".
+`MEMORY_JUDGE_BUDGET` caps the input tokens of this pass (100,000 unless set; 0 skips it); a call
+that does not reach the model leaves that memory's later reads for the next pass.
+
 ### Memories
 
 Nereus captures the memories agents keep and does not write them. A capture reads Claude Code auto
@@ -473,13 +482,16 @@ tokens are disabled for them, with the reason, and the server refuses them.
 
 **Memories** (`/agents/memories`) lists the latest version of every memory still kept: Updated,
 Agent, Scope, Memory (name and description), Kind, Still valid and Source session. It opens on the
-past 30 days, since a memory is updated seldom. Still valid is
-"Not used since written" until a session reads the memory's file again, "Not judged yet" after,
-and "Use not recorded" for Gemini CLI, which loads its memories whole into every session. Source
+past 30 days, since a memory is updated seldom. Still valid is the latest state of the validity
+fold (Holds, In doubt, Out of date); before it has judged a read, "Not used since written" until a
+session reads the memory's file again and "Not judged yet" after; and "Use not recorded" for
+Gemini CLI, which loads its memories whole into every session. Source
 session is the recorded session, "inferred · N % of words", or "Not recorded"; a session opens.
 A memory's page (`/agents/memories/<agent>/<scope>/<name>`) has its fields with where the agent
-keeps each, whether it is still used with the calls that read or wrote its file (each opens its
-step), its content by its own sections, and its versions. A session that wrote a memory says so in
+keeps each, whether it still holds with one row per update of its state (time, version, the
+session, which opens the step that read it, the evidence, the state after and why) and the calls
+that read or wrote its file (each opens its step), its content by its own sections, and its
+versions. A session that wrote a memory says so in
 its header ("Wrote memory <name>").
 
 Browser tests of these pages: `cd web && npm run build && node --test e2e/agents.e2e.ts
