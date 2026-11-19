@@ -28,6 +28,7 @@ const RULES: { from: RegExp; banned: RegExp; why: string }[] = [
   { from: /^semantics\//, banned: /^(control|rum|cli|api|jobs)\/|^server\.ts$/, why: 'semantics/ does not call upwards' },
   { from: /^semantics\/(trajectory|adapters)\//, banned: /^db\//, why: 'the normaliser and adapters do no I/O' },
   { from: /^api\//, banned: /^(cli|jobs)\/|^server\.ts$/, why: 'api/ is wired by server.ts, not the other way round' },
+  { from: /^jobs\//, banned: /^(api|cli)\/|^server\.ts$/, why: 'jobs/ is run by a command, not the other way round' },
 ];
 
 export function violations(graph: Map<string, string[]>): string[] {
@@ -36,11 +37,13 @@ export function violations(graph: Map<string, string[]>): string[] {
 }
 
 test('the rules catch an upward import', () => {
-  const g = new Map([['db/doris.ts', ['semantics/search/build.ts']], ['semantics/trajectory/normalise.ts', ['db/doris.ts']], ['rum/http.ts', ['db/doris.ts']], ['api/agents/routes.ts', ['server.ts']]]);
+  const g = new Map([['db/doris.ts', ['semantics/search/build.ts']], ['semantics/trajectory/normalise.ts', ['db/doris.ts']], ['rum/http.ts', ['db/doris.ts']], ['api/agents/routes.ts', ['server.ts']],
+    ['jobs/rules.ts', ['semantics/sequences/rules.ts', 'db/doris.ts', 'cli/run-rules.ts']]]);
   assert.deepEqual(violations(g), [
     'db/doris.ts imports semantics/search/build.ts: db/ is the bottom layer',
     'semantics/trajectory/normalise.ts imports db/doris.ts: the normaliser and adapters do no I/O',
     'api/agents/routes.ts imports server.ts: api/ is wired by server.ts, not the other way round',
+    'jobs/rules.ts imports cli/run-rules.ts: jobs/ is run by a command, not the other way round',
   ]);
 });
 

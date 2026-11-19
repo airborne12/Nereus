@@ -183,3 +183,32 @@ PROPERTIES (
     "enable_unique_key_merge_on_write" = "true",
     "compression" = "zstd"
 );
+
+-- Risks the safety rules found (section 5.6): one row per place where a session broke a rule.
+-- Written by the rules job, which replaces the rows of a tree each time it runs on it.
+CREATE TABLE IF NOT EXISTS ${DB}.agent_risks (
+    session_id    VARCHAR(128) NOT NULL,
+    rule          VARCHAR(64)  NOT NULL,
+    first_seq     BIGINT       NOT NULL,
+    rule_version  INT          NOT NULL,
+    rule_name     STRING,
+    root_id       VARCHAR(128) NOT NULL,
+    ts            DATETIME(6),
+    turn          INT,
+    events        ARRAY<BIGINT>,
+    steps         VARIANT,
+    what          STRING,
+    why           STRING,
+    found_at      DATETIME(6),
+    INDEX idx_rule (rule) USING INVERTED,
+    INDEX idx_root_id (root_id) USING INVERTED,
+    INDEX idx_rule_name (rule_name) USING INVERTED PROPERTIES ("parser" = "unicode", "lower_case" = "true", "support_phrase" = "true"),
+    INDEX idx_what (what) USING INVERTED PROPERTIES ("parser" = "unicode", "lower_case" = "true", "support_phrase" = "true")
+)
+UNIQUE KEY (session_id, rule, first_seq)
+DISTRIBUTED BY HASH (session_id) BUCKETS AUTO
+PROPERTIES (
+    "replication_num" = "${REPLICATION_NUM}",
+    "enable_unique_key_merge_on_write" = "true",
+    "compression" = "zstd"
+);
