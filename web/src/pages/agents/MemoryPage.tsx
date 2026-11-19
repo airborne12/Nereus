@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import * as api from '../../api/memories.ts';
 import { SqlDialog } from '../../components/agents/SqlDialog.tsx';
 import { stamp, text, timeOf } from '../../lib/agents/format.ts';
-import { type Kept, memoryUrl, sourceOf, stateLabel, stateNote, stateTone, whereKept } from '../../lib/agents/memories.ts';
+import { evidenceLabel, judgedBy, type Kept, memoryUrl, sourceOf, stateLabel, stateNote, stateTone, whereKept } from '../../lib/agents/memories.ts';
 import { sessionUrl } from '../../lib/agents/pages.ts';
 import { stepKey } from '../../lib/agents/select.ts';
 import type { Go } from '../../Root.tsx';
@@ -61,7 +61,23 @@ export function MemoryPage({ memoryRef: r, go }: { memoryRef: api.MemoryRef; go:
           </table>
           <section className="mem-valid" aria-label="Still valid?">
             <h2>Still valid?</h2>
-            <div className={`mem-state ${tone}`}><b>{stateLabel(data.state)}</b><p>{stateNote(data.state, r.agent)}</p></div>
+            <div className={`mem-state ${tone}`}>
+              <b>{stateLabel(data.state)}</b><p>{stateNote(data.state, r.agent)}</p>
+              {judgedBy(data.history) && <p className="mem-judged">{judgedBy(data.history)}</p>}
+            </div>
+            {data.history.length > 0 && <h3>How its state changed</h3>}
+            {data.history.length > 0 && (
+              <table className="ag-table mem-history" aria-label="Updates">
+                <thead><tr>{['Time', 'Version', 'Session', 'Evidence', 'Then', 'Why'].map((h) => <th key={h}><span className="jg-th">{h}</span></th>)}</tr></thead>
+                <tbody>{data.history.map((h) => (
+                  <tr key={text(h.version)} onClick={() => go(sessionUrl(text(h.root_id) || text(h.session_id), stepKey(text(h.session_id), Number(h.seq))), { state: back })}>
+                    <td className="ag-time">{when(h.judged_at)}</td><td className="num">{text(h.version)}</td><td>{text(h.title) || text(h.session_id)}</td>
+                    <td>{evidenceLabel(h.evidence)}</td><td>{h.state ? stateLabel(h.state) : 'Unchanged'}</td><td>{text(h.reason)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+            {data.uses.length > 0 && <h3>Calls on its file</h3>}
             {data.uses.length > 0 && (
               <table className="ag-table mem-uses" aria-label="Sessions that read or wrote it">
                 <thead><tr><th><span className="jg-th">Time</span></th><th><span className="jg-th">Session</span></th><th><span className="jg-th">Call</span></th></tr></thead>

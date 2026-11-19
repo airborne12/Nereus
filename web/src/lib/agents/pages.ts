@@ -138,7 +138,7 @@ export const MEMORIES: PageDef = {
     col('scope', 'Scope', 'text', true),
     { ...col('name', 'Memory', 'text', true), fill: true },
     col('kind', 'Kind', 'enum', true),
-    col('still_valid', 'Still valid', 'enum', true, ['unjudged', 'unused', 'unrecorded']),
+    col('still_valid', 'Still valid', 'enum', true, ['holds', 'doubt', 'outdated', 'unjudged', 'unused', 'unrecorded']),
     col('source_session_id', 'Source session', 'text', true),
     col('description', 'Description', 'text', false),
     col('source_kind', 'Source', 'enum', false, ['recorded', 'inferred', 'none']),

@@ -832,6 +832,24 @@ its session. A memory's page lists the Read, Write and Edit calls on its file, n
 opening its step, and its versions; "Wrote memory <name>" on a session's header comes from a
 recorded source or a Write or Edit call of the tree on the memory's file.
 
+As built (validity fold): the judge `memory-validity`, version 1, its criterion in code, follows
+each version of a memory: its subject is the md5 of the memory's agent, scope and name with the
+start of its content hash, so a new version starts again from "holds as written". The run-judges
+command judges, after the risks, each Read call of a memory's file after the memory's latest
+update (or after the capture that still saw the version before, when that is later) in a turn that
+is over (a later turn exists, or the session has been quiet for ten minutes) that the judge has not
+judged, oldest first, one after another per memory and under a lease per memory, which drops the
+reads another runner judged since the list was read, within its own budget (`MEMORY_JUDGE_BUDGET`, 100,000 input tokens by default; 0 turns
+it off). The model reads the memory, the state so far with its reason, and the turn of the read
+from the model call that read it (at most 30 steps after it, the request of the turn always, the
+last steps left out first beyond 40,000 characters), and answers evidence (supports, conflicts,
+none), the state after (holds, doubt, outdated) and why, with a JSON schema. A row of
+agent_judgments keeps the state, the evidence, the version it started from and the model call that
+read the memory (`seq`); a call that does not reach the model is not stored, and the memory's later
+reads wait for the next pass; an answer that is not an update is stored as no judgment (verdict
+`unsure`, no state, why), and the state stays as it was. Still valid on the pages is the latest
+state when there is one, and a memory's page names the judge version and the model.
+
 A memory's page: its fields in a table with "where <agent> keeps it" for each; "Still valid?": the
 current state (Holds, In doubt, Out of date, Not used since written, Use not recorded) and one row
 per update (Time, Version, New session linked to the step that read the memory, Supports /
