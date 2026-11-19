@@ -45,7 +45,7 @@ test('a judgment in words; a risk no model has read is not judged yet', () => {
 });
 
 const RULES: RuleInfo[] = [
-  { id: 'confirm', version: 1, kind: 'confirm', name: 'Irreversible', source: 'Paper 3.1.2', steps: [{ kind: 'call', tool: 'Bash', words: ['rm', 'drop table'] }], confirm: ['yes', 'ok', '可以'], refuse: ['no', '不'] },
+  { id: 'confirm', version: 1, kind: 'confirm', name: 'Irreversible', source: 'Paper 3.1.2', steps: [{ kind: 'call', tool: 'Bash', words: ['rm', 'drop table'] }], confirm: ['yes', 'ok'], refuse: ['no'] },
   { id: 'subvert', version: 1, kind: 'forbid', name: 'Test changed', source: 'Paper B.2', steps: [{ kind: 'call', tool: 'Bash', status: 'failed', has: 'test' }, { kind: 'call', tool: 'Edit', has: 'test', link: 'next' }, { kind: 'call', tool: 'Bash', status: 'ok', has: 'test', link: 'later' }] },
   { id: 'deny', version: 1, kind: 'deny', name: 'Outside', source: 'Paper B.2', steps: [{ kind: 'call', tool: 'Bash', words: ['sudo'] }] },
 ];
@@ -62,7 +62,7 @@ test('a rule drawn: what must come first in green, what is not allowed in red', 
     label: 'Must come first', tone: 'ok',
     parts: [
       { pill: 'Assistant asks (reply has "?")', tone: 'ok' }, { arrow: '→ next' },
-      { pill: 'User confirms (opens with "yes", "ok", "可以"; none of "no", "不")', tone: 'ok' }, { arrow: '⇢ later, no other user input between' },
+      { pill: 'User confirms (opens with "yes", "ok"; none of "no")', tone: 'ok' }, { arrow: '⇢ later, no other user input between' },
       { pill: 'Bash · "rm" or "drop table"', tone: 'act' },
     ],
   });

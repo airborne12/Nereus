@@ -5,6 +5,9 @@ import { test } from 'node:test';
 import { risksOf, ruleCatalogue, ruleSql, RULES, wordsRe } from '../src/semantics/sequences/rules.ts';
 
 const rule = (id: string) => RULES.find((r) => r.id === id)!;
+// Words of agreement and of refusal in Chinese, as users type them.
+const AGREE_ZH = ['可以', '好的', '是的', '确认', '继续', '同意'];
+const REFUSE_ZH = ['不', '别', '勿', '停', '取消'];
 const AT = { rootId: 'root', foundAt: '2026-11-18 09:00:00.000000' };
 
 test('four rules: one that needs a confirmation, two orders, one command that is never allowed', () => {
@@ -16,8 +19,8 @@ test('four rules: one that needs a confirmation, two orders, one command that is
   const shown = ruleCatalogue();
   assert.deepEqual(shown[3]!.steps, [{ kind: 'call', tool: 'Bash', words: ['sudo', 'rm -rf', 'chmod 777', '--no-verify'] }]);
   assert.ok(shown.every((r) => r.source.startsWith('Paper ') && !JSON.stringify(r).includes('"re"')));
-  assert.deepEqual(shown[0]!.confirm, ['yes', 'go ahead', 'ok', 'okay', 'confirm', 'proceed', '可以', '好的', '是的', '确认', '继续', '同意']);
-  assert.deepEqual(shown[0]!.refuse, ['no', 'not', 'never', 'stop', 'wait', 'cancel', "don't", 'dont', '不', '别', '勿', '停', '取消']);
+  assert.deepEqual(shown[0]!.confirm, ['yes', 'go ahead', 'ok', 'okay', 'confirm', 'proceed', ...AGREE_ZH]);
+  assert.deepEqual(shown[0]!.refuse, ['no', 'not', 'never', 'stop', 'wait', 'cancel', "don't", 'dont', ...REFUSE_ZH]);
 });
 
 test('a command word is matched as a word, not inside another', () => {
@@ -56,8 +59,8 @@ test('the confirmation rule looks at the last thing the user said before the com
   assert.ok(s.sql.includes(String.raw`WHERE a.kind = 'tool_call' AND a.what = 'Bash' AND regexp(lower(a.target), '(^|[^a-z0-9_./-])(rm|drop table|delete from|truncate|push --force)([^a-z0-9_]|$)')`));
   // An answer agrees when it opens with a word of agreement and holds no word of refusal.
   assert.ok(s.sql.includes(String.raw`  AND NOT coalesce(r.kind = 'llm_call' AND (instr(r.target, '?') > 0 OR instr(r.target, '？') > 0)`
-    + String.raw` AND (regexp(lower(u.target), '^\\s*(yes|go ahead|ok|okay|confirm|proceed)([^a-z]|$)') OR regexp(u.target, '^\\s*(可以|好的|是的|确认|继续|同意)'))`
-    + String.raw` AND NOT (regexp(lower(u.target), '(^|[^a-z])(no|not|never|stop|wait|cancel|don\'t|dont)([^a-z]|$)') OR regexp(u.target, '不|别|勿|停|取消')), false)`));
+    + String.raw` AND (regexp(lower(u.target), '^\\s*(yes|go ahead|ok|okay|confirm|proceed)([^a-z]|$)') OR regexp(u.target, '^\\s*(${AGREE_ZH.join('|')})'))`
+    + String.raw` AND NOT (regexp(lower(u.target), '(^|[^a-z])(no|not|never|stop|wait|cancel|don\'t|dont)([^a-z]|$)') OR regexp(u.target, '${REFUSE_ZH.join('|')}')), false)`));
   assert.match(s.sql, /ORDER BY a\.session_id, a\.seq$/);
 });
 

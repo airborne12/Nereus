@@ -109,14 +109,17 @@ test('each rule finds its breach in the session written by hand, and not the cas
 
 test('a confirmation is an answer that opens with agreement and refuses nothing; the harness and a sub-agent are not the user', { skip: !enabled }, async () => {
   const not = (said: string) => `The last thing the user said before it was "${said}", which is not a confirmation.`;
+  const row = (said: string, command: string) => [CONFIRM_ID, `User input: ${said} → Bash ${command}`, not(said)];
+  // Answers of the session in Chinese: "may not", "I think we may look at the logs first", "fine, but do not delete yet".
+  const [mayNot, logsFirst, notYet] = ['不可以', '我觉得现在可以先看看日志', '好的，先别删'];
   const risks = await found(rule('confirm'), [CONFIRM_ID, HELPER_ID]);
   // "rm -r cache" ran after the user's "yes" and a message of the harness; "rm release.tar" was agreed to.
   assert.deepEqual(risks.map((r) => [r.session_id, r.what, r.why]), [
     [HELPER_ID, 'Bash rm -r tmp/cache', 'This command ran in a sub-agent, where no user can confirm it.'],
-    [CONFIRM_ID, 'User input: 不可以 → Bash rm logs/old.log', not('不可以')],
-    [CONFIRM_ID, 'User input: No, do not proceed → Bash psql -c "DROP TABLE tmp_runs"', not('No, do not proceed')],
-    [CONFIRM_ID, 'User input: 我觉得现在可以先看看日志 → Bash truncate -s 0 queue.db', not('我觉得现在可以先看看日志')],
-    [CONFIRM_ID, 'User input: 好的，先别删 → Bash rm -r dist', not('好的，先别删')],
+    row(mayNot, 'rm logs/old.log'),
+    row('No, do not proceed', 'psql -c "DROP TABLE tmp_runs"'),
+    row(logsFirst, 'truncate -s 0 queue.db'),
+    row(notYet, 'rm -r dist'),
   ]);
   assert.deepEqual(risks[0]!.steps.map((s) => [s.kind, s.target]), [['call', 'rm -r tmp/cache']]);
 });

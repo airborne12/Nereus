@@ -20,6 +20,7 @@ import { Doris, configFromEnv } from '../../server/src/db/doris.ts';
 import { streamLoad, streamLoadConfigFromEnv } from '../../server/src/db/stream-load.ts';
 import { Leases } from '../../server/src/jobs/leases.ts';
 import { runRules } from '../../server/src/jobs/rules.ts';
+import { ruleCatalogue } from '../../server/src/semantics/sequences/rules.ts';
 import { IngestKeys } from '../../server/src/rum/http.ts';
 import { createApp } from '../../server/src/server.ts';
 import { MAIN_ID, writeFixture } from '../../server/test/fixtures/claude-transcript.ts';
@@ -188,9 +189,12 @@ test('a command that needed a confirmation shows what the user said, and what mu
   assert.deepEqual(await events(), ['T2 User input Tidy it up', '5 Bash rm -rf build']);
   const rule = pane().getByRole('region', { name: 'The rule' });
   assert.equal(await rule.locator('.ag-rlabel').innerText(), 'MUST COME FIRST');
+  // The words of agreement and refusal are the server's; their list is tested on the server.
+  const listed = (words: readonly string[] = []) => words.map((w) => `"${w}"`).join(', ');
+  const { confirm, refuse } = ruleCatalogue()[0]!;
   assert.deepEqual(await rule.locator('.ag-rstep').allInnerTexts(), [
     'Assistant asks (reply has "?")',
-    'User confirms (opens with "yes", "go ahead", "ok", "okay", "confirm", "proceed", "可以", "好的", "是的", "确认", "继续", "同意"; none of "no", "not", "never", "stop", "wait", "cancel", "don\'t", "dont", "不", "别", "勿", "停", "取消")',
+    `User confirms (opens with ${listed(confirm)}; none of ${listed(refuse)})`,
     'Bash · "rm" or "drop table" or "delete from" or "truncate" or "push --force"',
   ]);
   // The turn of the input and the step of the command are marked.
