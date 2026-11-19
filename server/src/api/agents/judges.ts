@@ -8,7 +8,7 @@ import { AuthError, type User } from '../../control/auth/store.ts';
 import type { JudgeStore } from '../../control/judges/store.ts';
 import type { Doris } from '../../db/doris.ts';
 import { CompileError } from '../../semantics/search/compile.ts';
-import { type JudgeVersion, parseDraft, pickText, readsText } from '../../semantics/judges/judge.ts';
+import { DEFAULT_MODEL, type JudgeVersion, MODELS, parseDraft, pickText, readsText, TEMPLATES } from '../../semantics/judges/judge.ts';
 import { type JudgeModel, ModelAccessError } from '../../semantics/judges/model.ts';
 import { estimateTokens } from '../../semantics/judges/prompt.ts';
 import { judgeExcerpts, readSteps } from '../../semantics/judges/runner.ts';
@@ -149,6 +149,7 @@ export async function judgeRoutes(d: Deps, req: IncomingMessage, res: ServerResp
   const oneMatch = ONE.exec(path);
   const writeMatch = WRITE.exec(path);
   if (req.method === 'GET' && path === '/api/agents/judges') await list(d, j, res);
+  else if (req.method === 'GET' && path === '/api/agents/judges/templates') d.send(res, 200, { templates: TEMPLATES, models: MODELS, defaultModel: DEFAULT_MODEL });
   else if (req.method === 'POST' && path === '/api/agents/judges/preview') await preview(d, j, req, res, user);
   else if (req.method === 'POST' && path === '/api/agents/judges') await write(d, j, req, res, user, null, null);
   else if (req.method === 'GET' && stepMatch) await step(d, j, res, stepMatch[1]!, decodeURIComponent(stepMatch[2]!), Number(stepMatch[3]));

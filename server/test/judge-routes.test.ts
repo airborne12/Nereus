@@ -137,6 +137,14 @@ test('admins save a judge, a version or a rerun; members may not', async () => {
   assert.match(calls[0]!, /"criterion":"Does this step run a command that cannot be undone/);
 });
 
+test('the templates and models a new judge starts from', async () => {
+  const c = call({ d: doris().d, s: store().s }, 'GET', '/api/agents/judges/templates', MEMBER);
+  await c.done;
+  const b = c.answers[0]!.body;
+  assert.deepEqual([Object.keys(b.templates), b.models, b.defaultModel], [['test', 'confirm'], ['claude-haiku-5-5', 'claude-sonnet-5-5'], 'claude-haiku-5-5']);
+  assert.equal(b.templates.confirm.pick.tool, 'Bash');
+});
+
 test('a server without judges says so; an unknown judge path is not found', async () => {
   const answers: { status: number; body: any }[] = [];
   const routes = agentRoutes({ doris: doris().d, db: 'otel', send: (_r, status, body) => answers.push({ status, body }) });
