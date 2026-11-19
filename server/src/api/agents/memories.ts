@@ -1,5 +1,5 @@
 // One memory (spec 7, 8.8): its latest version with its fields and sections, its versions, the calls
-// that read or wrote it, and its state.
+// that read or wrote it, the states the validity fold gave its latest version, and its state.
 //
 //   GET /api/agents/memories/<agent>/<scope>/<name>     each part encoded as a URI component
 
@@ -34,7 +34,7 @@ export async function memory(doris: Doris, db: string, send: Send, res: ServerRe
   if (!m) return false;
   const ref = refOf(m);
   const s = memorySql(db, ref);
-  const { results: [versions, uses], elapsedMs } = await run(doris, [s.versions, s.uses]);
+  const { results: [versions, uses, history], elapsedMs } = await run(doris, [s.versions, s.uses, s.history]);
   const latest = versions![0];
   if (!latest) {
     send(res, 404, { error: 'no such memory' });
@@ -43,7 +43,7 @@ export async function memory(doris: Doris, db: string, send: Send, res: ServerRe
   send(res, 200, {
     memory: { ...ref, ...latest, sections: json(latest.sections) ?? [], fields: json(latest.fields) ?? {} },
     versions: versions!.map(({ content: _c, sections: _s, fields: _f, ...rest }) => rest),
-    uses, state: memoryState(latest, uses!), sql: [s.versions, s.uses], elapsedMs,
+    uses, history, state: memoryState(latest, uses!, history!), sql: [s.versions, s.uses, s.history], elapsedMs,
   });
   return true;
 }

@@ -14,7 +14,7 @@ const VERSION = {
   content_hash: 'h2', source_session_id: 's-1', source_kind: 'recorded', source_score: null, source_root_id: 's-1', source_title: 'Speed up the build',
 };
 
-function stub(versions: Record<string, unknown>[], uses: Record<string, unknown>[] = []) {
+function stub(versions: Record<string, unknown>[], uses: Record<string, unknown>[] = [], history: Record<string, unknown>[] = []) {
   const seen: string[] = [];
   const doris = {
     query: async (sql: string) => {
@@ -22,6 +22,7 @@ function stub(versions: Record<string, unknown>[], uses: Record<string, unknown>
       if (sql.startsWith('SELECT count(*)')) return [{ total: versions.length, bytes: 0 }];
       if (sql.includes('FROM otel.agent_memories m\nLEFT JOIN')) return versions;
       if (sql.startsWith('SELECT e.session_id, s.root_id')) return uses;
+      if (sql.startsWith('SELECT j.version')) return history;
       return versions;
     },
   } as unknown as Doris;
@@ -53,8 +54,11 @@ test('one memory: its latest version with fields and sections, its versions, the
   const b = c.answers[0]!.body;
   assert.equal(c.answers[0]!.status, 200);
   assert.deepEqual([b.memory.name, b.memory.kind, b.memory.fields, b.memory.sections.length, b.memory.source_title], ['build', 'feedback', { name: 'build', metadata: { type: 'feedback' } }, 2, 'Speed up the build']);
-  assert.deepEqual([b.versions.length, b.versions[1].content_hash, b.uses, b.state], [2, 'h1', uses, 'unjudged']);
-  assert.deepEqual(b.sql.map((s: any) => s.title), ['Versions of the memory', 'Calls that read or wrote it']);
+  assert.deepEqual([b.versions.length, b.versions[1].content_hash, b.uses, b.history, b.state], [2, 'h1', uses, [], 'unjudged']);
+  assert.deepEqual(b.sql.map((s: any) => s.title), ['Versions of the memory', 'Calls that read or wrote it', 'States of the memory']);
+  const judged = call(stub([VERSION], uses, [{ version: 1, state: 'doubt', evidence: 'conflicts', reason: 'Another flag.' }]).doris, `/api/agents/memories/claude-code/${encodeURIComponent('-home-u')}/build`);
+  await judged.done;
+  assert.deepEqual([judged.answers[0]!.body.state, judged.answers[0]!.body.history.length], ['doubt', 1]);
   assert.equal(b.versions[0].content, undefined, 'the versions list carries no content');
 });
 
