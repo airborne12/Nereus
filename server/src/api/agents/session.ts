@@ -1,7 +1,7 @@
 // The session page (spec 7, 8.3): the tree with its turns, a turn's steps one page at a time, and
 // what the right side reads for a turn, a step or a compaction.
 //
-//   GET /api/agents/sessions/<id>                                 tree, turns, marks; every step when the tree is small
+//   GET /api/agents/sessions/<id>                                 tree, turns, marks, risks; every step when the tree is small
 //   GET /api/agents/sessions/<id>/turns/<n>                       the user's input and the final answer
 //   GET /api/agents/sessions/<id>/turns/<n>/steps?offset=         100 steps of a turn
 //   GET /api/agents/sessions/<id>/steps/<seq>?inputOffset=        input, output and prompt of a model call
@@ -10,6 +10,8 @@
 import type { ServerResponse } from 'node:http';
 import type { Doris } from '../../db/doris.ts';
 import { CompileError } from '../../semantics/search/compile.ts';
+import { RISKS_LIMIT, treeRisksSql } from '../../semantics/sequences/risks.ts';
+import { ruleCatalogue } from '../../semantics/sequences/rules.ts';
 import {
   compactionSql, MARKS_LIMIT, marksSql, OPEN_ALL_STEPS, sessionId, STEPS_PAGE, stepSql, treeSql, treeStepsSql, turnSql, turnStepsSql, turnsSql,
 } from '../../semantics/trajectory/session.ts';
@@ -22,12 +24,15 @@ async function tree(doris: Doris, db: string, send: Send, res: ServerResponse, i
   const ids = sessions!.map((s) => String(s.session_id));
   const main = sessions!.find((s) => s.kind === 'main') ?? sessions![0]!;
   const openAll = Number(main.steps ?? 0) <= OPEN_ALL_STEPS;
-  const statements = [turnsSql(db, ids), marksSql(db, ids), ...(openAll ? [treeStepsSql(db, ids)] : [])];
+  const statements = [turnsSql(db, ids), marksSql(db, ids), treeRisksSql(db, id), ...(openAll ? [treeStepsSql(db, ids)] : [])];
   const { results, elapsedMs: more } = await run(doris, statements);
   const marks = results[1]!;
+  const risks = results[2]!;
   send(res, 200, {
     sessions: parsed(sessions!), turns: results[0], marks: marks.slice(0, MARKS_LIMIT), marksCut: marks.length > MARKS_LIMIT,
-    steps: openAll ? results[2] : null, openAll,
+    // The rules are sent with the risks they found, so the page can draw the rule beside the risk.
+    risks: parsed(risks.slice(0, RISKS_LIMIT)), risksCut: risks.length > RISKS_LIMIT, rules: risks.length ? ruleCatalogue() : [],
+    steps: openAll ? results[3] : null, openAll,
     sql: [head, ...statements], elapsedMs: elapsedMs + more,
   });
 }

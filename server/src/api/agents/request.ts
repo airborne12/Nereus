@@ -38,7 +38,7 @@ export async function run(doris: Doris, statements: readonly Statement[]): Promi
 }
 
 /** VARIANT and ARRAY columns arrive as JSON text; these are parsed into values. */
-const JSON_COLUMNS = ['args', 'attrs', 'payload', 'tools', 'tool_names', 'config'];
+const JSON_COLUMNS = ['args', 'attrs', 'payload', 'tools', 'tool_names', 'config', 'events', 'steps'];
 
 export function parsed(rows: readonly Row[]): Row[] {
   return rows.map((r) => {

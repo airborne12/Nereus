@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '../../api/agents.ts';
 import { Lanes } from '../../components/agents/Lanes.tsx';
 import { CutPane, StepPane, TurnPane } from '../../components/agents/Pane.tsx';
+import { RiskPane } from '../../components/agents/RiskPane.tsx';
 import { SqlDialog } from '../../components/agents/SqlDialog.tsx';
 import { blockOf } from '../../lib/agents/chat.ts';
 import { duration, num, plural, stamp, text, timeOf, tokens } from '../../lib/agents/format.ts';
@@ -10,6 +11,7 @@ import {
   rowKeyOf, STEPS_PAGE, type Tree,
 } from '../../lib/agents/lanes.ts';
 import { sessionName, sessionUrl } from '../../lib/agents/pages.ts';
+import { riskAt, riskKey, riskMarks, riskRowKey } from '../../lib/agents/risks.ts';
 import { parseMarks, parseSel, type Selection, selKey, stepKey, turnKey } from '../../lib/agents/select.ts';
 import type { Go } from '../../Root.tsx';
 import type { From } from './TablePage.tsx';
@@ -52,6 +54,8 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [showSql, setShowSql] = useState(false);
+  // The risks the safety rules found in the tree, and the rules, as the tree answer brought them.
+  const [risks, setRisks] = useState<{ list: api.Risk[]; cut: boolean; rules: api.RuleInfo[] }>({ list: [], cut: false, rules: [] });
   // What the callbacks of the lanes read; the rows keep one identity, so they are not drawn again.
   const live = useRef({ tree, rows: rowsByTurn, reading: new Map<string, Promise<void>>(), places: new Map<string, Place>() });
   // The items of each turn, kept until that turn's rows change, so reading one turn does not rebuild the others.
@@ -71,6 +75,7 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
       // A small tree opens with its whole structure visible.
       if (a.openAll) setOpen(new Set([...t.main.turns.map((x) => turnKey(x.sid, x.no)), ...[...t.branches.values()].filter((b) => b.parent !== null).map((b) => branchKey(b.sid))]));
       setTreeSql(a.sql);
+      setRisks({ list: a.risks ?? [], cut: a.risksCut ?? false, rules: a.rules ?? [] });
       setTree(t);
     }, (e: Error) => { if (!ac.signal.aborted) setError(e.message); });
     return () => ac.abort();
@@ -105,7 +110,12 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
   const param = params.get('sel');
   // The rows a match of a pattern marks; they stay marked while the selection moves.
   const marksParam = params.get('marks');
-  const marks = useMemo(() => parseMarks(marksParam), [marksParam]);
+  // The risk the address names, when the tree has it. While it is shown, its events are what is marked.
+  const riskParam = params.get('risk');
+  const riskNo = useMemo(() => riskAt(risks.list, riskParam), [risks, riskParam]);
+  const risk = riskNo >= 0 ? risks.list[riskNo]! : null;
+  const marks = useMemo(() => (risk ? riskMarks(risk) : parseMarks(marksParam)), [risk, marksParam]);
+  const marksId = risk ? `risk:${riskKey(risk)}` : marksParam;
   // A mark in a sub-agent's turn falls on the row that stands for the sub-agent.
   const marked = useMemo(() => new Set(marks.map((m) => (tree ? rowKeyOf(tree, m.key) : m.key))), [marks, tree]);
   const sel: Selection | null = useMemo(() => {
@@ -173,12 +183,16 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
   // The marked rows are opened once, when the page gets them.
   const opened = useRef<string | null>(null);
   useEffect(() => {
-    if (!tree || !marksParam || opened.current === marksParam) return;
-    opened.current = marksParam;
+    if (!tree || !marksId || opened.current === marksId) return;
+    opened.current = marksId;
     const ways = marks.map((m) => reveal(tree, m));
     setOpen((prev) => new Set([...prev, ...ways.flatMap((w) => w.open)]));
     ways.flatMap((w) => w.load).forEach((l) => void ensure(l.sid, l.turn, l.steps));
-  }, [tree, marksParam, marks, ensure]);
+  }, [tree, marksId, marks, ensure]);
+
+  // Showing a risk keeps the selection; choosing a row afterwards leaves the view of the risk.
+  const showRisk = (at: number) => go(sessionUrl(id, param, null, riskKey(risks.list[at]!)), { replace: true });
+  const leaveRisk = () => go(sessionUrl(id, param, marksParam), { replace: true });
 
   const jump = (kind: JumpKind) => {
     if (!tree) return;
@@ -214,6 +228,7 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
   const stepNo = fresh?.kind === 'step' ? num(fresh.answer.step.step) : null;
   const turnNo = sel?.kind === 'turn' ? sel.turn : place?.turn ?? null;
   const output = fresh?.kind === 'step' ? fresh.answer.output.map(blockOf) : [];
+  const shownKey = (risk && riskRowKey(risk)) ?? key;
   const childAt = (callSeq: number): Branch | null => [...tree.branches.values()].find((b) => b.parent === sel?.sid && b.parentSeq === callSeq) ?? null;
 
   return (
@@ -228,16 +243,30 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
           {' · '}{duration(num(m.active_us))} active · {tokens(num(m.input_tokens) + num(m.output_tokens))} tokens · peak context {tokens(num(m.peak_ctx_tokens))}
           {m.model ? ` · ${text(m.model)}` : ''}{m.user_id ? ` · ${text(m.user_id)}` : ''}{exactness(tree) ? ` · ${exactness(tree)}` : ''}
         </p>
-        {JUMPS.some((j) => counts[j.kind] > 0) && (
-          <p className="ag-jump">Jump to{JUMPS.filter((j) => counts[j.kind] > 0).map((j) => (
-            <button type="button" key={j.kind} onClick={() => jump(j.kind)}>{plural(counts[j.kind], j.noun)}</button>
-          ))}{tree.marksCut && <span>Only the first 2,000 of these places are known to this page.</span>}</p>
+        {(risks.list.length > 0 || JUMPS.some((j) => counts[j.kind] > 0)) && (
+          <p className="ag-jump">
+            {/* Safety risks come first: they are what a reader of the session must not miss. */}
+            {risks.list.length > 0 && (
+              <button type="button" className={`ag-riskb${risk ? ' on' : ''}`} aria-pressed={risk !== null} onClick={() => (risk ? leaveRisk() : showRisk(0))}>
+                {plural(risks.list.length, 'safety risk')}{risks.cut ? ' and more' : ''}
+              </button>
+            )}
+            {JUMPS.some((j) => counts[j.kind] > 0) && <>Jump to{JUMPS.filter((j) => counts[j.kind] > 0).map((j) => (
+              <button type="button" key={j.kind} onClick={() => jump(j.kind)}>{plural(counts[j.kind], j.noun)}</button>
+            ))}</>}
+            {tree.marksCut && <span>Only the first 2,000 of these places are known to this page.</span>}
+          </p>
         )}
-        {marks.length > 0 && <p className="ag-matched">{plural(marks.length, 'event')} of a pattern match marked on the left.</p>}
+        {!risk && marks.length > 0 && <p className="ag-matched">{plural(marks.length, 'event')} of a pattern match marked on the left.</p>}
       </header>
       {error && <div className="error" role="alert">{error}</div>}
       <div className="ag-sbody">
-        <Lanes rows={rows} selected={key ? rowKeyOf(tree, key) : null} marked={marked} scale={tree.scale} main={tree.main.sid} onSelect={onSelect} onTwist={onTwist} onMore={onMore} />
+        {/* While a risk is shown, the lanes stand at the event it is keyed by. */}
+        <Lanes rows={rows} selected={shownKey ? rowKeyOf(tree, shownKey) : null} marked={marked} scale={tree.scale} main={tree.main.sid} onSelect={onSelect} onTwist={onTwist} onMore={onMore} />
+        {risk ? (
+          <RiskPane key={riskKey(risk)} risk={risk} at={riskNo} total={risks.list.length} rule={risks.rules.find((r) => r.id === risk.rule)}
+            agent={tree.branches.get(risk.session_id)?.parent ? tree.branches.get(risk.session_id)!.name : ''} onShow={showRisk} onOpen={select} />
+        ) : (
         <div className="ag-pane" key={key}>
           {sel && sel.kind !== 'turn' && (
             <p className="ag-crumbs">
@@ -263,6 +292,7 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
           )}
           {fresh?.kind === 'cut' && <CutPane answer={fresh.answer} />}
         </div>
+        )}
       </div>
       {showSql && <SqlDialog statements={[...treeSql, ...stepsSql, ...(fresh && fresh.kind !== 'error' ? fresh.answer.sql : [])]} onClose={() => setShowSql(false)} />}
     </div>

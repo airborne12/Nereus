@@ -3,7 +3,8 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { matchSql, type MatchRequest } from '../src/semantics/sequences/match.ts';
+import { sessionScope } from '../src/semantics/sequences/events.ts';
+import { matchSql, type MatchRequest, patternCtes } from '../src/semantics/sequences/match.ts';
 import { parsePattern } from '../src/semantics/sequences/pattern.ts';
 
 const req = (pattern: unknown, extra: Partial<MatchRequest> = {}): MatchRequest =>
@@ -103,4 +104,20 @@ test('the rows of the table, one per event, become matches with one entry per st
   // A match with a row missing is an error, not a shorter match.
   assert.throws(() => matches(rows.slice(0, 3)), /the rows of a match are incomplete/);
   assert.throws(() => matches([rows[0]!, rows[3]!]), /the rows of a match are incomplete/);
+});
+
+test('a pattern over the sessions of a tree reads those sessions, whatever their time', () => {
+  const head = patternCtes('otel', sessionScope(['fx-main-0001', 'agent-a1']), parsePattern([{ kind: 'reply' }, { tool: 'Bash', link: 'later' }]));
+  assert.match(head, /^WITH base AS \(/);
+  assert.match(head, /\n {4}AND e\.session_id IN \('fx-main-0001', 'agent-a1'\)\n\)/);
+  assert.doesNotMatch(head, /e\.ts >=/);
+  assert.match(head, /m2 AS \([^)]*\n\)$/);
+  assert.throws(() => sessionScope(["a' OR 1=1"]), /bad session id/);
+  assert.throws(() => sessionScope([]), /no session to read/);
+});
+
+test('a step of a rule can ask for whole words; a request cannot', () => {
+  const head = patternCtes('otel', sessionScope(['s']), [{ kind: 'call', tool: 'Bash', re: '(^|[^a-z])rm( |$)' }]);
+  assert.ok(head.includes(String.raw`a.what = 'Bash' AND regexp(lower(a.target), '(^|[^a-z])rm( |$)')`));
+  assert.throws(() => parsePattern([{ tool: 'Bash', re: 'rm' }]), /step 1: unknown condition 're'/);
 });

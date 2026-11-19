@@ -1,15 +1,18 @@
 // Every statement of the agent API is planned by Doris on empty tables (spec 11): each page with
-// every column as the sort and as a condition, the session page, Compare, the exports and the
-// sequences.
+// every column as the sort and as a condition, the session page, Compare, the exports, the
+// sequences and the safety rules.
 // Skipped unless DORIS_TEST=1.
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { Doris, configFromEnv } from '../src/db/doris.ts';
+import { dueSql } from '../src/jobs/rules.ts';
 import { matchSql } from '../src/semantics/sequences/match.ts';
 import { parsePattern } from '../src/semantics/sequences/pattern.ts';
 import { pathsSql, toolsSql } from '../src/semantics/sequences/paths.ts';
+import { risksPage, treeRisksSql } from '../src/semantics/sequences/risks.ts';
+import { RULES, ruleSql } from '../src/semantics/sequences/rules.ts';
 import { compareSql } from '../src/semantics/trajectory/compare.ts';
 import { conversationSql } from '../src/semantics/trajectory/export.ts';
 import { messagesPage, sessionsPage, stepsPage } from '../src/semantics/trajectory/pages.ts';
@@ -51,7 +54,7 @@ function pageStatements(page: Page): Statement[] {
 }
 
 test('table pages: every column as sort and as condition', { skip: !enabled }, async () => {
-  for (const page of [sessionsPage(db), stepsPage(db), messagesPage(db)]) await planned(pageStatements(page));
+  for (const page of [sessionsPage(db), stepsPage(db), messagesPage(db), risksPage(db)]) await planned(pageStatements(page));
 });
 
 test('session page, compare and exports', { skip: !enabled }, async () => {
@@ -85,4 +88,8 @@ test('sequences: every shape of a step, every sort, and the drawing', { skip: !e
   const drawings = [{ kind: 'failed' as const }, { kind: 'user' as const }, { kind: 'tool' as const, tool: 'Bash' }]
     .flatMap((start) => [2, 3, 4].map((depth) => pathsSql(db, { ...range, start, depth })));
   await planned([...statements, ...drawings, toolsSql(db, range.from, range.to)]);
+});
+
+test('safety rules: each rule over a tree, the trees that are due, the risks of a tree', { skip: !enabled }, async () => {
+  await planned([...RULES.map((r) => ruleSql(db, r, ['m', 'agent-a1'])), dueSql(db, 100), treeRisksSql(db, 'm')]);
 });

@@ -363,3 +363,33 @@
 .ag-trow.mk { background: var(--ag-hit); }
 .ag-trow.mk.sel { background: var(--selected); }
 .ag-matched { margin: 6px 0 0; font-size: 12px; color: var(--text-2); }
+
+/* ---------- safety risks: the count on a session, the view of a risk, a rule drawn as a row of steps */
+.ag-riskp { padding: 0 7px; border: 1px solid var(--ag-bad); border-radius: 999px; background: var(--ag-bad-soft); color: var(--ag-bad); font: 500 11px var(--font); cursor: pointer; }
+.ag-riskp:hover { background: var(--ag-bad); color: var(--panel); }
+.ag-jump .ag-riskb { margin-right: 10px; border-color: var(--ag-bad); background: var(--ag-bad-soft); color: var(--ag-bad); font-weight: 500; }
+.ag-jump .ag-riskb:hover, .ag-jump .ag-riskb.on { background: var(--ag-bad); color: var(--panel); border-color: var(--ag-bad); }
+.ag-rnav { margin-left: 12px; }
+.ag-rnav button { margin-left: 6px; }
+.ag-judge { margin: 4px 0 6px; padding: 10px 14px; border: 1px solid var(--border); border-left-width: 4px; border-radius: 6px; background: var(--panel); }
+.ag-judge.breach { border-left-color: var(--ag-bad); }
+.ag-judge.review { border-left-color: var(--ag-warn); }
+.ag-verdict { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.ag-judge.breach .ag-verdict { color: var(--ag-bad); }
+.ag-judge.review .ag-verdict { color: var(--ag-warn); }
+.ag-judge p { margin: 5px 0 0; font-size: 13.5px; line-height: 1.5; }
+.ag-revs { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.ag-rev { max-width: 100%; padding: 6px 12px; border: 1px solid var(--ag-bad); border-radius: 8px; background: var(--ag-bad-soft); color: var(--text); font: 12.5px var(--mono); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.ag-rev code { margin-right: 6px; font-weight: 600; }
+.ag-rev:hover { box-shadow: inset 0 0 0 1px var(--ag-bad); }
+.ag-rev b.bad { color: var(--ag-bad); }
+.ag-revs .ag-rsep { margin-left: 22px; font-style: normal; color: var(--text-2); }
+.ag-rpic { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.ag-rlabel { margin-right: 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.ag-rlabel.ok { color: var(--text-2); }
+.ag-rlabel.bad { color: var(--ag-bad); }
+.ag-rstep { padding: 4px 11px; border-radius: 999px; font: 500 12px var(--mono); }
+.ag-rstep.ok { border: 1px dashed var(--text-2); color: var(--text); background: var(--panel); }
+.ag-rstep.pre { border: 1px solid var(--text); background: var(--panel); }
+.ag-rstep.act { border: 1px solid var(--ag-bad); background: var(--ag-bad-soft); color: var(--ag-bad); }
+.ag-rarrow { font-size: 11.5px; color: var(--text-2); }

@@ -245,6 +245,39 @@ the agent tables:
     GRANT LOAD_PRIV ON otel.agent_sessions TO 'nereus_import'@'%';
     -- likewise agent_events, agent_messages, agent_contexts, agent_prompts; plus SELECT_PRIV on them
 
+### Safety rules
+
+Four rules look for orders of events that are not allowed in a session, though each event alone
+may be. A rule finds candidates; whether one is a breach is a judgment, which no model makes yet.
+
+| Rule | Finds |
+| --- | --- |
+| Irreversible command without the user's confirmation | A command with `rm`, `drop table`, `delete from`, `truncate` or `push --force`, unless the last thing the user said before it agrees and answers a reply of the assistant that asks (`?`) |
+| Secret read, later sent out of the machine | A read of a file named like `.env`, `credentials`, `secret`, `id_rsa` or `token`, and any later command with `curl`, `wget`, `scp` or `nc` |
+| Test changed right after it failed, then passes | A failed command with `test`, the edit of a file with `test` as the very next event, and a later command with `test` that passes |
+| Command outside the allowed set | A command with `sudo`, `rm -rf`, `chmod 777` or `--no-verify` |
+
+The words of a command are matched as whole words, so `--rm` and `perform` are not `rm`. An answer
+agrees when it opens with `yes`, `go ahead`, `ok`, `okay`, `confirm`, `proceed`, `可以`, `好的`, `是的`,
+`确认`, `继续` or `同意` and holds none of `no`, `not`, `never`, `stop`, `wait`, `cancel`, `don't`,
+`dont`, `不`, `别`, `勿`, `停` or `取消`; so `不可以` and `No, do not proceed` do not agree. An input
+that opens with a tag, such as `<task-notification>` or `<command-name>`, was written by the
+harness and is not taken as something the user said. A sub-agent is started by the assistant, so
+no user can confirm its commands: each such command in a sub-agent is a risk.
+
+The rules run as a job on the session trees imported since they last ran:
+
+    cd server
+    DORIS_HOST=127.0.0.1 DORIS_PORT=9030 DORIS_DB=otel DORIS_BE_HTTP_URL=http://127.0.0.1:8040 \
+      META_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/nereus node src/cli/run-rules.ts
+
+It writes one row per risk to `agent_risks` and the count of each session to
+`agent_sessions.safety_risks`. A tree that is imported again loses its count, which hides its
+stored risks until the job has run on it again. `--all` runs the rules on every tree, for use
+after a rule changed. Two runners can work at once: each takes a lease on a tree in PostgreSQL
+(`job_leases`) before it works on it, and leaves a tree that another runner finished meanwhile. A
+tree whose run fails is named and stays due; the others still run, and the command exits with 1.
+
 ### Agent trajectory API
 
 Read-only routes under `/api/agents/` (any signed-in user or API key). Every answer carries the
@@ -252,12 +285,12 @@ statements that ran (`sql`: title and text) and `elapsedMs`; a query error answe
 
 | Route | Answers |
 | --- | --- |
-| `GET /api/agents/sessions\|steps\|messages?from=&to=&q=&f=&sort=&dir=&limit=&offset=` | One page of rows (100 by default) and the total. `q`: every word must match, quotes make a phrase. `f=column:op:value`, repeatable, op one of `eq ne lt le gt ge contains`; `limit` at most 1000 |
+| `GET /api/agents/sessions\|steps\|messages\|risks?from=&to=&q=&f=&sort=&dir=&limit=&offset=` | One page of rows (100 by default) and the total. `q`: every word must match, quotes make a phrase. `f=column:op:value`, repeatable, op one of `eq ne lt le gt ge contains`; `limit` at most 1000 |
 | the same with `format=csv` | Every matching row as CSV: at most 200,000 rows and 128 MiB of text, otherwise 400. Free text that a spreadsheet would run as a formula (it starts with `=`, `+`, `-`, `@`, a tab or a carriage return) gets a leading apostrophe |
 | the same with `format=csv&size=1` | The number of rows of that export, its first five rows, and its SQL |
 | `GET /api/agents/sessions?...&format=jsonl` | The matching sessions and their sub-agents as conversations, one JSON line per stretch between compactions; at most 128 MiB of text, otherwise 400 |
 | `GET /api/agents/sessions?...&format=jsonl&size=1` | Size of that export, a preview of three sessions, and its SQL |
-| `GET /api/agents/sessions/<id>` | The session tree, one row per turn, the marks (calls that started a sub-agent and compactions first, then failed and repeated calls; at most 2,000, with `marksCut` saying when there were more), and every step when the tree has at most 40 |
+| `GET /api/agents/sessions/<id>` | The session tree, one row per turn, the marks (calls that started a sub-agent and compactions first, then failed and repeated calls; at most 2,000, with `marksCut` saying when there were more), the risks the safety rules found in the tree (at most 500, with `risksCut`) and the rules that found them, and every step when the tree has at most 40 |
 | `GET /api/agents/sessions/<id>/turns/<n>` and `.../turns/<n>/steps?offset=` | A turn's input and final answer; 100 of its steps |
 | `GET /api/agents/sessions/<id>/steps/<seq>?inputOffset=` | A model call: its input (100 blocks at a time, latest first), output, tool results and prompt |
 | `GET /api/agents/sessions/<id>/events/<seq>/compaction` | The blocks a compaction replaced and its summary |
@@ -266,7 +299,7 @@ statements that ran (`sql`: title and text) and `elapsedMs`; a query error answe
 | `GET /api/agents/sequences/tools?from=&to=` | The tools called in the range, most called first |
 | `POST /api/agents/sequences/match` | The places where the steps of a pattern follow one another. The body is `{from, to, pattern, sort, dir, limit, offset}`: `sort` is `time` (the default), `session`, `agent`, `turn`, `span` or `step<n>` for the time of a step, `dir` is `desc` (the default) or `asc`. The answer holds `rows`, one per match with the events of its `steps`, and the counts `matches` and `sessions` |
 
-`agent_sessions`, `agent_events` and `agent_messages` are also sources of search, charts and alerts
+`agent_sessions`, `agent_events`, `agent_messages` and `agent_risks` are also sources of search, charts and alerts
 (`/api/search?source=agent_messages&q=role:assistant AND timeout`).
 
 A **pattern** is a list of one to six steps. A step puts conditions on one event, and from the
@@ -295,11 +328,13 @@ model wrote them.
 
 ### Agent trajectory pages
 
-The app opens on **Agent trajectories**, an area of the navigation with three table pages:
+The app opens on **Agent trajectories**, an area of the navigation with four table pages:
 
-- **Sessions** (`/agents/sessions`): one row per session tree. Tick two rows to compare them.
+- **Sessions** (`/agents/sessions`): one row per session tree. Tick two rows to compare them. The
+  Risks column counts the safety risks of the tree; the count names the rules and opens the first risk.
 - **Steps** (`/agents/steps`): one row per model call with the tool calls it issued.
 - **Messages** (`/agents/messages`): one row per content block with its role.
+- **Risks** (`/agents/risks`): one row per place where a session broke a safety rule.
 
 Every table page has one time range (the past 1 hour, 24 hours, 7 days or 30 days, or a custom
 range), one search over the row's own text, conditions added with **Add filter**, a sort by any
@@ -313,7 +348,10 @@ branch (several sub-agents of one step each on a row of their own), and the widt
 size of the context, so a compaction shows as a funnel. On
 the right the selected turn, step or compaction reads as a chat between roles: for a step, what
 the model saw, what it answered and what its calls returned. **Jump to** visits the failed calls,
-repeated calls, compactions and sub-agents; the arrow keys move along the lanes.
+repeated calls, compactions and sub-agents; the arrow keys move along the lanes. "N safety
+risks" in the header, a row of Risks, or the count on Sessions shows a risk in place of the
+selection: the judgment, the events that broke the rule, each opening its step, and the rule
+drawn as a row of steps. The events are marked on the lanes.
 
 **Compare** (`/agents/compare?a=&b=`) shows two sessions as two rows of facts with their
 difference, then their lanes side by side with the steps of each pair of turns paired in order.
@@ -327,7 +365,7 @@ start from. Below it is a table with one row per match and one column per step. 
 session with the events of the match marked on its lanes.
 
 Browser tests of these pages: `cd web && npm run build && node --test e2e/agents.e2e.ts
-e2e/sequences.e2e.ts`. They create and drop their own Doris database and need `DORIS_BE_HTTP_URL` and a PostgreSQL for the
+e2e/sequences.e2e.ts e2e/risks.e2e.ts`. They create and drop their own Doris database and need `DORIS_BE_HTTP_URL` and a PostgreSQL for the
 metadata database, as the server's Doris tests do.
 
 Times of the session page on a large session, taken in headless Chromium against a running

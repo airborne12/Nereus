@@ -1,4 +1,4 @@
-// The Sessions, Steps and Messages pages as data: their columns in display order, which are shown
+// The Sessions, Steps, Messages and Risks pages as data: their columns in display order, which are shown
 // at first, how a cell and a condition on it are written, and what a row opens.
 
 import type { Row, TableName } from '../../api/agents.ts';
@@ -47,6 +47,7 @@ export const SESSIONS: PageDef = {
     col('last_event_at', 'Last activity', 'time', true),
     col('title', 'Session', 'text', true),
     col('tool_errors', 'Errors', 'count', true),
+    col('safety_risks', 'Risks', 'count', true),
     col('first_input', 'First input', 'text', true),
     col('last_output', 'Last output', 'text', true),
     col('turns', 'Turns', 'number', true),
@@ -109,7 +110,23 @@ export const MESSAGES: PageDef = {
   ],
 };
 
-export const PAGES: Record<TableName, PageDef> = { sessions: SESSIONS, steps: STEPS, messages: MESSAGES };
+export const RISKS: PageDef = {
+  name: 'risks', label: 'Risks', noun: 'risk', defaultSort: 'ts',
+  unit: 'One row per safety risk: a place where a session broke a safety rule.',
+  search: 'Search rules and what happened',
+  columns: [
+    col('ts', 'Time', 'time', true),
+    col('title', 'Session', 'text', true),
+    col('agent', 'Agent', 'enum', false),
+    col('turn', 'Turn', 'number', true),
+    col('judgment', 'Judgment', 'enum', true, ['none', 'breach', 'review', 'ok']),
+    col('rule_name', 'Rule', 'enum', true),
+    { ...col('what', 'What happened', 'text', true), fill: true },
+    col('why', 'Why it counts', 'text', false),
+  ],
+};
+
+export const PAGES: Record<TableName, PageDef> = { sessions: SESSIONS, steps: STEPS, messages: MESSAGES, risks: RISKS };
 
 export const columnOf = (def: PageDef, name: string): ColumnDef | undefined => def.columns.find((c) => c.name === name);
 
@@ -127,11 +144,12 @@ export function sessionName(row: Row): string {
   return text(row.title).trim() || plainLine(text(row.first_input)).slice(0, 80) || text(row.session_id);
 }
 
-/** What a row opens: the tree of its session, and what is selected there (null: the first turn). */
-export function openTarget(page: TableName, row: Row): { root: string; sel: string | null } {
+/** What a row opens: the tree of its session, and what is selected there (null: the first turn) or which risk is shown. */
+export function openTarget(page: TableName, row: Row): { root: string; sel: string | null; risk?: string } {
   const sid = text(row.session_id);
   if (page === 'sessions') return { root: sid, sel: null };
   const root = text(row.root_id) || sid;
+  if (page === 'risks') return { root, sel: null, risk: `${sid}:${text(row.rule)}:${num(row.first_seq)}` };
   if (page === 'steps') return { root, sel: stepKey(sid, num(row.seq)) };
   const kind = text(row.event_kind);
   // A block opens the step that produced it, a summary its compaction, a user message its turn.
@@ -142,10 +160,11 @@ export function openTarget(page: TableName, row: Row): { root: string; sel: stri
 }
 
 /** The address of a session page. */
-export function sessionUrl(root: string, sel: string | null, marks: string | null = null): string {
+export function sessionUrl(root: string, sel: string | null, marks: string | null = null, risk: string | null = null): string {
   const p = new URLSearchParams();
   if (sel) p.set('sel', sel);
   if (marks) p.set('marks', marks);
+  if (risk) p.set('risk', risk);
   const qs = p.toString();
   return `/agents/sessions/${encodeURIComponent(root)}${qs ? `?${qs}` : ''}`;
 }

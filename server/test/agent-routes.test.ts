@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { test } from 'node:test';
 import { agentRoutes } from '../src/api/agents/routes.ts';
 import type { Doris } from '../src/db/doris.ts';
+import { RISKS_LIMIT } from '../src/semantics/sequences/risks.ts';
 import { MAX_EXPORT_BYTES, MAX_EXPORT_ROWS } from '../src/semantics/trajectory/export.ts';
 
 /** A Doris that answers counts with `total` and everything else with `rows`, recording the SQL. */
@@ -104,15 +105,42 @@ test('the size of a CSV export: rows, bytes, a preview and the statements, witho
   assert.ok(!seen.some((s) => /LIMIT 200001$/.test(s)), 'the file itself is not read');
 });
 
-test('a session tree answers sessions, turns and marks; every step only when the tree is small', async () => {
+test('a session tree answers sessions, turns, marks and risks; every step only when the tree is small', async () => {
   const big = call(stub(0, [{ session_id: 's', kind: 'main', steps: 41 }]).doris, '/api/agents/sessions/s');
   assert.equal(await big.done, true);
   const a = big.answers[0]!;
-  assert.deepEqual([a.status, a.body.openAll, a.body.steps, a.body.sql.map((s: any) => s.title)], [200, false, null, ['Session', 'Turns', 'Marks']]);
+  assert.deepEqual([a.status, a.body.openAll, a.body.steps, a.body.sql.map((s: any) => s.title)], [200, false, null, ['Session', 'Turns', 'Marks', 'Risks']]);
   assert.equal(a.body.marks.length, 1);
+  // The stub answers one row to every statement: one risk, and with it the rules a page draws.
+  assert.deepEqual([a.body.risks.length, a.body.risksCut, a.body.rules.map((r: any) => r.id)], [1, false, ['confirm', 'exfil', 'subvert', 'deny']]);
   const small = call(stub(0, [{ session_id: 's', kind: 'main', steps: 40 }]).doris, '/api/agents/sessions/s');
   await small.done;
-  assert.deepEqual(small.answers[0]!.body.sql.map((s: any) => s.title), ['Session', 'Turns', 'Marks', 'Steps']);
+  assert.deepEqual(small.answers[0]!.body.sql.map((s: any) => s.title), ['Session', 'Turns', 'Marks', 'Risks', 'Steps']);
+  assert.equal(small.answers[0]!.body.steps.length, 1);
+});
+
+test('a session tree answers at most 500 risks and says when there were more', async () => {
+  const risk = (i: number) => ({ session_id: 's', rule: 'deny', rule_name: 'x', first_seq: i, rule_version: 1, ts: '2026-11-17 10:00:00', turn: 1, events: `[${i}]`, steps: '[]', what: '', why: '', found_at: '' });
+  const many = Array.from({ length: RISKS_LIMIT + 1 }, (_, i) => risk(i));
+  const doris = { query: async (sql: string) => (sql.includes('agent_risks') ? many : [{ session_id: 's', kind: 'main', steps: 41 }]) } as unknown as Doris;
+  const c = call(doris, '/api/agents/sessions/s');
+  await c.done;
+  const a = c.answers[0]!.body;
+  assert.deepEqual([a.risks.length, a.risksCut, a.risks.at(-1).first_seq, a.risks[0].events], [500, true, 499, [0]]);
+});
+
+test('the Risks table is a table page like the others, with its export', async () => {
+  const { doris, seen } = stub(3, [{ session_id: 's', rule: 'deny' }]);
+  const c = call(doris, `/api/agents/risks?${RANGE}&q=sudo&f=rule:eq:deny&sort=turn&dir=asc`);
+  await c.done;
+  const a = c.answers[0]!;
+  assert.deepEqual([a.status, a.body.total, a.body.rows, a.body.sql.map((s: any) => s.title)], [200, 3, [{ session_id: 's', rule: 'deny' }], ['Rows', 'Total']]);
+  assert.ok(a.body.columns.some((x: any) => x.name === 'judgment' && x.kind === 'text'));
+  assert.match(seen[0]!, /FROM otel\.agent_risks r\nJOIN otel\.agent_sessions s ON s\.session_id = r\.session_id\nJOIN otel\.agent_sessions m ON m\.session_id = r\.root_id\nWHERE m\.safety_risks IS NOT NULL/);
+  assert.match(seen[0]!, /\(r\.what MATCH_PHRASE 'sudo' OR r\.rule_name MATCH_PHRASE 'sudo'\)\n {2}AND r\.rule = 'deny'\nORDER BY r\.turn ASC, r\.session_id, r\.rule, r\.first_seq\nLIMIT 100 OFFSET 0$/);
+  const file = call(stub(1, [{ session_id: 's', rule: 'deny', what: '=cmd' }]).doris, `/api/agents/risks?${RANGE}&format=csv&size=1`);
+  await file.done;
+  assert.match(file.answers[0]!.body.preview, /^ts,session_id,root_id,title,agent,turn,judgment,rule,rule_name,what,why,first_seq,rule_version,found_at\n/);
 });
 
 test('Compare with a turn answers both sides, their pairs and their compactions', async () => {

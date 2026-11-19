@@ -4,7 +4,7 @@
 
 import { CompileError, sqlString } from '../search/compile.ts';
 import { type Statement, timeRange } from '../trajectory/query.ts';
-import { eventsCtes } from './events.ts';
+import { eventsCtes, rangeScope } from './events.ts';
 
 /** Where a drawing starts: a failed call, a user input, or a call of one tool. */
 export type Start = { kind: 'failed' } | { kind: 'user' } | { kind: 'tool'; tool: string };
@@ -59,7 +59,7 @@ export function pathsSql(db: string, req: PathsRequest): Statement {
   const after = Array.from({ length: req.depth - 1 }, (_, i) => i + 1);
   const keys = after.map((n) => `k${n + 1}`);
   const sql = [
-    `WITH ${eventsCtes(db, range, 'events', 'none').join(',\n')},`,
+    `WITH ${eventsCtes(db, rangeScope(range), 'events', 'none').join(',\n')},`,
     'runs AS (',
     `  SELECT ${keys.join(', ')}`,
     '  FROM (',

@@ -23,9 +23,10 @@ after(async () => {
 
 const columns = async (table: string) => (await doris.query(`DESC ${db}.${table}`)).map((r) => String(r.Field));
 
-test('five unique-key tables with the spec columns', { skip: !enabled }, async () => {
+test('six unique-key tables with the spec columns', { skip: !enabled }, async () => {
   assert.deepEqual((await doris.query(`SHOW TABLES FROM ${db}`)).map((r) => String(Object.values(r)[0])).sort(),
-    ['agent_contexts', 'agent_events', 'agent_messages', 'agent_prompts', 'agent_sessions']);
+    ['agent_contexts', 'agent_events', 'agent_messages', 'agent_prompts', 'agent_risks', 'agent_sessions']);
+  assert.deepEqual((await columns('agent_risks')), ['session_id', 'rule', 'first_seq', 'rule_version', 'rule_name', 'root_id', 'ts', 'turn', 'events', 'steps', 'what', 'why', 'found_at']);
   assert.deepEqual((await columns('agent_contexts')), ['session_id', 'seq', 'rel', 'pos', 'ts', 'from_msg', 'to_msg']);
   assert.ok((await columns('agent_messages')).includes('msg_role'));
   assert.ok((await columns('agent_prompts')).includes('system_text'));

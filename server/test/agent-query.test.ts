@@ -27,7 +27,8 @@ test('Sessions: fixed condition, range, search on three columns, conditions, sor
     q: "clock it's", conditions: [parseCondition('steps:ge:7'), parseCondition('model:contains:OPUS'), parseCondition('first_input:contains:fail')],
     sort: 'steps', dir: 'asc', offset: 200,
   }), 'list');
-  assert.match(rows.sql, /FROM otel\.agent_sessions s\nWHERE s\.kind = 'main'/);
+  assert.match(rows.sql, /FROM otel\.agent_sessions s\nLEFT JOIN \(SELECT root_id, array_join\(array_sort\(collect_set\(rule_name\)\), '\\n'\) AS rules FROM otel\.agent_risks GROUP BY root_id\) k ON k\.root_id = s\.session_id\nWHERE s\.kind = 'main'/);
+  assert.match(rows.sql, /if\(s\.safety_risks IS NULL, NULL, k\.rules\) AS `risk_rules`/);
   assert.match(rows.sql, /s\.last_event_at >= '2026-11-17 00:00:00\.000' AND s\.last_event_at < '2026-11-18 00:00:00\.000'/);
   assert.match(rows.sql, /\(s\.title MATCH_PHRASE 'clock' OR s\.first_input MATCH_PHRASE 'clock' OR s\.last_output MATCH_PHRASE 'clock'\)/);
   assert.match(rows.sql, /s\.title MATCH_PHRASE 'it\\'s'/);
@@ -36,7 +37,7 @@ test('Sessions: fixed condition, range, search on three columns, conditions, sor
   assert.match(rows.sql, /s\.first_input MATCH_PHRASE 'fail'/);
   assert.match(rows.sql, /left\(s\.first_input, 1000\) AS `first_input`/);
   assert.match(rows.sql, /ORDER BY s\.steps ASC, s\.session_id\nLIMIT 100 OFFSET 200$/);
-  assert.match(total.sql, /^SELECT count\(\*\) AS total\nFROM otel\.agent_sessions s\nWHERE /);
+  assert.match(total.sql, /^SELECT count\(\*\) AS total\nFROM otel\.agent_sessions s\nLEFT JOIN /);
   assert.doesNotMatch(total.sql, /ORDER BY|LIMIT/);
 });
 

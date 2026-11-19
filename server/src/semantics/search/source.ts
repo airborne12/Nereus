@@ -276,6 +276,33 @@ export function agentEventsSource(db = 'otel'): Source {
   };
 }
 
+/** agent_risks: the places where a session broke a safety rule, written by the rules job. */
+export function agentRisksSource(db = 'otel'): Source {
+  return {
+    name: 'agent_risks',
+    defaultSelect: 'ts, session_id, rule_name, what, why',
+    table: `${db}.agent_risks`,
+    timestampColumn: 'ts',
+    defaultFields: ['what', 'rule_name'],
+    attributeColumns: [],
+    aliases: { session: 'session_id', root: 'root_id' },
+    idColumns: [],
+    columns: [
+      col('session_id', 'string'),
+      col('rule', 'string', 'keyword'),
+      col('first_seq', 'number'),
+      col('rule_version', 'number'),
+      col('rule_name', 'string', 'fulltext'),
+      col('root_id', 'string', 'keyword'),
+      col('ts', 'datetime'),
+      col('turn', 'number'),
+      col('what', 'string', 'fulltext'),
+      col('why', 'string'),
+      col('found_at', 'datetime'),
+    ],
+  };
+}
+
 /** agent_messages: the content blocks of agent sessions, each stored once. */
 export function agentMessagesSource(db = 'otel'): Source {
   return {

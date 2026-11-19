@@ -5,7 +5,7 @@
 
 import { CompileError, sqlString } from '../search/compile.ts';
 import { MAX_LIMIT, type Statement, timeRange } from '../trajectory/query.ts';
-import { EVENT_KIND, eventsCtes } from './events.ts';
+import { EVENT_KIND, eventsCtes, rangeScope, type Scope } from './events.ts';
 import type { Step, StepKind } from './pattern.ts';
 
 export interface MatchRequest {
@@ -51,13 +51,14 @@ const STEP_KIND = new Map(Object.entries(EVENT_KIND).map(([kind, event]) => [eve
 const AFTER = 'OVER (PARTITION BY b.session_id ORDER BY b.pos ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING)';
 
 /** The conditions an event `c` meets to be taken by a step; `m` is the match so far. */
-function meets(step: Step, c: string): string[] {
+export function meets(step: Step, c: string): string[] {
   return [
     `${c}.kind = ${sqlString(EVENT_KIND[step.kind])}`,
     ...(step.tool ? [`${c}.what = ${sqlString(step.tool)}`] : []),
     ...(step.status ? [`${c}.status = ${sqlString(step.status === 'failed' ? 'error' : 'ok')}`] : []),
     ...(step.has ? [`instr(lower(${c}.target), ${sqlString(step.has)}) > 0`] : []),
     ...(step.any ? [`(${step.any.map((w) => `instr(lower(${c}.target), ${sqlString(w)}) > 0`).join(' OR ')})`] : []),
+    ...(step.re ? [`regexp(lower(${c}.target), ${sqlString(step.re)})`] : []),
     ...(step.same ? [`${c}.target = m.res${step.same}`, `${c}.target <> ''`] : []),
   ];
 }
@@ -100,6 +101,16 @@ function sortOf(req: MatchRequest): { by: string; step: number; dir: 'ASC' | 'DE
   return { by, step: step ? Number(step[1]) : 1, dir: dir === 'asc' ? 'ASC' : 'DESC' };
 }
 
+/** The numbered events of a scope and the levels `m1` … `m<k>` of a pattern, as the head of a statement. */
+export function patternCtes(db: string, scope: Scope, pattern: readonly Step[]): string {
+  const text = pattern.some((s) => s.kind === 'user' || s.kind === 'reply');
+  const windows = pattern.flatMap((s, i) => (i > 0 && byWindow(s) ? [`min(if(${meets(s, 'b').join(' AND ')}, b.pos, NULL)) ${AFTER} AS n${i + 1}`] : []));
+  const events = windows.length
+    ? [...eventsCtes(db, scope, 'base', text ? 'text' : 'calls'), `events AS (\n  SELECT b.*,\n         ${windows.join(',\n         ')}\n  FROM base b\n)`]
+    : eventsCtes(db, scope, 'events', text ? 'text' : 'calls');
+  return `WITH ${[...events, ...levels(pattern)].join(',\n')}`;
+}
+
 /**
  * The statements of the table of matches and its total, and the reader of the table's rows.
  * The table statement takes one page of matches, then joins the events of those matches once: it
@@ -111,13 +122,7 @@ export function matchSql(db: string, req: MatchRequest): { rows: Statement; tota
   if (!Number.isSafeInteger(req.limit) || req.limit < 1 || req.limit > MAX_LIMIT) throw new CompileError(`limit must be an integer from 1 to ${MAX_LIMIT}`);
   if (!Number.isSafeInteger(req.offset) || req.offset < 0) throw new CompileError('offset must be an integer of 0 or more');
   const sort = sortOf(req);
-  const range = timeRange(req.from, req.to);
-  const text = p.some((s) => s.kind === 'user' || s.kind === 'reply');
-  const windows = p.flatMap((s, i) => (i > 0 && byWindow(s) ? [`min(if(${meets(s, 'b').join(' AND ')}, b.pos, NULL)) ${AFTER} AS n${i + 1}`] : []));
-  const events = windows.length
-    ? [...eventsCtes(db, range, 'base', text ? 'text' : 'calls'), `events AS (\n  SELECT b.*,\n         ${windows.join(',\n         ')}\n  FROM base b\n)`]
-    : eventsCtes(db, range, 'events', text ? 'text' : 'calls');
-  const head = `WITH ${[...events, ...levels(p)].join(',\n')}`;
+  const head = patternCtes(db, rangeScope(timeRange(req.from, req.to)), p);
   const positions = Array.from({ length: k }, (_, i) => `pos${i + 1}`);
   const rows = [
     `${head},`,
@@ -147,15 +152,28 @@ export function matchSql(db: string, req: MatchRequest): { rows: Statement; tota
   };
 }
 
-/** The matches of the table statement's rows: `k` rows per match, one per step, in order. */
-function readMatches(rows: readonly Record<string, unknown>[], k: number): Match[] {
+/** One event of a match from a row that carries its columns. */
+export function stepOf(r: Record<string, unknown>): MatchStep {
+  return {
+    kind: STEP_KIND.get(String(r.kind)) ?? 'call', seq: Number(r.seq), call: r.call_seq === null || r.call_seq === undefined ? null : Number(r.call_seq),
+    ts: String(r.ts), turn: Number(r.turn), step: Number(r.step), what: String(r.what), status: String(r.status ?? ''), target: String(r.target ?? ''),
+  };
+}
+
+/** The rows of a statement that answers `k` rows per match, one per step in order, as one group per match. */
+export function groupsOf<T extends Record<string, unknown>>(rows: readonly T[], k: number): T[][] {
   return Array.from({ length: Math.ceil(rows.length / k) }, (_, i) => rows.slice(i * k, i * k + k)).map((group) => {
     const first = group[0]!;
     if (group.length !== k || group.some((r, j) => Number(r.j) !== j || r.session_id !== first.session_id || String(r.pos1) !== String(first.pos1))) throw new Error('the rows of a match are incomplete');
-    const steps = group.map((r): MatchStep => ({
-      kind: STEP_KIND.get(String(r.kind)) ?? 'call', seq: Number(r.seq), call: r.call_seq === null || r.call_seq === undefined ? null : Number(r.call_seq),
-      ts: String(r.ts), turn: Number(r.turn), step: Number(r.step), what: String(r.what), status: String(r.status ?? ''), target: String(r.target ?? ''),
-    }));
+    return group;
+  });
+}
+
+/** The matches of the table statement's rows. */
+function readMatches(rows: readonly Record<string, unknown>[], k: number): Match[] {
+  return groupsOf(rows, k).map((group) => {
+    const first = group[0]!;
+    const steps = group.map(stepOf);
     return {
       session_id: String(first.session_id), root_id: String(first.root_id), title: (first.title as string | null) ?? null, agent: String(first.agent),
       ts: steps[0]!.ts, turn: steps[0]!.turn, span: Number(first.span), steps,

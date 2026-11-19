@@ -35,7 +35,7 @@ import {
 } from './semantics/search/build.ts';
 import { CompileError, unknownFields } from './semantics/search/compile.ts';
 import {
-  agentEventsSource, agentMessagesSource, agentSessionsSource, logsSource, metricsSource, rumSource, tracesSource, type Source,
+  agentEventsSource, agentMessagesSource, agentRisksSource, agentSessionsSource, logsSource, metricsSource, rumSource, tracesSource, type Source,
 } from './semantics/search/source.ts';
 import { Doris, configFromEnv } from './db/doris.ts';
 import { type AuthContext, authRoutes, authenticate } from './control/auth/http.ts';
@@ -113,7 +113,7 @@ function send(res: ServerResponse, status: number, body: unknown, headers: Recor
 export function sourcesFor(db: string): Record<string, Source> {
   return {
     logs: logsSource(db), traces: tracesSource(db), metrics: metricsSource(db),
-    agent_sessions: agentSessionsSource(db), agent_events: agentEventsSource(db), agent_messages: agentMessagesSource(db),
+    agent_sessions: agentSessionsSource(db), agent_events: agentEventsSource(db), agent_messages: agentMessagesSource(db), agent_risks: agentRisksSource(db),
   };
 }
 

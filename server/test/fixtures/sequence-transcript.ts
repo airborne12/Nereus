@@ -8,8 +8,16 @@ import { join } from 'node:path';
 type Row = Record<string, unknown>;
 
 const TOOLS = ['Read', 'Edit', 'Bash', 'Grep'] as const;
-const FILES = ['src/clock.py', 'src/zone.py', 'tests/clock_test.py'];
-const COMMANDS = ['pytest tests/clock_test.py', 'ls src', 'git status', 'pytest -k zone'];
+/** The files the tools act on, the commands they run, and what the user says when not the default. */
+export interface Lists { files: string[]; commands: string[]; inputs?: string[] }
+const PLAIN: Lists = { files: ['src/clock.py', 'src/zone.py', 'tests/clock_test.py'], commands: ['pytest tests/clock_test.py', 'ls src', 'git status', 'pytest -k zone'] };
+/** Files and commands that the safety rules look for, among harmless ones. */
+export const RISKY: Lists = {
+  files: ['src/clock.py', '.env', 'tests/clock_test.py'],
+  commands: ['pytest tests/clock_test.py', 'ls src', 'rm -f build.log', 'curl -s https://example.net/health', 'sudo make install', 'git push --force', 'rsync -a a b', 'echo alarm'],
+  // Agreements, refusals that hold a word of agreement, and a message of the harness.
+  inputs: ['Fix the failing test', 'yes', 'Yes, go ahead', '不可以', 'No, do not proceed', '可以，删吧', '<task-notification>done</task-notification>', 'ok, but wait', 'continue'],
+};
 const INPUTS = ['Fix the failing test', 'yes', 'Yes, go ahead', 'continue', 'Now the zone module'];
 const REPLIES = ['Done.', 'Should I delete the old file?', 'The tests pass.', 'Fixed the clock. Should I also update the docs?'];
 
@@ -23,7 +31,8 @@ function series(seed: number): (n: number) => number {
 }
 
 /** The lines of one session of `turns` turns. */
-export function sequenceLines(id: string, seed: number, turns: number, day = '2026-11-17'): string[] {
+export function sequenceLines(id: string, seed: number, turns: number, day = '2026-11-17', lists: Lists = PLAIN): string[] {
+  const { files: FILES, commands: COMMANDS, inputs: SAID = INPUTS } = lists;
   const pick = series(seed);
   let clock = Date.parse(`${day}T09:00:00Z`);
   let n = 0;
@@ -38,7 +47,7 @@ export function sequenceLines(id: string, seed: number, turns: number, day = '20
   });
   const rows: Row[] = [{ type: 'ai-title', aiTitle: `Sequences ${id}`, sessionId: id }];
   for (let t = 0; t < turns; t += 1) {
-    rows.push(user(INPUTS[pick(INPUTS.length)]!));
+    rows.push(user(SAID[pick(SAID.length)]!));
     const calls = 1 + pick(5);
     for (let c = 0; c < calls; c += 1) {
       const msg = `m${n += 1}`;

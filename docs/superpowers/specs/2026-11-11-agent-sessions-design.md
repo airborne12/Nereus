@@ -1,9 +1,8 @@
 # Agent trajectories in Nereus: model, import, pages and judgments
 
 Date: 2026-11-11, revised 2026-11-17 after the prototype walk, 2026-11-19 after sub-project 1 and
-after the Sequences page.
-Status: sub-project 1 and the Sequences page of sub-project 2 are built; sections on the rest are
-design.
+after sub-project 2.
+Status: sub-projects 1 and 2 are built; sections on the later sub-projects are design.
 
 The pages of section 8 were settled one function at a time on a clickable prototype with invented
 data. Where this document and the prototype differ, this document wins.
@@ -271,18 +270,26 @@ step's input and of every exported conversation.
 
 ### 5.6 `agent_risks`
 
-Written by the rules job (6.5). `UNIQUE KEY (session_id, rule, first_seq)`, hash distribution on
-`session_id`.
+Written by the rules job (6.5), which replaces the rows of a tree each time it runs on it.
+`UNIQUE KEY (session_id, rule, first_seq)`, hash distribution on `session_id`.
 
 | Column | Type | Meaning |
 | --- | --- | --- |
-| `session_id`, `rule`, `first_seq` | VARCHAR(128), VARCHAR(64), BIGINT, NOT NULL | Key: the branch, the rule id, the first event of the breach |
+| `session_id`, `rule`, `first_seq` | VARCHAR(128), VARCHAR(64), BIGINT, NOT NULL | Key: the branch, the rule id, and the event the risk is keyed by: the first event of an order, or the command that needed a confirmation |
 | `rule_version` | INT NOT NULL | Version of the rule's code that found it |
+| `rule_name` | STRING | The rule's name when it found the risk, so the tables can show and search it |
 | `root_id` | VARCHAR(128) NOT NULL | For the Sessions page |
-| `ts`, `turn` | DATETIME(6), INT | Of the first event |
-| `events` | ARRAY<BIGINT> | The `seq` of every event of the breach |
+| `ts`, `turn` | DATETIME(6), INT | Of the event `first_seq` names |
+| `events` | ARRAY<BIGINT> | The `seq` of every event of the risk; for a command that needed a confirmation, the user's last input comes first |
+| `steps` | VARIANT | Those events as the risk view shows them: kind, turn, step, the model call of a tool call, name, status, target |
+| `what` | STRING | The events in words, joined by arrows |
 | `why` | STRING | The sentence filled from the rule's template and the events |
 | `found_at` | DATETIME(6) | When the job wrote it |
+
+Inverted indexes: `rule`, `root_id`, and tokenized indexes on `rule_name` and `what`.
+
+The risks of a tree are read only while its main session has a count in `safety_risks`. An import
+unsets the count, so risks that point at the events of an earlier import are not shown.
 
 ### 5.7 `agent_judges`
 
@@ -465,12 +472,20 @@ with SQL.
 
 | Job | Due work (SQL) | Does | Writes |
 | --- | --- | --- | --- |
-| Rules | Sessions whose `last_seq` is past the rules cursor | Runs the four rule statements (8.6) on those sessions | `agent_risks`; `safety_risks` |
+| Rules | Main sessions whose `safety_risks` is unset: an import unsets it, the job sets it | Runs the four rule statements (8.6) on the sessions of each such tree, replaces the tree's risks, then writes the counts | `agent_risks`; `safety_risks` |
 | Judge run | Picked steps without a verdict of the requested version, limited to the run's set | Builds what the model reads, calls the model with a token budget, validates the answer | `agent_judgments` |
 | Judge on new sessions | For judges set to run on new sessions: picked steps of sessions imported since the judge's cursor | As above, with the current version | `agent_judgments` |
 | Risk judgment | Risks without a judgment of the rule judge's current version | Model judgment of the candidate (rules find, the model decides) | `agent_judgments` |
 | Memory capture | Not SQL: one adapter per memory format reads the stores | Splits by the format's sections; writes a row when the content hash changes; infers the source if not recorded | `agent_memories` |
 | Memory validity | Sessions with a recorded read of the memory's `location` after the latest state | Fold: previous state plus one new session, oldest first | `agent_judgments` (judge `memory-validity`) |
+
+A lease is a row of `job_leases` in PostgreSQL (job, unit, holder, expiry); for the rules job a unit
+is a session tree. A runner takes the lease before it works on a tree and gives it back after; a
+lease that has expired can be taken by anyone. Once it holds the lease, a runner checks that the
+tree is still due, so a tree another runner finished meanwhile is not run twice. A tree whose run
+fails is named and stays due; the job goes on with the others and exits with 1. The rules job
+runs from the command line: `node src/cli/run-rules.ts`, with `--all` to run the rules on every
+tree again.
 
 A model call that fails is retried with backoff; after the last attempt the step gets `unsure`
 with the error as reason. Every run records its token counts. Model access is configured in
@@ -500,8 +515,8 @@ A CSV export holds at most 200,000 rows and 128 MiB of text, a conversations exp
 | Sessions | Main sessions by `last_event_at` in range; stored columns; search on title, first input, last output | `GET /api/agents/sessions` |
 | Steps | `llm_call` events with their tool calls; search joins a derived table of assistant blocks per word | `GET /api/agents/steps` |
 | Messages | Blocks with role and kind; `MATCH_PHRASE` on `text` per word | `GET /api/agents/messages` |
-| Risks | `agent_risks` with the latest judgment | `GET /api/agents/risks` |
-| Session tree and lanes | `WHERE root_id = ?`; one row per turn; the marks (calls that started a sub-agent and compactions first, then failed and repeated calls; at most 2,000, and the answer says when there were more); per step one light row (kind, status, repeat, context size, compaction) when the tree has at most 40 steps | `GET /api/agents/sessions/<id>` |
+| Risks | `agent_risks` of the trees whose rules have run since their last import, as a table page like the others; the judgment is `none` until sub-project 3 joins the verdicts | `GET /api/agents/risks` |
+| Session tree and lanes | `WHERE root_id = ?`; one row per turn; the marks (calls that started a sub-agent and compactions first, then failed and repeated calls; at most 2,000, and the answer says when there were more); per step one light row (kind, status, repeat, context size, compaction) when the tree has at most 40 steps; the risks of the tree (at most 500) and, with them, the rules | `GET /api/agents/sessions/<id>` |
 | Turn | The user's input and the text of the turn's last model call | `GET /api/agents/sessions/<id>/turns/<n>` |
 | Steps of a turn | One page of 100 steps of one turn | `GET /api/agents/sessions/<id>/turns/<n>/steps` |
 | Step | Input: context ranges joined with blocks, new blocks first, earlier ones on request; output; tool results | `GET /api/agents/sessions/<id>/steps/<seq>` |
@@ -542,7 +557,7 @@ Dashboard
 ```
 
 A page appears in the navigation with the sub-project that builds it: Sessions, Steps and Messages
-with sub-project 1, Sequences with the first plan of sub-project 2. The app opens on Sessions. In a window too narrow for the navigation's labels,
+with sub-project 1, Sequences and Risks with sub-project 2. The app opens on Sessions. In a window too narrow for the navigation's labels,
 a table page itself offers its sibling pages.
 
 A page of the navigation replaces whatever is open. Rules for every page:
@@ -564,8 +579,8 @@ A page of the navigation replaces whatever is open. Rules for every page:
 **Sessions.** A row is a main session with its tree. Columns, the first nine shown by default:
 Last activity (default sort), Session, Errors, Risks, First input, Last output, Turns, Steps,
 Tokens; in the menu: Started, Active time, Sub-agents, Compactions, Peak context, Model, User.
-Errors counts failed calls. Risks is a red count whose title names the rules; the column comes with
-sub-project 2. A session without a title is called by the first line of its first input. A
+Errors counts failed calls. Risks is a red count whose title names the rules; it opens the session
+on its first risk. A session on which the rules have not run since its import shows a dash. A session without a title is called by the first line of its first input. A
 checkbox column at the far left allows ticking two sessions for Compare. Export writes every
 matching session as a table (CSV, database column names, raw values) or as conversations (JSON
 lines, 8.4). In a CSV file, free text that a spreadsheet would run as a formula gets a leading
@@ -611,7 +626,9 @@ assistant's text and tool calls) and Tool results (a card per result naming its 
 duration). A turn reads the user's input and the final answer. A compaction reads the replaced
 messages (folded) and the summary. A risk reads "Safety risk i of N" with the model's judgment,
 what happened (the breach's events as buttons that open their step, marked on the left) and the
-rule.
+rule, drawn as a row of steps. A risk is shown in place of the selection and is named in the address
+(`risk=<session>:<rule>:<first event>`); the lanes stand at the event it is keyed by, Previous and
+Next go round the risks of the tree, and choosing a row leaves the view.
 
 Measured on the prototype with a 2,712-step session: about 20 ms to open and to select a step,
 1,340 elements on the page.
@@ -683,7 +700,28 @@ Four rules, defined in code as patterns compiled to SQL, run by the rules job:
 | Command outside the allowed set | deny | One call outside the allowed commands |
 
 A rule finds candidates; whether a candidate is a breach is a model judgment (Breach, Needs
-review, Not a breach, Not judged yet), shown first in the risk view.
+review, Not a breach, Not judged yet), shown first in the risk view. Until sub-project 3 every
+risk is "Not judged yet".
+
+As built:
+
+- The words of a command (`rm`, `curl`, `sudo` and the like) are matched as whole words of the
+  lower-case command: not inside another word, a path or an option, so `--rm` and `perform` are
+  not `rm`. A secret file is one whose path has `.env`, `credentials`, `secret`, `id_rsa` or
+  `token`; a test is a command or a file with `test`.
+- The two order rules and the deny rule are patterns of the Sequences compiler (8.5), run over
+  every event of the sessions of one tree, whatever their time.
+- The confirmation rule looks, for each irreversible command, at the last user input before it
+  in its session and at the event just before that input. An input that opens with a tag
+  (`<task-notification>`, `<command-name>` and the like) was written by the harness and is passed
+  over. The command is confirmed when that event is a reply with a question mark (`?` or `？`)
+  and the input agrees: it opens with `yes`, `go ahead`, `ok`, `okay`, `confirm` or `proceed` as
+  a whole word, or with `可以`, `好的`, `是的`, `确认`, `继续` or `同意`, and holds neither `no`,
+  `not`, `never`, `stop`, `wait`, `cancel`, `don't` or `dont` as a whole word nor `不`, `别`, `勿`,
+  `停` or `取消`. Otherwise the command is a risk, with the input listed before it.
+- A sub-agent has no user: what started it came from the assistant. Each irreversible command in
+  a sub-agent is a risk, which says so.
+- A rule has a version in code; a risk records the version that found it.
 
 ### 8.7 Judges
 
@@ -804,7 +842,8 @@ Sub-projects 1 to 5 are done when:
 5. Every page works on real data, including a session with more than 2,000 model calls, within the
    times measured on the prototype (session page and step selection under 50 ms in the browser).
 6. Every page shows its SQL, and all tests pass.
-7. Each safety rule finds its breach in the fixture, and every risk gets a model judgment.
+7. Each safety rule finds its breach in the fixture, and every risk gets a model judgment. The
+   first half holds since sub-project 2; the judgment comes with sub-project 3.
 8. A judge created on the form runs on real steps; after a new version, the out-of-date count is
    right, and a full rerun leaves none.
 9. Every captured memory shows its source as recorded, inferred with a score, or not recorded, and
@@ -833,9 +872,15 @@ Open questions:
   sub-project 6.
 - **Large exports.** An export over its cap (7) is refused today. A streamed download or
   `SELECT ... INTO OUTFILE` to object storage would lift the cap.
-- **Unverified statements.** Statements of Risks, Judges, Memories and Dashboard have not been run
-  on Doris yet. They are checked first in sub-projects 2 to 5. Those of the Sequences page are
+- **Unverified statements.** Statements of Judges, Memories and Dashboard have not been run on
+  Doris yet. They are checked first in sub-projects 3 to 5. Those of the Sequences page are
   checked: 157 patterns and 48 drawings against an independent computation on generated sessions.
+  Those of the safety rules too: each rule against a loop over generated sessions that hold its
+  words.
+- **Risks at scale.** On the acceptance data the rules job took about 12 s for 78 session trees
+  and found 169 risks in four trees: 140 commands without a confirmation, 12 of them in
+  sub-agents, and 29 commands outside the allowed set. Without a judgment every candidate counts
+  on the Sessions table, which is loud; sub-project 3 judges them.
 - **Targets at scale.** A pattern's statement reads the target of every tool call in the range.
   When a step is an input or a reply, it also joins the text blocks of those events by key,
   whatever their age, since a text said before keeps its first block; the join looks into every
@@ -857,9 +902,9 @@ One implementation plan per sub-project, in this order.
    adapter; writer, per-session columns and the import command; operations and endpoints; the table
    pages Sessions, Steps and Messages with filters, sort, columns, SQL and export; the session page;
    Compare; acceptance items 1 to 6 and 10.
-2. **Sub-project 2.** In two plans. First: pattern compiler and next-event paths; the Sequences
-   page. Second: the rules job and `agent_risks`; the Risks page, column and the risk view on the
-   session page.
+2. **Sub-project 2.** In two plans, both built. First: pattern compiler and next-event paths; the
+   Sequences page. Second: the rules job and `agent_risks`; the Risks page, column and the risk
+   view on the session page.
 3. **Sub-project 3.** `agent_judges`, `agent_judgments`; the model client and the judge runner with
    budgets; Judges list, page and form; versions, out-of-date and reruns; risk judgments.
 4. **Sub-project 4.** Memory adapters and capture; source inference; the Memories page; the
