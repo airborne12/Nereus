@@ -460,7 +460,7 @@ test('a compaction, the Jump to buttons, the arrow keys and the SQL of the selec
 
   await page.getByRole('button', { name: 'SQL', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Generated SQL' });
-  assert.deepEqual(await dialog.locator('.ag-stmt h4 > span:first-child').allInnerTexts(), ['Session', 'Turns', 'Marks', 'Risks', 'Steps', 'Step', 'Input', 'Output', 'Prompt']);
+  assert.deepEqual(await dialog.locator('.ag-stmt h4 > span:first-child').allInnerTexts(), ['Session', 'Turns', 'Marks', 'Risks', 'Memories written', 'Steps', 'Step', 'Input', 'Output', 'Prompt']);
   await page.keyboard.press('Escape');
   // A place that does not exist says so on the right; the lanes stay.
   await page.goto(`${base}/agents/sessions/${MAIN_ID}?sel=${encodeURIComponent(main('s', 3))}`);

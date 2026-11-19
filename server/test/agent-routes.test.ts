@@ -109,14 +109,16 @@ test('a session tree answers sessions, turns, marks and risks; every step only w
   const big = call(stub(0, [{ session_id: 's', kind: 'main', steps: 41 }]).doris, '/api/agents/sessions/s');
   assert.equal(await big.done, true);
   const a = big.answers[0]!;
-  assert.deepEqual([a.status, a.body.openAll, a.body.steps, a.body.sql.map((s: any) => s.title)], [200, false, null, ['Session', 'Turns', 'Marks', 'Risks']]);
+  assert.deepEqual([a.status, a.body.openAll, a.body.steps, a.body.sql.map((s: any) => s.title)], [200, false, null, ['Session', 'Turns', 'Marks', 'Risks', 'Memories written']]);
+  // The stub answers one row: one memory the tree wrote, as the header names it.
+  assert.equal(a.body.memories.length, 1);
   assert.equal(a.body.marks.length, 1);
   // The stub answers one row to every statement: one risk, and with it the rules a page draws.
   assert.deepEqual([a.body.risks.length, a.body.risksCut, a.body.rules.map((r: any) => r.id)], [1, false, ['confirm', 'exfil', 'subvert', 'deny']]);
   assert.ok(a.body.rules.every((r: any) => /Answer violates when/.test(r.criterion)), 'each rule comes with the question its judge asks');
   const small = call(stub(0, [{ session_id: 's', kind: 'main', steps: 40 }]).doris, '/api/agents/sessions/s');
   await small.done;
-  assert.deepEqual(small.answers[0]!.body.sql.map((s: any) => s.title), ['Session', 'Turns', 'Marks', 'Risks', 'Steps']);
+  assert.deepEqual(small.answers[0]!.body.sql.map((s: any) => s.title), ['Session', 'Turns', 'Marks', 'Risks', 'Memories written', 'Steps']);
   assert.equal(small.answers[0]!.body.steps.length, 1);
 });
 
