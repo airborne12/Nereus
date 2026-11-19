@@ -76,7 +76,7 @@ export function pathsSql(db: string, req: PathsRequest): Statement {
     'CROSS JOIN (SELECT count(*) AS n FROM runs) t',
     // A node under one run in fifty is never drawn, so its branches are not needed; of a drawn node, the commonest ones are.
     `WHERE r.parent_times * ${RARE} >= t.n AND (r.rk = 1 OR (r.rk <= ${KIDS} AND r.times * ${RARE} >= t.n))`,
-    `ORDER BY r.level, ${keys.map((k) => `r.${k}`).join(', ')}`,
+    `ORDER BY r.level, r.rk, ${keys.map((k) => `r.${k}`).join(', ')}`,
   ].join('\n');
   return { title: 'Paths', sql };
 }
@@ -93,14 +93,14 @@ export interface Other { count: number; times: number }
 export interface PathNode { key: string; times: number; kids: PathNode[]; other: Other | null }
 export interface PathTree { total: number; kids: PathNode[]; other: Other | null }
 
-/** The tree of the drawing from the rows of the Paths statement. */
+/** The tree of the drawing from the rows of the Paths statement, which arrive in the order of their rank. */
 export function pathTree(rows: readonly PathRow[], depth: number): PathTree {
   const total = rows.length ? Number(rows[0]!.total) : 0;
   const keysOf = (r: PathRow): string[] => [r.k2, r.k3, r.k4].slice(0, Number(r.level) - 1);
   const under = (path: readonly string[], times: number): { kids: PathNode[]; other: Other | null } => {
     const level = path.length + 2;
     const branches = rows.filter((r) => Number(r.level) === level && path.every((k, i) => keysOf(r)[i] === k));
-    const shown = branches.filter((r) => Number(r.rk) <= KIDS && Number(r.times) * RARE >= total).sort((a, b) => Number(a.rk) - Number(b.rk));
+    const shown = branches.filter((r) => Number(r.rk) <= KIDS && Number(r.times) * RARE >= total);
     const kids = shown.map((r): PathNode => {
       const key = keysOf(r)[level - 2]!;
       const below = key !== '' && level < depth ? under([...path, key], Number(r.times)) : { kids: [], other: null };

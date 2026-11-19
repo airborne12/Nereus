@@ -50,6 +50,7 @@ test('what happens next takes its start and depth from the address', async () =>
   assert.match(seen[0]!, /what = 'Bash'/);
   await assert.rejects(call(doris, '/api/agents/sequences/next').done, /'from' and 'to' are required/);
   await assert.rejects(call(doris, `/api/agents/sequences/next?${RANGE}&depth=9`).done, /'depth' must be an integer from 2 to 4/);
+  await assert.rejects(call(doris, `/api/agents/sequences/next?${RANGE}&depth=abc`).done, /'depth' must be an integer from 2 to 4/);
   await assert.rejects(call(doris, `/api/agents/sequences/next?${RANGE}&start=Bash`).done, /'start' must be/);
 });
 

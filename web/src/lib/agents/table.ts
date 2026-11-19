@@ -61,14 +61,10 @@ export function parseRange(p: URLSearchParams): TableRange {
     : p.has('from') && fits ? { from, to } : { preset: DEFAULT_PRESET };
 }
 
-/** Writes a time range into the parameters of an address; the default range is left out. */
-export function writeRange(p: URLSearchParams, range: TableRange): void {
-  if ('preset' in range) {
-    if (range.preset !== DEFAULT_PRESET) p.set('t', range.preset);
-  } else {
-    p.set('from', String(Math.round(range.from)));
-    p.set('to', String(Math.round(range.to)));
-  }
+/** The parameters of an address that say a time range; the default range needs none. */
+export function rangeParams(range: TableRange): [string, string][] {
+  if ('preset' in range) return range.preset === DEFAULT_PRESET ? [] : [['t', range.preset]];
+  return [['from', String(Math.round(range.from))], ['to', String(Math.round(range.to))]];
 }
 
 /** The state an address holds; anything it does not say, or says wrongly, is the page's default. */
@@ -90,8 +86,7 @@ export function parseTableState(search: string, def: PageDef): TableState {
 
 /** The query string of a state; what equals the default is left out. */
 export function serializeTableState(s: TableState, def: PageDef): string {
-  const p = new URLSearchParams();
-  writeRange(p, s.range);
+  const p = new URLSearchParams(rangeParams(s.range));
   if (s.q.trim()) p.set('q', s.q.trim());
   for (const c of s.conditions) p.append('f', conditionParam(c));
   if (s.sort !== def.defaultSort) p.set('sort', s.sort);

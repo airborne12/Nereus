@@ -2,7 +2,7 @@
 // the page makes to a pattern, and the pattern a path of the drawing opens as.
 
 import type { Match } from '../../api/sequences.ts';
-import { parseRange, type TableRange, writeRange } from './table.ts';
+import { parseRange, rangeParams, type TableRange } from './table.ts';
 
 /** An event of a sequence: a tool call, a user input, a reply that ends a turn, or a compaction. */
 export type StepKind = 'call' | 'user' | 'reply' | 'compaction';
@@ -99,8 +99,7 @@ export function parseSeqState(search: string): SeqState {
 
 /** The query string of a state; what equals the default is left out. */
 export function serializeSeqState(s: SeqState): string {
-  const p = new URLSearchParams();
-  writeRange(p, s.range);
+  const p = new URLSearchParams(rangeParams(s.range));
   if (s.start !== DEFAULT_START) p.set('start', s.start);
   if (s.pattern) {
     p.set('p', JSON.stringify(s.pattern));

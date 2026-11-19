@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { bandPath, half, indent, kindOf, rowTops, windowOf } from '../src/lib/agents/lane-draw.ts';
 import {
-  branchKey, buildTree, chain, childrenOf, itemsKey, itemsOf, jumpTargets, laneRows, nextTarget, pagesToRead, reveal,
+  branchKey, buildTree, chain, childrenOf, itemsKey, itemsOf, jumpTargets, laneRows, nextTarget, pagesToRead, reveal, rowKeyOf,
   stepFailed, stepLabel, stepRepeats, stepTotalUs, twistOf, type Item, type LaneRow, type Step, type Tree,
 } from '../src/lib/agents/lanes.ts';
 
@@ -281,4 +281,14 @@ test('long turns, long chains and many marks are read in one pass', () => {
   assert.deepEqual([list.length, stepAt(list, n - 1).tools.map((t) => t.name), links.links.length, links.more, targets.length], [n, ['Bash'], 9, true, n]);
   // Work that grows with the square of the size takes many seconds here.
   assert.ok(took < 1500, `took ${Math.round(took)} ms`);
+});
+
+test('a turn of a sub-agent has no row of its own: the row that stands for it is the one of its branch', () => {
+  // The only sub-agent of a step is drawn under that step.
+  assert.equal(rowKeyOf(tree, 't:a:1'), 's:m:7');
+  // Several sub-agents of one step have a row each.
+  const two = buildTree({ sessions: TWO_SESSIONS, turns: TWO_TURNS, marks: TWO_MARKS });
+  assert.deepEqual([rowKeyOf(two, 't:a:1'), rowKeyOf(two, 't:b:1')], ['t:a:1', 't:b:1']);
+  // Everything else is its own row: a turn of the main session, a step, a compaction, a key the tree does not know.
+  assert.deepEqual(['t:m:2', 's:a:2', 'c:m:12', 't:zz:1', 'nonsense'].map((k) => rowKeyOf(tree, k)), ['t:m:2', 's:a:2', 'c:m:12', 't:zz:1', 'nonsense']);
 });

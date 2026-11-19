@@ -50,14 +50,18 @@ test('the same target as an earlier step is carried along and compared', () => {
 
 test('a step on an input or a reply reads the text blocks', () => {
   const { rows } = matchSql('otel', req([{ kind: 'reply', has: 'should i' }, { kind: 'user', link: 'next' }, { tool: 'Bash', any: ['rm -rf', 'drop table'], link: 'later' }]));
-  assert.match(rows.sql, /^WITH texts AS \(\n {2}SELECT session_id, event_seq, group_concat\(text, '\\n' ORDER BY msg_seq\) AS text\n {2}FROM otel\.agent_messages/);
+  // The event names its text block, so one join by key reads it; no block is looked for by its event.
+  assert.match(rows.sql, /^WITH base AS \(/);
+  assert.doesNotMatch(rows.sql, /texts AS|event_seq/);
+  assert.match(rows.sql, /ELSE coalesce\(if\(m\.kind = 'text', m\.text, NULL\), ''\) END AS target/);
   assert.match(rows.sql, /LEFT JOIN otel\.agent_messages m ON m\.session_id = e\.session_id AND m\.msg_seq = e\.msg_seq/);
   assert.match(rows.sql, /a\.kind = 'llm_call' AND instr\(lower\(a\.target\), 'should i'\) > 0/);
   assert.match(rows.sql, /\(instr\(lower\(b\.target\), 'rm -rf'\) > 0 OR instr\(lower\(b\.target\), 'drop table'\) > 0\)/);
 });
 
 test('text from the request appears only inside escaped literals', () => {
-  const { rows } = matchSql('otel', req([{ tool: "x' OR 1=1 --", has: "a'b\\" }]));
+  const { rows } = matchSql('otel', req([{ tool: "x' OR 1=1 --", has: "a'b\\", any: ["') OR ('1'='1"] }]));
+  assert.ok(rows.sql.includes(String.raw`(instr(lower(a.target), '\') or (\'1\'=\'1') > 0)`));
   assert.ok(rows.sql.includes(String.raw`a.what = 'x\' OR 1=1 --'`));
   assert.ok(rows.sql.includes(String.raw`instr(lower(a.target), 'a\'b\\') > 0`));
 });
@@ -74,6 +78,9 @@ test('the table sorts by where a match starts, by a step, or by its span', () =>
   assert.throws(() => matchSql('otel', req(two, { dir: 'up' as 'asc' })), /sort direction must be asc or desc/);
   assert.throws(() => matchSql('otel', req(two, { limit: 0 })), /limit must be an integer from 1 to 1000/);
   assert.throws(() => matchSql('otel', req(two, { offset: -1 })), /offset must be an integer of 0 or more/);
+  // A number too large to be exact is refused, not written into the statement.
+  assert.throws(() => matchSql('otel', req(two, { offset: 1e21 })), /offset must be an integer of 0 or more/);
+  assert.throws(() => matchSql('otel', req(two, { limit: 1.5 })), /limit must be an integer from 1 to 1000/);
   assert.throws(() => matchSql('otel', req(two, { to: '2026-11-16T00:00:00Z' })), /time range is empty/);
 });
 

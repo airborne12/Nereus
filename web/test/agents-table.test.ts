@@ -6,6 +6,7 @@ import { filterParams } from '../src/api/agents.ts';
 import { MESSAGES, openTarget, SESSIONS, sessionName, sessionUrl, shownColumns, STEPS } from '../src/lib/agents/pages.ts';
 import {
   conditionFrom, conditionLabel, defaultState, filterText, opsOf, parseTableState, queryOf, resolveRange, serializeTableState, sortBy, syncDraft,
+  rangeParams,
 } from '../src/lib/agents/table.ts';
 
 test('the pages list their columns in the order of the specification, the time first', () => {
@@ -109,4 +110,10 @@ test('the search box keeps what is being typed when the address catches up with 
   // A search set from elsewhere (the address, another page) replaces the box.
   assert.equal(syncDraft('public', 'other'), 'other');
   assert.equal(syncDraft('typed', ''), '');
+});
+
+test('the time range of an address, as the parameters that say it', () => {
+  assert.deepEqual(rangeParams({ preset: '7d' }), [], 'the default range is left out');
+  assert.deepEqual(rangeParams({ preset: '24h' }), [['t', '24h']]);
+  assert.deepEqual(rangeParams({ from: 1000.4, to: 2000 }), [['from', '1000'], ['to', '2000']]);
 });

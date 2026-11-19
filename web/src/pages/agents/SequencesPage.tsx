@@ -103,7 +103,7 @@ export function SequencesPage({ search, go }: { search: string; go: Go }) {
           {/* Rows of the pattern shown before stay while the new ones are read, unless they have other columns. */}
           <MatchTable pattern={state.pattern} rows={shown && shown.rows[0]?.steps.length === state.pattern.length ? shown.rows : []} sort={state.sort} dir={state.dir} onSort={sortBy} onOpen={openMatch}
             more={found ? found.matches - found.rows.length : 0} onMore={more} loadingMore={loadingMore}
-            empty={!shown && !error ? 'Loading…' : 'No events follow one another this way in the time range.'} />
+            empty={found ? 'No events follow one another this way in the time range.' : error ? '' : 'Loading…'} />
         </div>
         {showSql && <SqlDialog statements={[...(shown?.sql ?? []), ...tools.sql]} onClose={() => setShowSql(false)} />}
       </div>

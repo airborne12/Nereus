@@ -1,6 +1,7 @@
 // Sequence patterns and "what happens next" on a live Doris, against an independent computation
-// (spec 11): the events are read back with plain statements and matched here by a loop, and the
-// compiled statements must find the same matches and the same tree. Skipped unless DORIS_TEST=1.
+// (spec 11): the events are read back with a plain statement and matched by a loop, with the text
+// of inputs and replies taken from the transcripts; the compiled statements must find the same
+// matches and the same tree. Skipped unless DORIS_TEST=1.
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -12,11 +13,12 @@ import { importFile } from '../src/cli/import-transcripts.ts';
 import { Doris, configFromEnv } from '../src/db/doris.ts';
 import { streamLoad, streamLoadConfigFromEnv } from '../src/db/stream-load.ts';
 import { matchSql } from '../src/semantics/sequences/match.ts';
-import { parsePattern, type Step, type StepKind } from '../src/semantics/sequences/pattern.ts';
+import { parsePattern } from '../src/semantics/sequences/pattern.ts';
 import { KIDS, parseStart, pathsSql, pathTree, RARE, toolsSql, type Other, type PathNode, type PathRow, type PathTree } from '../src/semantics/sequences/paths.ts';
 import { writeFixture } from './fixtures/claude-transcript.ts';
 import { SEQ_A, writeSequences } from './fixtures/sequence-transcript.ts';
 import { applySchemaFile } from './schema-helper.ts';
+import { bySession, type Ev, find, readEvents, spoken } from './sequence-reference.ts';
 
 const enabled = process.env.DORIS_TEST === '1';
 const db = `nereus_sequences_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
@@ -26,7 +28,6 @@ const PART = { from: '2026-11-17T09:01:30Z', to: '2026-11-17T09:04:00Z' };
 let doris: Doris;
 let dir = '';
 
-interface Ev { session_id: string; seq: number; ts: string; kind: StepKind; name: string; status: string; target: string }
 let all: Ev[] = [];
 
 before(async () => {
@@ -38,7 +39,7 @@ before(async () => {
   const load = (t: string, l: string, r: readonly object[]) => streamLoad(cfg, db, t, l, r);
   dir = mkdtempSync(join(tmpdir(), 'nereus-sequences-'));
   for (const file of [writeFixture(dir), ...writeSequences(dir)]) await importFile(file, { doris, db, load });
-  all = await readEvents();
+  all = await readEvents(doris, db, spoken(dir));
 });
 after(async () => {
   if (dir) rmSync(dir, { recursive: true, force: true });
@@ -46,53 +47,10 @@ after(async () => {
   try { await doris.query(`DROP DATABASE IF EXISTS ${db} FORCE`); } finally { await doris.close(); }
 });
 
-/** The events of every session in order, with their targets worked out here from the blocks. */
-async function readEvents(): Promise<Ev[]> {
-  const events = await doris.query(`SELECT session_id, seq, ts, kind, name, status, resource, CAST(args AS STRING) AS args, msg_seq, stop_reason FROM ${db}.agent_events ORDER BY session_id, seq`);
-  const blocks = await doris.query(`SELECT session_id, msg_seq, event_seq, msg_role, text FROM ${db}.agent_messages WHERE kind = 'text' ORDER BY session_id, msg_seq`);
-  const KIND: Record<string, StepKind> = { tool_call: 'call', user_input: 'user', compaction: 'compaction', llm_call: 'reply' };
-  return events
-    .filter((e) => e.kind === 'user_input' || e.kind === 'tool_call' || e.kind === 'compaction' || (e.kind === 'llm_call' && e.stop_reason === 'end_turn'))
-    .map((e): Ev => {
-      const own = blocks.find((b) => b.session_id === e.session_id && Number(b.msg_seq) === Number(e.msg_seq));
-      const said = blocks.filter((b) => b.session_id === e.session_id && b.msg_role === 'assistant' && Number(b.event_seq) === Number(e.seq)).map((b) => String(b.text));
-      const text = own ? String(own.text) : e.kind === 'llm_call' && said.length ? said.join('\n') : '';
-      const target = e.kind === 'tool_call' ? String(e.resource ?? e.args ?? '') : e.kind === 'compaction' ? '' : text;
-      return { session_id: String(e.session_id), seq: Number(e.seq), ts: String(e.ts), kind: KIND[String(e.kind)]!, name: String(e.name ?? ''), status: String(e.status ?? ''), target };
-    });
-}
-
 const stamp = (iso: string) => iso.replace('T', ' ').replace('Z', '');
 /** The events of a range, per session, in order. */
 function streams(range: { from: string; to: string }): Ev[][] {
-  const inRange = all.filter((e) => e.ts >= stamp(range.from) && e.ts < stamp(range.to));
-  return [...new Set(inRange.map((e) => e.session_id))].map((id) => inRange.filter((e) => e.session_id === id));
-}
-
-const meets = (s: Step, e: Ev, taken: readonly Ev[]): boolean => s.kind === e.kind
-  && (!s.tool || e.name === s.tool)
-  && (!s.status || e.status === (s.status === 'failed' ? 'error' : 'ok'))
-  && (!s.has || e.target.toLowerCase().includes(s.has))
-  && (!s.any || s.any.some((w) => e.target.toLowerCase().includes(w)))
-  && (!s.same || (e.target !== '' && e.target === taken[s.same - 1]!.target));
-
-/** The matches in one session: every event that meets step 1 starts at most one, each further step takes the nearest event. */
-function find(pattern: readonly Step[], events: readonly Ev[]): { taken: Ev[]; span: number }[] {
-  return events.flatMap((first, at) => {
-    if (!meets(pattern[0]!, first, [])) return [];
-    const taken = [first];
-    const where = [at];
-    for (let j = 1; j < pattern.length; j += 1) {
-      const from = where[j - 1]! + 1;
-      const end = pattern[j]!.link === 'next' ? Math.min(from + 1, events.length) : events.length;
-      let hit = -1;
-      for (let i = from; i < end && hit < 0; i += 1) if (meets(pattern[j]!, events[i]!, taken)) hit = i;
-      if (hit < 0) return [];
-      taken.push(events[hit]!);
-      where.push(hit);
-    }
-    return [{ taken, span: where[where.length - 1]! - where[0]! + 1 }];
-  });
+  return bySession(all.filter((e) => e.ts >= stamp(range.from) && e.ts < stamp(range.to)));
 }
 
 const TOOLS = ['Read', 'Edit', 'Bash', 'Grep'];
@@ -154,7 +112,21 @@ test('every pattern finds the matches a loop over the events finds', { skip: !en
 });
 
 test('a time range cuts the sessions before matching', { skip: !enabled }, async () => {
-  await each(PATTERNS.filter((_, i) => i % 5 === 0), async (p) => { await compare(p, PART); });
+  let found = 0;
+  await each(PATTERNS.filter((_, i) => i % 5 === 0), async (p) => { found += await compare(p, PART); });
+  assert.ok(found > 20, `${found} matches inside the stretch`);
+});
+
+test('a reply has its text when it thought first, and when it said the same before', { skip: !enabled }, async () => {
+  const said = spoken(dir).get(SEQ_A)!.replies;
+  const asking = said.filter((t) => t.toLowerCase().includes('should i')).length;
+  // The generated session repeats four replies over forty turns, a third of them after a thinking block.
+  assert.ok(asking > 10 && new Set(said).size === 4, `${asking} of ${said.length} replies ask`);
+  const pattern = parsePattern([{ kind: 'reply', has: 'should i' }]);
+  const { total } = matchSql(db, { from: '2026-11-17T09:00:00Z', to: '2026-11-17T09:30:00Z', pattern, limit: 100, offset: 0 });
+  const here = all.filter((e) => e.kind === 'reply' && e.target.toLowerCase().includes('should i')).length;
+  assert.equal(Number((await doris.query(total.sql))[0]!.matches), here);
+  assert.ok(here >= asking);
 });
 
 test('a match carries its events as the page shows them', { skip: !enabled }, async () => {

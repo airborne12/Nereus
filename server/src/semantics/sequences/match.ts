@@ -69,6 +69,7 @@ const byWindow = (step: Step): boolean => step.link === 'later' && !step.same;
 function levels(pattern: readonly Step[]): string[] {
   const kept = [...new Set(pattern.flatMap((s) => (s.same ? [s.same] : [])))].sort((a, b) => a - b);
   // What a level takes from its own event: the target later steps compare with, and where the next step is.
+  // min_by passes over NULL. That is right for `n`: where the nearest event has none, no later one has either.
   const taken = (j: number, c: string, grouped: boolean): string[] => [
     ...(kept.includes(j) ? [grouped ? `min_by(${c}.target, ${c}.pos) AS res${j}` : `${c}.target AS res${j}`] : []),
     ...(pattern[j] && byWindow(pattern[j]!) ? [grouped ? `min_by(${c}.n${j + 1}, ${c}.pos) AS nx${j + 1}` : `${c}.n${j + 1} AS nx${j + 1}`] : []),
@@ -107,8 +108,8 @@ function sortOf(req: MatchRequest): { by: string; step: number; dir: 'ASC' | 'DE
 export function matchSql(db: string, req: MatchRequest): { rows: Statement; total: Statement; matches: (rows: readonly Record<string, unknown>[]) => Match[] } {
   const p = req.pattern;
   const k = p.length;
-  if (!Number.isInteger(req.limit) || req.limit < 1 || req.limit > MAX_LIMIT) throw new CompileError(`limit must be an integer from 1 to ${MAX_LIMIT}`);
-  if (!Number.isInteger(req.offset) || req.offset < 0) throw new CompileError('offset must be an integer of 0 or more');
+  if (!Number.isSafeInteger(req.limit) || req.limit < 1 || req.limit > MAX_LIMIT) throw new CompileError(`limit must be an integer from 1 to ${MAX_LIMIT}`);
+  if (!Number.isSafeInteger(req.offset) || req.offset < 0) throw new CompileError('offset must be an integer of 0 or more');
   const sort = sortOf(req);
   const range = timeRange(req.from, req.to);
   const text = p.some((s) => s.kind === 'user' || s.kind === 'reply');

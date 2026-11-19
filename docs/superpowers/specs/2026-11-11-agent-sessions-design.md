@@ -218,7 +218,7 @@ and tokenized indexes on `title`, `first_input` and `last_output`.
 | `ctx_change` | VARCHAR(16) | `fresh`, `append`, `truncate`, `compact` |
 | `ctx_exact` | BOOLEAN | True when the context comes from a request log, false when inferred |
 | `prompt_hash` | VARCHAR(64) | System prompt and tool definitions of this call |
-| `msg_seq`, `result_msg` | BIGINT | Block this event produced; tool-result block |
+| `msg_seq`, `result_msg` | BIGINT | The block the event names: an input's text, a tool call's block, and for a model call the first text it wrote, or its first block when it wrote none; tool-result block |
 | `tool_call_id` | VARCHAR(128) | Provider id of the tool call |
 | `resource` | STRING | The object the tool call acts on: file path, URL or command |
 | `args` | VARIANT | Tool arguments |
@@ -386,7 +386,8 @@ The adapter emits records of these kinds, in source order per session:
   takes its call id, so two identical calls stay two blocks. Within a session, a block whose hash
   is already known keeps its `msg_seq`; a new hash gets `last_msg_seq + 1`.
 - **Events.** A user prompt opens a turn and becomes a `user_input` event. The blocks of one API
-  message become one `llm_call` event; `step` increases by one. Each tool-use block becomes a
+  message become one `llm_call` event, which names the first text block among them; `step`
+  increases by one. Each tool-use block becomes a
   `tool_call` event whose `parent_seq` is that model call. The matching tool-result block sets
   `status`, `end_ts`, `duration_us` and `result_msg` on the same key. A compaction record becomes a
   `compaction` event and its summary is a block of kind `summary`. An error record becomes an
@@ -654,13 +655,18 @@ Turn, one column per step, Span); a row opens the session with the match's steps
 three examples are offered as starting patterns.
 
 The events of a session are numbered inside the time range, so a match never reaches outside it. A
-sub-agent is a session of its own. The target of a tool call is its `resource`, or its arguments
-as text when the tool has none; the target of an input or a reply is its text. "Has" ignores case.
+sub-agent is a session of its own. Tool calls that one model call issued together follow one
+another in the order the model wrote them, so the event after a call can be a call issued with it,
+before its result was known. The target of a tool call is its `resource`, or its arguments
+as text when the tool has none; the target of an input is its text, that of a reply the first
+text it wrote. "Has" ignores case.
 "Same target" needs a target that is not empty. A failed call is one whose status is `error`.
 The pattern and its sort are in the address; a match opened in its session carries its events in
-the address as `marks`, and they stay marked while the selection moves.
+the address as `marks`, and they stay marked while the selection moves. A turn of a sub-agent has
+no row of its own on the lanes: a mark or a selection of it falls on the row that stands for the
+sub-agent, which is the step that started it.
 
-Measured on the real sessions of the acceptance database (31 days, 57 sessions, about 15,000
+Measured on the real sessions of the acceptance database (31 days, 57 sessions with tool calls, about 15,000
 events of a sequence; result caches off): the drawing reads in about 75 ms; a pattern's table in
 120 to 200 ms and its total in 30 to 165 ms, for patterns of one to four steps with up to 12,532
 matches.
@@ -830,9 +836,14 @@ Open questions:
 - **Unverified statements.** Statements of Risks, Judges, Memories and Dashboard have not been run
   on Doris yet. They are checked first in sub-projects 2 to 5. Those of the Sequences page are
   checked: 157 patterns and 48 drawings against an independent computation on generated sessions.
-- **Targets at scale.** A pattern's statement reads the target of every tool call in the range, and
-  the text of every input and reply when a step is one of those. On large ranges the targets of
-  the page's rows alone could be read after the matches are found.
+- **Targets at scale.** A pattern's statement reads the target of every tool call in the range.
+  When a step is an input or a reply, it also joins the text blocks of those events by key,
+  whatever their age, since a text said before keeps its first block; the join looks into every
+  partition of `agent_messages`. On large ranges the targets of the page's rows alone could be
+  read after the matches are found.
+- **Calls issued together.** Whether "next" should pass over the calls a model call issued with
+  the one before is open. On the acceptance data the event after a failed call is such a call in
+  about one case in four.
 - **Rule and memory changes.** When a rule's code changes, its old risks are kept with their
   `rule_version`; whether to rerun automatically is open. When the memory-validity criterion
   changes, the fold must replay from the first state; not designed yet.

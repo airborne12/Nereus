@@ -7,7 +7,7 @@ import { blockOf } from '../../lib/agents/chat.ts';
 import { duration, num, plural, stamp, text, timeOf, tokens } from '../../lib/agents/format.ts';
 import {
   type Branch, branchKey, buildTree, type Item, itemsKey, itemsOf, type JumpKind, jumpTargets, type LaneRow, laneRows, nextTarget, pagesToRead, reveal,
-  STEPS_PAGE, type Tree,
+  rowKeyOf, STEPS_PAGE, type Tree,
 } from '../../lib/agents/lanes.ts';
 import { sessionName, sessionUrl } from '../../lib/agents/pages.ts';
 import { parseMarks, parseSel, type Selection, selKey, stepKey, turnKey } from '../../lib/agents/select.ts';
@@ -106,7 +106,8 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
   // The rows a match of a pattern marks; they stay marked while the selection moves.
   const marksParam = params.get('marks');
   const marks = useMemo(() => parseMarks(marksParam), [marksParam]);
-  const marked = useMemo(() => new Set(marks.map((m) => m.key)), [marks]);
+  // A mark in a sub-agent's turn falls on the row that stands for the sub-agent.
+  const marked = useMemo(() => new Set(marks.map((m) => (tree ? rowKeyOf(tree, m.key) : m.key))), [marks, tree]);
   const sel: Selection | null = useMemo(() => {
     const first = tree?.main.turns[0];
     return parseSel(param) ?? (tree && first ? { kind: 'turn', sid: first.sid, turn: first.no } : null);
@@ -236,7 +237,7 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
       </header>
       {error && <div className="error" role="alert">{error}</div>}
       <div className="ag-sbody">
-        <Lanes rows={rows} selected={key} marked={marked} scale={tree.scale} main={tree.main.sid} onSelect={onSelect} onTwist={onTwist} onMore={onMore} />
+        <Lanes rows={rows} selected={key ? rowKeyOf(tree, key) : null} marked={marked} scale={tree.scale} main={tree.main.sid} onSelect={onSelect} onTwist={onTwist} onMore={onMore} />
         <div className="ag-pane" key={key}>
           {sel && sel.kind !== 'turn' && (
             <p className="ag-crumbs">

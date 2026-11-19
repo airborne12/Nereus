@@ -28,7 +28,7 @@ export async function sequences(doris: Doris, db: string, send: Send, res: Serve
   if (url.pathname === '/api/agents/sequences/next') {
     const raw = p.get('start');
     const start = parseStart(raw);
-    const depth = intParam(url, 'depth', MAX_DEPTH, 0);
+    const depth = intParam(url, 'depth', MAX_DEPTH, 2, MAX_DEPTH);
     const statement = pathsSql(db, { ...rangeOf(p.get('from'), p.get('to')), start, depth });
     const { results, elapsedMs } = await run(doris, [statement]);
     send(res, 200, { start: start.kind === 'tool' ? `tool:${start.tool}` : start.kind, depth, ...pathTree(results[0] as unknown as PathRow[], depth), sql: [statement], elapsedMs });

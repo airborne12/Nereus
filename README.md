@@ -264,7 +264,7 @@ statements that ran (`sql`: title and text) and `elapsedMs`; a query error answe
 | `GET /api/agents/compare?a=&b=&turn=` | Two sessions' trees and turns; with `turn` (0 allowed), that pair of turns' steps paired in order, each with its context size, and the turn's compactions |
 | `GET /api/agents/sequences/next?from=&to=&start=&depth=` | What happens next: from every event of one kind (`failed`, `user` or `tool:<name>`), the events that came after it as a tree of at most `depth` columns (2 to 4), each node with how often its path occurs |
 | `GET /api/agents/sequences/tools?from=&to=` | The tools called in the range, most called first |
-| `POST /api/agents/sequences/match` | The places where the steps of a pattern follow one another; the body is `{from, to, pattern, sort, dir, limit, offset}` |
+| `POST /api/agents/sequences/match` | The places where the steps of a pattern follow one another. The body is `{from, to, pattern, sort, dir, limit, offset}`: `sort` is `time` (the default), `session`, `agent`, `turn`, `span` or `step<n>` for the time of a step, `dir` is `desc` (the default) or `asc`. The answer holds `rows`, one per match with the events of its `steps`, and the counts `matches` and `sessions` |
 
 `agent_sessions`, `agent_events` and `agent_messages` are also sources of search, charts and alerts
 (`/api/search?source=agent_messages&q=role:assistant AND timeout`).
@@ -290,7 +290,8 @@ second step on says how it follows the step before:
 Every event that meets the first step starts at most one match, and each further step takes the
 nearest event that meets it. The events of a session are its user inputs, tool calls, replies
 that end a turn and compactions inside the time range, in order; a sub-agent is a session of
-its own.
+its own. Tool calls that one model call issued together follow one another in the order the
+model wrote them.
 
 ### Agent trajectory pages
 

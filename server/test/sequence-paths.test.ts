@@ -28,7 +28,7 @@ test('the runs are read with lead() and counted per level', () => {
   assert.match(s.sql, /SELECT 2 AS level, k2, '' AS k3, '' AS k4, times,\n {9}row_number\(\) OVER \(ORDER BY times DESC, k2\) AS rk, count\(\*\) OVER \(\) AS siblings, sum\(times\) OVER \(\) AS parent_times/);
   assert.match(s.sql, /SELECT 4 AS level, k2, k3, k4, times,\n {9}row_number\(\) OVER \(PARTITION BY k2, k3 ORDER BY times DESC, k4\) AS rk/);
   assert.match(s.sql, /FROM runs WHERE k3 <> '' GROUP BY k2, k3, k4/);
-  assert.match(s.sql, /WHERE r\.parent_times \* 50 >= t\.n AND \(r\.rk = 1 OR \(r\.rk <= 3 AND r\.times \* 50 >= t\.n\)\)\nORDER BY r\.level, r\.k2, r\.k3, r\.k4$/);
+  assert.match(s.sql, /WHERE r\.parent_times \* 50 >= t\.n AND \(r\.rk = 1 OR \(r\.rk <= 3 AND r\.times \* 50 >= t\.n\)\)\nORDER BY r\.level, r\.rk, r\.k2, r\.k3, r\.k4$/);
 });
 
 test('a failed call or a user input as the start, and fewer columns', () => {

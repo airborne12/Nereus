@@ -20,7 +20,7 @@ import { Doris, configFromEnv } from '../../server/src/db/doris.ts';
 import { streamLoad, streamLoadConfigFromEnv } from '../../server/src/db/stream-load.ts';
 import { IngestKeys } from '../../server/src/rum/http.ts';
 import { createApp } from '../../server/src/server.ts';
-import { writeFixture } from '../../server/test/fixtures/claude-transcript.ts';
+import { AGENT_FILE_ID, MAIN_ID, writeFixture } from '../../server/test/fixtures/claude-transcript.ts';
 import { SEQ_A, SEQ_B, writeSequences } from '../../server/test/fixtures/sequence-transcript.ts';
 import { freshMetaDb } from '../../server/test/meta-helper.ts';
 import { applySchemaFile } from '../../server/test/schema-helper.ts';
@@ -260,6 +260,24 @@ test('a match opens its session with its events marked, and the page leads back 
   await total(/^\d+ matches in 2 sessions$/);
 });
 
+test('a match inside a sub-agent marks the row that stands for the sub-agent', async () => {
+  // The sub-agent of the first fixture: its input, then its search.
+  await page.goto(urlOf([{ kind: 'user', has: 'clock helpers' }, { kind: 'call', tool: 'Grep', link: 'next' }]));
+  await total('1 match in 1 session');
+  assert.equal((await rows().first().locator('td').nth(2).innerText()).trim(), 'Explore');
+  await rows().first().click();
+  await page.waitForURL((u) => u.pathname === `/agents/sessions/${MAIN_ID}` && u.searchParams.get('marks') !== null);
+  assert.equal(param('sel'), `t:${AGENT_FILE_ID}:1`);
+  await page.getByText('2 events of a pattern match marked on the left.').waitFor();
+  // The input of a sub-agent is its only turn; the step that started the sub-agent stands for it, and is selected.
+  const spawn = page.locator('.ag-trow.step.mk.sel');
+  await spawn.waitFor();
+  assert.match((await spawn.innerText()).replace(/\s+/g, ' '), /Agent Explore/);
+  await page.locator('.ag-trow.step.mk', { hasText: 'Grep' }).waitFor();
+  assert.equal(await page.locator('.ag-trow.mk').count(), 2);
+  await page.locator('.ag-pane').getByRole('heading', { name: 'Explore: turn 1' }).waitFor();
+});
+
 test('nothing matching and a refused request are said plainly', async () => {
   await page.goto(urlOf([{ kind: 'call', tool: 'Nothing' }]));
   await total('0 matches in 0 sessions');
@@ -267,6 +285,19 @@ test('nothing matching and a refused request are said plainly', async () => {
   await page.route('**/api/agents/sequences/match', (route) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'a pattern has 1 to 6 steps' }) }));
   await page.goto(urlOf([{ kind: 'call', tool: 'Read' }]));
   await page.getByRole('alert').filter({ hasText: 'a pattern has 1 to 6 steps' }).waitFor();
+  // A request that failed found nothing out: the page does not say that nothing matches.
+  assert.equal(await page.getByText('No events follow one another this way').count(), 0);
+  await page.unroute('**/api/agents/sequences/match');
+  // While a pattern with other columns is read, the table says it is loading.
+  await page.goto(urlOf([{ kind: 'call', tool: 'Read' }]));
+  await total(/^\d+ matches in \d sessions$/);
+  await page.route('**/api/agents/sequences/match', async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
+  await page.getByRole('button', { name: '+ Add step' }).click();
+  await page.locator('.ag-matches tr.ag-none', { hasText: 'Loading…' }).waitFor();
+  assert.equal(await page.getByText('No events follow one another this way').count(), 0);
   await page.unroute('**/api/agents/sequences/match');
   // An address that spells a pattern wrongly shows the drawing.
   await page.goto(`${base}/agents/sequences?p=nonsense`);
