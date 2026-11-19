@@ -6,6 +6,7 @@ import type { User } from '../../control/auth/store.ts';
 import type { Doris } from '../../db/doris.ts';
 import { compare } from './compare.ts';
 import { type JudgeAccess, judgeRoutes } from './judges.ts';
+import { mcp } from './mcp.ts';
 import { memory } from './memories.ts';
 import type { Send } from './request.ts';
 import { sequenceMatch, sequences } from './sequences.ts';
@@ -17,6 +18,7 @@ export function agentRoutes(o: { doris: Doris; db: string; send: Send; judges?: 
     if (!url.pathname.startsWith('/api/agents/')) return false;
     const { doris, db, send } = o;
     if (await judgeRoutes(o, req, res, url, user)) return true;
+    if (await mcp(doris, db, send, req, res, url)) return true;
     // The other post: a pattern arrives as a body. It reads only.
     if (req.method === 'POST') return sequenceMatch(doris, db, send, req, res, url);
     if (req.method !== 'GET') return false;
