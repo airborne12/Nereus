@@ -64,7 +64,7 @@ before(async () => {
   const meta = await freshMetaDb();
   drop = () => meta.drop();
   const report = await captureStores({ doris, db, load, leases: new Leases(meta.pool), now: () => new Date('2026-11-18T10:00:00Z') }, [
-    { agent: 'claude-code', scope: '-home-u-work', memories: [['build-cache-flag', BUILD], ['staging-deploy', STAGING]].map(([n, t]) => readClaudeMemory(`${MEMORY_DIR}/${n}.md`, t!, LATER)!) },
+    { agent: 'claude-code', scope: '-home-u-work', memories: [['build-cache-flag', BUILD], ['staging-deploy', STAGING]].map(([n, t]) => readClaudeMemory('-home-u-work', `${MEMORY_DIR}/${n}.md`, t!, LATER)!) },
     { agent: 'gemini-cli', scope: 'global', memories: readGeminiMemories('/home/u/.gemini/GEMINI.md', '## Gemini Added Memories\n- Use pnpm here.\n', 'global', LATER) },
   ]);
   assert.deepEqual([report.written, report.inferred], [3, 1]);

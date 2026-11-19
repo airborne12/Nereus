@@ -40,7 +40,7 @@ const LATER = Date.parse('2026-11-18T09:00:00Z');
 /** The two stores as the adapters read them: three Claude Code memories, or the ones given, and two Gemini CLI bullets. */
 function stores(claude: [string, string][] = [['build-cache-flag', BUILD], ['staging-deploy', STAGING], ['unrelated-note', UNRELATED]]): MemoryStore[] {
   return [
-    { agent: 'claude-code', scope: '-home-u-work', memories: claude.map(([n, text]) => readClaudeMemory(`${MEMORY_DIR}/${n}.md`, text, LATER)!) },
+    { agent: 'claude-code', scope: '-home-u-work', memories: claude.map(([n, text]) => readClaudeMemory('-home-u-work', `${MEMORY_DIR}/${n}.md`, text, LATER)!) },
     { agent: 'gemini-cli', scope: 'global', memories: readGeminiMemories('/home/u/.gemini/GEMINI.md', '## Gemini Added Memories\n- Use pnpm here.\n- Fridays are read-only.\n', 'global', LATER) },
   ];
 }
@@ -72,7 +72,7 @@ after(async () => {
 const versions = async () => doris.query(`SELECT name, source_kind, source_session_id, source_score, content_hash FROM ${db}.agent_memories ORDER BY name, captured_at`);
 
 test('a capture writes every memory, keeps a recorded source and infers one from the words of a session', { skip: !enabled }, async () => {
-  assert.deepEqual(await captureStores(deps, stores()), { stores: 2, written: 5, removed: 0, unchanged: 0, inferred: 1, held: 0, failed: [] });
+  assert.deepEqual(await captureStores(deps, stores()), { stores: 2, written: 5, removed: 0, unchanged: 0, inferred: 1, reinferred: 0, held: 0, failed: [] });
   const rows = Object.fromEntries((await versions()).map((r) => [String(r.name), [r.source_kind, r.source_session_id]]));
   assert.deepEqual(rows, {
     'build-cache-flag': ['recorded', WRITER_ID], 'staging-deploy': ['inferred', READER_ID], 'unrelated-note': ['none', null],
@@ -83,7 +83,7 @@ test('a capture writes every memory, keeps a recorded source and infers one from
 });
 
 test('an unchanged memory writes nothing; an edited one a new version; a removed one a row that says so', { skip: !enabled }, async () => {
-  assert.deepEqual(await captureStores(deps, stores()), { stores: 2, written: 0, removed: 0, unchanged: 5, inferred: 0, held: 0, failed: [] });
+  assert.deepEqual(await captureStores(deps, stores()), { stores: 2, written: 0, removed: 0, unchanged: 5, inferred: 0, reinferred: 0, held: 0, failed: [] });
   deps = { ...deps, now: () => new Date('2026-11-19T11:00:00Z') };
   const edited = await captureStores(deps, stores([['build-cache-flag', BUILD], ['staging-deploy', `${STAGING} Ask before a rebuild.`]]));
   assert.deepEqual([edited.written, edited.removed, edited.unchanged], [1, 1, 3]);

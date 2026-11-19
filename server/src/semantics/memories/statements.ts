@@ -13,7 +13,8 @@ export const REMOVED = 'removed';
 export const storeVersionsSql = (db: string, agent: string, scope: string): Statement => ({
   title: 'Memories of the store',
   sql: [
-    'SELECT name, max_by(content_hash, captured_at) AS content_hash, max_by(location, captured_at) AS location, max_by(format, captured_at) AS format',
+    'SELECT name, max_by(content_hash, captured_at) AS content_hash, max_by(location, captured_at) AS location, max_by(format, captured_at) AS format,',
+    '       max(captured_at) AS captured_at, max_by(source_kind, captured_at) AS source_kind',
     `FROM ${db}.agent_memories`,
     `WHERE agent = ${sqlString(agent)} AND scope = ${sqlString(scope)}`,
     'GROUP BY name',

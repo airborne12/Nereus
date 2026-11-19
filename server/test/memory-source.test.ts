@@ -44,7 +44,8 @@ test('a session found for more than half of the words is the inferred source, wi
 
 test('the latest version of each memory of a store, and the rows a capture writes', () => {
   assert.equal(storeVersionsSql('otel', 'claude-code', '-home-u-work').sql, [
-    'SELECT name, max_by(content_hash, captured_at) AS content_hash, max_by(location, captured_at) AS location, max_by(format, captured_at) AS format',
+    'SELECT name, max_by(content_hash, captured_at) AS content_hash, max_by(location, captured_at) AS location, max_by(format, captured_at) AS format,',
+    '       max(captured_at) AS captured_at, max_by(source_kind, captured_at) AS source_kind',
     'FROM otel.agent_memories',
     "WHERE agent = 'claude-code' AND scope = '-home-u-work'",
     'GROUP BY name',

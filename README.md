@@ -342,10 +342,16 @@ memory) and Gemini CLI memories (one per bullet under "## Gemini Added Memories"
     DORIS_HOST=127.0.0.1 DORIS_PORT=9030 DORIS_DB=otel DORIS_BE_HTTP_URL=http://127.0.0.1:8040 \
       META_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/nereus node src/cli/capture-memories.ts
 
-Without options it reads `~/.claude/projects` and `~/.gemini/GEMINI.md`; `--claude <folder>` and
-`--gemini <file>[=<scope>]` name others. A memory gets a new row of `agent_memories` only when its
-content or metadata changed, and a memory gone from its folder or file gets a row that says so. A
-store (one agent's memories of one scope) is taken under a lease. When the agent did not record
+Import the transcripts first: a memory's source is inferred from the sessions already imported, and
+`--reinfer` infers again the sources not recorded after older transcripts come in. Without a folder
+or file it reads `~/.claude/projects` and `~/.gemini/GEMINI.md`; `--claude <folder>` and
+`--gemini <file>[=<scope>]` name others, and one that is missing or cannot be read fails the
+command. A scope starts with its owner, user@host unless `--owner <name>` is given, so the memories
+of two hosts captured into one database stay apart. A memory gets a new row of `agent_memories`
+only when its content or its frontmatter as written changed, and a memory gone from its folder or
+file gets a row that says so. A store (one agent's memories of one scope) is taken under a lease,
+renewed before each inference. A name over 200 bytes is cut at a character boundary and ends with a
+short hash of the whole. When the agent did not record
 the session that wrote a memory, the capture looks for it: the memory's words (at most 40, without
 common words and headings) are matched against the first input and the assistant text of the same
 agent's sessions before the memory was updated, and a session holding more than half of them is

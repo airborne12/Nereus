@@ -1,6 +1,7 @@
 // The frontmatter of a memory file and its sections. The frontmatter is the small part of YAML that
-// memory files use: keys with plain or quoted values, maps nested by indentation, and lists of
-// `- item`. Anything else in it is passed over; the body is split by its own Markdown headings.
+// memory files use: keys with plain or quoted values, block values (`|`, `>`), maps nested by
+// indentation or written in braces, and lists of `- item` or in brackets. Anything else in it is
+// passed over; the body is split by its own Markdown headings.
 
 type Value = string | Value[] | { [key: string]: Value };
 interface Line { indent: number; text: string }
@@ -18,6 +19,31 @@ function scalar(raw: string): string {
   }
   if (s.length >= 2 && s.startsWith("'") && s.endsWith("'")) return s.slice(1, -1).replaceAll("''", "'");
   return s;
+}
+
+const BLOCK = /^([|>])([+-]?)$/;
+
+/** A block value: the lines under its key, kept apart (`|`) or folded into one (`>`), with its last line break as asked. */
+function blockValue(lines: readonly Line[], from: number, indent: number, mark: RegExpExecArray): [string, number] {
+  let i = from;
+  let parts: string[] = [];
+  while (i < lines.length && lines[i]!.indent > indent) {
+    parts = [...parts, lines[i]!.text];
+    i += 1;
+  }
+  const text = parts.join(mark[1] === '|' ? '\n' : ' ');
+  return [mark[2] === '-' || !text ? text : `${text}\n`, i];
+}
+
+/** A value written in braces or brackets with no nesting; anything else stays as written. */
+function flowValue(raw: string): Value {
+  const inner = raw.slice(1, -1).trim();
+  if (/[{}[\]]/.test(inner)) return raw;
+  const items = inner ? inner.split(',').map((x) => x.trim()) : [];
+  if (raw.startsWith('[')) return items.map(scalar);
+  const pairs = items.map((x) => /^([^:]+):\s*(.*)$/.exec(x));
+  if (pairs.some((p) => !p)) return raw;
+  return Object.fromEntries(pairs.map((p) => [p![1]!.trim(), scalar(p![2]!)]));
 }
 
 function list(lines: readonly Line[], from: number, indent: number): [Value[], number] {
@@ -45,9 +71,21 @@ function block(lines: readonly Line[], from: number, indent: number): [Value, nu
     const key = pair[1]!.trim();
     const rest = pair[2]?.trim() ?? '';
     const next = lines[i + 1];
-    if (rest !== '') {
+    const mark = BLOCK.exec(rest);
+    if (mark) {
+      const [value, after] = blockValue(lines, i + 1, indent, mark);
+      map = { ...map, [key]: value };
+      i = after;
+    } else if (/^\{.*\}$|^\[.*\]$/.test(rest)) {
+      map = { ...map, [key]: flowValue(rest) };
+      i += 1;
+    } else if (rest !== '') {
       map = { ...map, [key]: scalar(rest) };
       i += 1;
+    } else if (next && next.indent === indent && next.text.startsWith('- ')) {
+      const [value, after] = list(lines, i + 1, indent);
+      map = { ...map, [key]: value };
+      i = after;
     } else if (next && next.indent > indent) {
       const [value, after] = block(lines, i + 1, next.indent);
       map = { ...map, [key]: value };
@@ -60,18 +98,18 @@ function block(lines: readonly Line[], from: number, indent: number): [Value, nu
   return [map, i];
 }
 
-/** The fields of a leading `---` block and the body after it; a text without a closed block is all body. */
-export function parseFrontmatter(text: string): { fields: Record<string, unknown>; body: string } {
+/** The fields of a leading `---` block, the block as written, and the body after it; a text without a closed block is all body. */
+export function parseFrontmatter(text: string): { fields: Record<string, unknown>; body: string; raw: string } {
   const lines = text.split('\n');
-  if (lines[0]?.trim() !== '---') return { fields: {}, body: text };
+  if (lines[0]?.trim() !== '---') return { fields: {}, body: text, raw: '' };
   const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
-  if (end < 0) return { fields: {}, body: text };
+  if (end < 0) return { fields: {}, body: text, raw: '' };
   const kept = lines.slice(1, end)
     .filter((l) => l.trim() !== '' && !l.trim().startsWith('#'))
     .map((l) => ({ indent: l.length - l.trimStart().length, text: l.trim() }));
   const [value] = kept.length ? block(kept, 0, kept[0]!.indent) : [{}];
   const fields = Array.isArray(value) || typeof value === 'string' ? {} : value;
-  return { fields, body: lines.slice(end + 1).join('\n').replace(/^\n+/, '') };
+  return { fields, body: lines.slice(end + 1).join('\n').replace(/^\n+/, ''), raw: lines.slice(1, end).join('\n').trim() };
 }
 
 /** A body split by its Markdown headings; a line inside a code fence is never a heading. */

@@ -41,8 +41,8 @@ test('a frontmatter of keys, quoted values, nested maps and lists', () => {
     tags: ['build', 'cache'],
   });
   assert.ok(body.startsWith('Run `make`'));
-  assert.deepEqual(parseFrontmatter('No frontmatter here.'), { fields: {}, body: 'No frontmatter here.' });
-  assert.deepEqual(parseFrontmatter('---\nname: x\nno closing line'), { fields: {}, body: '---\nname: x\nno closing line' }, 'an unclosed frontmatter is body');
+  assert.deepEqual(parseFrontmatter('No frontmatter here.'), { fields: {}, body: 'No frontmatter here.', raw: '' });
+  assert.deepEqual(parseFrontmatter('---\nname: x\nno closing line'), { fields: {}, body: '---\nname: x\nno closing line', raw: '' }, 'an unclosed frontmatter is body');
 });
 
 test('a body is split by its own headings, not by lines inside a code fence', () => {
@@ -55,22 +55,22 @@ test('a body is split by its own headings, not by lines inside a code fence', ()
 
 test('a Claude Code auto memory: its name, kind, time and recorded source come from its frontmatter', () => {
   const path = '/home/u/.claude/projects/-home-u-work/memory/build-cache-flag.md';
-  const m = readClaudeMemory(path, CLAUDE, Date.parse('2026-11-12T08:00:00Z'))!;
+  const m = readClaudeMemory('-home-u-work', path, CLAUDE, Date.parse('2026-11-12T08:00:00Z'))!;
   assert.deepEqual([m.agent, m.scope, m.name, m.format, m.location, m.kind], ['claude-code', '-home-u-work', 'build-cache-flag', 'claude-auto-memory', path, 'feedback']);
   assert.equal(m.description, 'The build reuses its cache only with --keep: say so before a clean build');
   assert.equal(m.updated_at, '2026-11-11 00:17:09.197000');
   assert.deepEqual([m.source_session_id, m.source_kind], ['0f3c9a12-7d4e-4b8a-9c21-6e5f4d3b2a10', 'recorded']);
   assert.equal(m.sections.length, 3);
   assert.match(m.content_hash, /^[0-9a-f]{64}$/);
-  assert.equal(readClaudeMemory(path, `${CLAUDE}\n`, 0)!.content_hash, m.content_hash, 'a trailing new line is not a change');
-  assert.notEqual(readClaudeMemory(path, CLAUDE.replace('forty', 'fifty'), 0)!.content_hash, m.content_hash);
+  assert.equal(readClaudeMemory('-home-u-work', path, `${CLAUDE}\n`, 0)!.content_hash, m.content_hash, 'a trailing new line is not a change');
+  assert.notEqual(readClaudeMemory('-home-u-work', path, CLAUDE.replace('forty', 'fifty'), 0)!.content_hash, m.content_hash);
 });
 
 test('a memory without metadata takes its name from the file and its time from the file; the index is not a memory', () => {
-  const m = readClaudeMemory('/home/u/.claude/projects/-home-u-work/memory/plain-note.md', 'Just a note.', Date.parse('2026-11-12T08:00:00Z'))!;
+  const m = readClaudeMemory('-home-u-work', '/home/u/.claude/projects/-home-u-work/memory/plain-note.md', 'Just a note.', Date.parse('2026-11-12T08:00:00Z'))!;
   assert.deepEqual([m.name, m.kind, m.description, m.updated_at, m.source_session_id, m.source_kind], ['plain-note', null, null, '2026-11-12 08:00:00.000000', null, 'none']);
-  assert.equal(readClaudeMemory('/home/u/.claude/projects/-home-u-work/memory/MEMORY.md', '- [A](a.md) — hook', 0), null);
-  assert.equal(readClaudeMemory('/home/u/notes/x.md', 'Not in a memory folder.', 0), null);
+  assert.equal(readClaudeMemory('-home-u-work', '/home/u/.claude/projects/-home-u-work/memory/MEMORY.md', '- [A](a.md) — hook', 0), null);
+  assert.equal(readClaudeMemory('u@h:-p', '/data/copy/-p/memory/x.md', 'Read from any folder.', 0)!.scope, 'u@h:-p', 'the scope is the one the reader gives');
 });
 
 const GEMINI = [
@@ -98,5 +98,38 @@ test('Gemini CLI: one memory per bullet under "## Gemini Added Memories", with n
   assert.deepEqual([ms[1]!.content, ms[1]!.description, ms[1]!.updated_at, ms[1]!.sections], ['Use pnpm, not npm, in this repository.', null, '2026-11-12 08:00:00.000000', []]);
   assert.deepEqual(readGeminiMemories('/home/u/p/GEMINI.md', '# Nothing added', '/home/u/p', 0), []);
   const long = `## Gemini Added Memories\n- ${'word '.repeat(80)}`;
-  assert.equal(readGeminiMemories('/g', long, 'global', 0)[0]!.name.length, 200, 'a name is cut at 200 characters; the content keeps the whole bullet');
+  const [cut] = readGeminiMemories('/g', long, 'global', 0);
+  assert.ok(Buffer.byteLength(cut!.name) <= 200 && /… [0-9a-f]{8}$/.test(cut!.name), cut!.name);
+  assert.equal(cut!.content.length, 399, 'the content keeps the whole bullet');
+});
+
+test('a name is cut at 200 bytes on a character boundary with a hash of the whole text, so long or non-ASCII names fit and stay apart', () => {
+  const zh = '记'.repeat(144);
+  const [a] = readGeminiMemories('/g', `## Gemini Added Memories\n- ${zh}`, 'global', 0);
+  assert.ok(Buffer.byteLength(a!.name) <= 200, String(Buffer.byteLength(a!.name)));
+  assert.equal(a!.content, zh);
+  const [e] = readGeminiMemories('/g', `## Gemini Added Memories\n- ${'😀'.repeat(60)}`, 'global', 0);
+  assert.doesNotThrow(() => encodeURIComponent(e!.name), 'no character is split');
+  const start = 'same start '.repeat(25);
+  const two = readGeminiMemories('/g', `## Gemini Added Memories\n- ${start}one\n- ${start}two`, 'global', 0);
+  assert.notEqual(two[0]!.name, two[1]!.name, 'two bullets that share their start stay two memories');
+  assert.equal(readGeminiMemories('/g', '## Gemini Added Memories\n- Use pnpm.', 'global', 0)[0]!.name, 'Use pnpm.');
+  const claude = readClaudeMemory('p', '/x/memory/k.md', `---\nname: ${'n'.repeat(300)}\nmetadata:\n  type: ${'t'.repeat(40)}\n  originSessionId: ${'s'.repeat(200)}\n---\nBody`, 0)!;
+  assert.ok(Buffer.byteLength(claude.name) <= 200);
+  assert.equal(Buffer.byteLength(claude.kind!), 32);
+  assert.deepEqual([claude.source_session_id, claude.source_kind], [null, 'none'], 'an id too long for a session id is not one');
+});
+
+test('block values, flow maps and lists at their key\'s indent are read; an edit anywhere in the frontmatter is a new version', () => {
+  const text = ['---', 'name: block-note', 'description: |', '  First line', '  second line', 'summary: >-', '  folded', '  text',
+    'metadata: {type: project, originSessionId: s-9, modified: 2026-11-10T00:00:00Z}', 'tags:', '- a', '- b', '---', 'Body.'].join('\n');
+  assert.deepEqual(parseFrontmatter(text).fields, {
+    name: 'block-note', description: 'First line\nsecond line\n', summary: 'folded text',
+    metadata: { type: 'project', originSessionId: 's-9', modified: '2026-11-10T00:00:00Z' }, tags: ['a', 'b'],
+  });
+  const m = readClaudeMemory('p', '/x/memory/block-note.md', text, 0)!;
+  assert.deepEqual([m.description, m.kind, m.source_session_id, m.source_kind, m.updated_at], ['First line\nsecond line', 'project', 's-9', 'recorded', '2026-11-10 00:00:00.000000']);
+  assert.equal(readClaudeMemory('p', '/x/memory/n.md', '---\nname: >\n  folded name\n---\nBody', 0)!.name, 'folded name');
+  const odd = '---\nname: x\nweird: [a, {b: c}]\n---\nBody';
+  assert.notEqual(readClaudeMemory('p', '/x/memory/x.md', odd, 0)!.content_hash, readClaudeMemory('p', '/x/memory/x.md', odd.replace('c}', 'd}'), 0)!.content_hash);
 });

@@ -2,12 +2,10 @@
 // remember as bullets under "## Gemini Added Memories", one memory per bullet, with no metadata.
 
 import { dorisTime } from '../trajectory/model.ts';
-import { type MemoryRecord, memoryHash } from './model.ts';
+import { keyName, type MemoryRecord, memoryHash } from './model.ts';
 
 const ADDED = /^##\s+Gemini Added Memories\s*$/;
 const BULLET = /^[-*]\s+(.*)$/;
-/** The longest name a memory gets; its content keeps the whole bullet. */
-const NAME_CHARS = 200;
 
 /** The bullets of the section, a line indented under a bullet being part of it. */
 function bulletsOf(lines: readonly string[]): string[] {
@@ -29,8 +27,8 @@ export function readGeminiMemories(location: string, text: string, scope: string
   return bulletsOf(text.split('\n')).map((raw) => {
     const content = raw.replace(/\s+/g, ' ').trim();
     return {
-      agent: 'gemini-cli', scope, name: content.slice(0, NAME_CHARS), format: 'gemini-md', location, description: null, kind: null,
-      content, sections: [], fields: {}, content_hash: memoryHash({}, content), updated_at: at, source_session_id: null, source_kind: 'none',
+      agent: 'gemini-cli', scope, name: keyName(content), format: 'gemini-md', location, description: null, kind: null,
+      content, sections: [], fields: {}, content_hash: memoryHash('', content), updated_at: at, source_session_id: null, source_kind: 'none',
     };
   });
 }
