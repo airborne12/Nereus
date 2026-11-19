@@ -553,6 +553,16 @@ For agents that write memories, the same read operations are offered as two read
 (one session's turns or one step). Their calls are recorded in the agent's own trajectory, which is
 how a memory's sources become recorded rather than inferred.
 
+As built (MCP tools): the tools are served by the API service at `POST /api/agents/mcp` over the
+Streamable HTTP transport without a stream: one JSON-RPC message per request, answered with one
+(`initialize`, `tools/list`, `tools/call`, `ping`) or with 202 for a notification; the server keeps
+no session. Like every route under /api it takes an API key or a session cookie. `trajectory_search`
+runs the statement of the Sessions, Steps or Messages page (7 days ending now unless given, at most
+50 rows); `trajectory_read` answers a session's sessions and turns (at most 200), a turn's request,
+final answer and first 100 steps, or a step's event and output. A wrong argument is a tool error
+whose text says why. A memory's source is still the session its agent recorded or the one inferred;
+reading which sessions a memory-writing agent read with these tools is not done yet.
+
 ## 8. Pages
 
 ### 8.1 Navigation
