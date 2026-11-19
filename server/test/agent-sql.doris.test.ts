@@ -1,11 +1,15 @@
 // Every statement of the agent API is planned by Doris on empty tables (spec 11): each page with
-// every column as the sort and as a condition, the session page, Compare and the exports.
+// every column as the sort and as a condition, the session page, Compare, the exports and the
+// sequences.
 // Skipped unless DORIS_TEST=1.
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { Doris, configFromEnv } from '../src/db/doris.ts';
+import { matchSql } from '../src/semantics/sequences/match.ts';
+import { parsePattern } from '../src/semantics/sequences/pattern.ts';
+import { pathsSql, toolsSql } from '../src/semantics/sequences/paths.ts';
 import { compareSql } from '../src/semantics/trajectory/compare.ts';
 import { conversationSql } from '../src/semantics/trajectory/export.ts';
 import { messagesPage, sessionsPage, stepsPage } from '../src/semantics/trajectory/pages.ts';
@@ -60,4 +64,25 @@ test('session page, compare and exports', { skip: !enabled }, async () => {
     s.event, s.input, s.output, s.prompt, c.event, c.blocks, ...compareSql(db, 'm', 'n', 1),
     conv.size, conv.parts, conv.blocks, peek.size, peek.parts, peek.blocks,
   ]);
+});
+
+test('sequences: every shape of a step, every sort, and the drawing', { skip: !enabled }, async () => {
+  const range = { from: '2026-11-17T00:00:00Z', to: '2026-11-18T00:00:00Z' };
+  const patterns: unknown[][] = [
+    [{ tool: 'Read' }],
+    [{ tool: 'Edit' }, { tool: 'Bash', status: 'failed', has: 'test', link: 'next' }, { tool: 'Edit', same: 1, link: 'next' }],
+    [{ tool: 'Grep' }, { tool: 'Read', link: 'later' }, { tool: 'Edit', same: 2, link: 'later' }, { tool: 'Bash', status: 'ok', any: ['test', 'check'], link: 'later' }],
+    [{ kind: 'reply', has: 'should i' }, { kind: 'user', link: 'next' }, { kind: 'compaction', link: 'later' }, { link: 'next' }, { kind: 'user', same: 2, link: 'later' }, { kind: 'reply', link: 'later' }],
+  ];
+  const statements = patterns.flatMap((raw) => {
+    const pattern = parsePattern(raw);
+    const sorts = ['time', 'session', 'agent', 'turn', 'span', ...pattern.map((_, i) => `step${i + 1}`)];
+    return sorts.flatMap((sort) => {
+      const { rows, total } = matchSql(db, { ...range, pattern, sort, dir: 'asc', limit: 100, offset: 100 });
+      return [rows, total];
+    });
+  });
+  const drawings = [{ kind: 'failed' as const }, { kind: 'user' as const }, { kind: 'tool' as const, tool: 'Bash' }]
+    .flatMap((start) => [2, 3, 4].map((depth) => pathsSql(db, { ...range, start, depth })));
+  await planned([...statements, ...drawings, toolsSql(db, range.from, range.to)]);
 });
