@@ -85,6 +85,14 @@ test('a chunk in which no call reached the model stops the judging, and nothing 
   assert.equal((await judgeExcerpts({ model: one, concurrency: 2 }, V, excerpts)).rows.length, 4);
 });
 
+test('a system prompt given to the runner reaches every call', async () => {
+  const excerpts = await read(['a', 'b']);
+  const systems: (string | undefined)[] = [];
+  const model: JudgeModel = { judge: async (_m, _c, _x, system) => { systems.push(system); return { verdict: 'ok', reason: 'fine', inputTokens: 10, outputTokens: 1 }; } };
+  await judgeExcerpts({ model }, V, excerpts, { system: 'You check a risk.' });
+  assert.deepEqual(systems, ['You check a risk.', 'You check a risk.']);
+});
+
 test('a model that cannot be used stops the judging', async () => {
   const excerpts = await read(['x']);
   const model: JudgeModel = { judge: async () => { throw new ModelAccessError('The model cannot be used: bad key'); } };

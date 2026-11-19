@@ -25,6 +25,8 @@ export interface JudgeOptions {
   perCall?: number;
   /** Takes the rows of each chunk as soon as they are made, before the next chunk is judged. */
   onChunk?: (rows: JudgmentRow[]) => Promise<void>;
+  /** The system prompt of every call, when not that of the step judges. */
+  system?: string;
 }
 
 /** What the model reads for each step, in the order given; a step that no longer exists has nothing. */
@@ -40,7 +42,7 @@ export async function readSteps(deps: { doris: Doris; db: string }, v: Pick<Judg
  * model, stops it with a `ModelAccessError`.
  */
 export async function judgeExcerpts(
-  deps: { model: JudgeModel; concurrency?: number; now?: () => Date }, v: JudgeVersion, excerpts: readonly Excerpt[], opts: JudgeOptions = {},
+  deps: { model: JudgeModel; concurrency?: number; now?: () => Date }, v: Pick<JudgeVersion, 'judge' | 'version' | 'criterion' | 'model'>, excerpts: readonly Excerpt[], opts: JudgeOptions = {},
 ): Promise<{ rows: JudgmentRow[]; stopped: boolean }> {
   const size = deps.concurrency ?? CONCURRENCY;
   const chunks = Array.from({ length: Math.ceil(excerpts.length / size) }, (_, i) => excerpts.slice(i * size, (i + 1) * size));
@@ -48,9 +50,9 @@ export async function judgeExcerpts(
   let spent = 0;
   for (const chunk of chunks) {
     const average = rows.length ? spent / rows.length : (opts.perCall ?? 0);
-    const estimate = Math.max(chunk.reduce((n, x) => n + estimateTokens(v.criterion, x.text), 0), Math.ceil(average * chunk.length));
+    const estimate = Math.max(chunk.reduce((n, x) => n + estimateTokens(v.criterion, x.text, opts.system), 0), Math.ceil(average * chunk.length));
     if (opts.budget !== undefined && spent + estimate > opts.budget) return { rows, stopped: true };
-    const answers = await Promise.all(chunk.map((x) => deps.model.judge(v.model, v.criterion, x.text)));
+    const answers = await Promise.all(chunk.map((x) => deps.model.judge(v.model, v.criterion, x.text, opts.system)));
     if (answers.every((a) => a.verdict === 'unsure' && a.inputTokens === 0)) throw new ModelAccessError(`No call reached the model: ${answers[0]!.reason}`);
     const at = dorisTime((deps.now ?? (() => new Date()))().toISOString());
     const made = chunk.map((x, i): JudgmentRow => ({

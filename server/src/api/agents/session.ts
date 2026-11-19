@@ -9,9 +9,13 @@
 
 import type { ServerResponse } from 'node:http';
 import type { Doris } from '../../db/doris.ts';
+import { riskJudgeOf } from '../../semantics/judges/risk-judges.ts';
 import { CompileError } from '../../semantics/search/compile.ts';
 import { RISKS_LIMIT, treeRisksSql } from '../../semantics/sequences/risks.ts';
 import { ruleCatalogue } from '../../semantics/sequences/rules.ts';
+
+/** The rules, each with the question its judge asks the model about a risk. */
+const rulesWithCriteria = () => ruleCatalogue().map((r) => ({ ...r, criterion: riskJudgeOf(r.id)?.criterion ?? null }));
 import {
   compactionSql, MARKS_LIMIT, marksSql, OPEN_ALL_STEPS, sessionId, STEPS_PAGE, stepSql, treeSql, treeStepsSql, turnSql, turnStepsSql, turnsSql,
 } from '../../semantics/trajectory/session.ts';
@@ -31,7 +35,7 @@ async function tree(doris: Doris, db: string, send: Send, res: ServerResponse, i
   send(res, 200, {
     sessions: parsed(sessions!), turns: results[0], marks: marks.slice(0, MARKS_LIMIT), marksCut: marks.length > MARKS_LIMIT,
     // The rules are sent with the risks they found, so the page can draw the rule beside the risk.
-    risks: parsed(risks.slice(0, RISKS_LIMIT)), risksCut: risks.length > RISKS_LIMIT, rules: risks.length ? ruleCatalogue() : [],
+    risks: parsed(risks.slice(0, RISKS_LIMIT)), risksCut: risks.length > RISKS_LIMIT, rules: risks.length ? rulesWithCriteria() : [],
     steps: openAll ? results[3] : null, openAll,
     sql: [head, ...statements], elapsedMs: elapsedMs + more,
   });

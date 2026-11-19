@@ -378,6 +378,9 @@
 .ag-judge.breach .ag-verdict { color: var(--ag-bad); }
 .ag-judge.review .ag-verdict { color: var(--ag-warn); }
 .ag-judge p { margin: 5px 0 0; font-size: 13.5px; line-height: 1.5; }
+.ag-judge.ok { border-left-color: var(--ok); }
+.ag-judge .ag-asked span { font-weight: 600; color: var(--text-2); margin-right: 4px; }
+.ag-judge .ag-read { font-size: 12.5px; color: var(--text-2); }
 .ag-revs { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .ag-rev { max-width: 100%; padding: 6px 12px; border: 1px solid var(--ag-bad); border-radius: 8px; background: var(--ag-bad-soft); color: var(--text); font: 12.5px var(--mono); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .ag-rev code { margin-right: 6px; font-weight: 600; }

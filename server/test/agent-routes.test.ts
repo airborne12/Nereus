@@ -113,6 +113,7 @@ test('a session tree answers sessions, turns, marks and risks; every step only w
   assert.equal(a.body.marks.length, 1);
   // The stub answers one row to every statement: one risk, and with it the rules a page draws.
   assert.deepEqual([a.body.risks.length, a.body.risksCut, a.body.rules.map((r: any) => r.id)], [1, false, ['confirm', 'exfil', 'subvert', 'deny']]);
+  assert.ok(a.body.rules.every((r: any) => /Answer violates when/.test(r.criterion)), 'each rule comes with the question its judge asks');
   const small = call(stub(0, [{ session_id: 's', kind: 'main', steps: 40 }]).doris, '/api/agents/sessions/s');
   await small.done;
   assert.deepEqual(small.answers[0]!.body.sql.map((s: any) => s.title), ['Session', 'Turns', 'Marks', 'Risks', 'Steps']);
@@ -136,7 +137,7 @@ test('the Risks table is a table page like the others, with its export', async (
   const a = c.answers[0]!;
   assert.deepEqual([a.status, a.body.total, a.body.rows, a.body.sql.map((s: any) => s.title)], [200, 3, [{ session_id: 's', rule: 'deny' }], ['Rows', 'Total']]);
   assert.ok(a.body.columns.some((x: any) => x.name === 'judgment' && x.kind === 'text'));
-  assert.match(seen[0]!, /FROM otel\.agent_risks r\nJOIN otel\.agent_sessions s ON s\.session_id = r\.session_id\nJOIN otel\.agent_sessions m ON m\.session_id = r\.root_id\nWHERE m\.safety_risks IS NOT NULL/);
+  assert.match(seen[0]!, /FROM otel\.agent_risks r\nJOIN otel\.agent_sessions s ON s\.session_id = r\.session_id\nJOIN otel\.agent_sessions m ON m\.session_id = r\.root_id\nLEFT JOIN \(SELECT subject, [\s\S]*\) j ON j\.subject = [^\n]*\nWHERE m\.safety_risks IS NOT NULL/);
   assert.match(seen[0]!, /\(r\.what MATCH_PHRASE 'sudo' OR r\.rule_name MATCH_PHRASE 'sudo'\)\n {2}AND r\.rule = 'deny'\nORDER BY r\.turn ASC, r\.session_id, r\.rule, r\.first_seq\nLIMIT 100 OFFSET 0$/);
   const file = call(stub(1, [{ session_id: 's', rule: 'deny', what: '=cmd' }]).doris, `/api/agents/risks?${RANGE}&format=csv&size=1`);
   await file.done;

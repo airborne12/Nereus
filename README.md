@@ -248,7 +248,8 @@ the agent tables:
 ### Safety rules
 
 Four rules look for orders of events that are not allowed in a session, though each event alone
-may be. A rule finds candidates; whether one is a breach is a judgment, which no model makes yet.
+may be. A rule finds candidates; whether one is a breach is a judgment: each rule has a judge that
+asks the model about each risk it found (see Judges), and the pages show its answer.
 
 | Rule | Finds |
 | --- | --- |
@@ -315,6 +316,20 @@ block cut at 2,000, with the arguments of a call when they say more than its tar
 is marked as data, not instructions, and its text is escaped so that it cannot open or close the
 record's own tags. Saving, changing, rerunning and trying judges are for admins. `npm test` skips
 the one test that calls the real model unless `MODEL_TEST=1`.
+
+The same command then judges the safety risks. Each rule has a judge, `risk-<rule>`, whose criterion
+is kept in code beside the rules (`server/src/semantics/judges/risk-judges.ts`); it judges each risk
+once per version. For a risk the model reads the rule and why it fired, then the events from the
+step before the first one to the last one in order, with the input of each turn they are in and
+the events the rule matched marked; where steps are left out, the record says how many. An input
+is shown as the user's, as the task a parent agent gave a sub-agent, or as a message of the
+harness, as the rules tell them apart. The content of the secret file an exfil risk starts by
+reading is not sent to the model. The verdict is the risk's judgment: violates is Breach, unsure is
+Needs review, ok is Not a breach. The judges take a batch of risks each in turn, newest first, and
+`RISK_JUDGE_BUDGET` caps the input tokens of the pass (200,000 unless set; 0 skips it). A call that
+does not reach the model is not stored: the command names it and the risk is tried again on the
+next pass. Each judge is taken under a lease that is renewed after every few calls, so two runners
+do not judge the same rule.
 
 ### Agent trajectory API
 
@@ -396,7 +411,8 @@ the right the selected turn, step or compaction reads as a chat between roles: f
 the model saw, what it answered and what its calls returned. **Jump to** visits the failed calls,
 repeated calls, compactions and sub-agents; the arrow keys move along the lanes. "N safety
 risks" in the header, a row of Risks, or the count on Sessions shows a risk in place of the
-selection: the judgment, the events that broke the rule, each opening its step, and the rule
+selection: the judgment of the rule's judge with its reason, the question asked and how many
+events the model read, then the events that broke the rule, each opening its step, and the rule
 drawn as a row of steps. The events are marked on the lanes.
 
 **Compare** (`/agents/compare?a=&b=`) shows two sessions as two rows of facts with their

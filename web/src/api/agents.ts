@@ -79,11 +79,15 @@ export interface RiskStep { kind: 'call' | 'user' | 'reply' | 'compaction'; seq:
 export interface Risk {
   session_id: string; rule: string; rule_name: string; first_seq: number; rule_version: number; ts: string; turn: number;
   events: number[]; steps: RiskStep[]; what: string; why: string; found_at: string;
+  /** The latest judgment of the rule's judge; `none` and nulls until a model has read the risk. */
+  judgment: 'breach' | 'review' | 'ok' | 'none'; judgment_reason: string | null; judgment_model: string | null;
+  judged_at: string | null; judge_version: number | null; read_events: number | null;
 }
 /** A step of a safety rule: `words` are whole words of a command, `any` texts anywhere in a target. */
 export interface RuleStep { kind: RiskStep['kind']; tool?: string; status?: 'ok' | 'failed'; has?: string; any?: string[]; words?: string[]; link?: 'next' | 'later' }
 /** A safety rule: a command that needs a confirmation, an order that is not allowed, or a command that never is. */
-export interface RuleInfo { id: string; version: number; kind: 'confirm' | 'forbid' | 'deny'; name: string; source: string; steps: RuleStep[]; confirm?: string[]; refuse?: string[] }
+/** A safety rule: `criterion` is the question its judge asks the model about a risk. */
+export interface RuleInfo { id: string; version: number; kind: 'confirm' | 'forbid' | 'deny'; name: string; source: string; steps: RuleStep[]; confirm?: string[]; refuse?: string[]; criterion?: string | null }
 
 export interface TreeAnswer {
   sessions: Row[];

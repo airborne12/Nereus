@@ -2,13 +2,25 @@
 // risk marks on the lanes, a judgment in words, and a rule as a row of pills.
 
 import type { Risk, RiskStep, RuleInfo, RuleStep } from '../../api/agents.ts';
-import { text } from './format.ts';
+import { plural, text } from './format.ts';
 import { cutKey, type Mark, stepKey, turnKey } from './select.ts';
 
 const JUDGMENT: Record<string, string> = { breach: 'Breach', review: 'Needs review', ok: 'Not a breach', none: 'Not judged yet' };
 
 /** A judgment in words. Until a model has read a risk, it is not judged. */
 export const judgmentLabel = (verdict: unknown): string => JUDGMENT[text(verdict)] ?? JUDGMENT.none!;
+
+/** What the pane of a risk says of its judgment; `asked` is the question of the rule's judge when the page has it. */
+export interface JudgmentBox { tone: Risk['judgment']; label: string; reason: string; asked: string | null; read: string | null }
+
+/** The judgment of a risk as its pane shows it: the verdict and why, the question asked, and what the model read. */
+export function judgmentBox(risk: Risk, rule: RuleInfo | undefined): JudgmentBox {
+  const tone = risk.judgment in JUDGMENT ? risk.judgment : 'none';
+  const asked = rule?.criterion ?? null;
+  if (tone === 'none') return { tone, label: JUDGMENT.none!, reason: 'The rule found this risk; no model has read it yet.', asked, read: null };
+  const read = `Read ${plural(Number(risk.read_events ?? 0), 'event')} with ${risk.judgment_model ?? 'the model'}, judge version ${risk.judge_version ?? 1}`;
+  return { tone, label: JUDGMENT[tone]!, reason: risk.judgment_reason || 'The model gave no reason.', asked, read };
+}
 
 /** A risk as the address names it. */
 export const riskKey = (r: Pick<Risk, 'session_id' | 'rule' | 'first_seq'>): string => `${r.session_id}:${r.rule}:${Number(r.first_seq)}`;

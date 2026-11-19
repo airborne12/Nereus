@@ -705,11 +705,28 @@ Four rules, defined in code as patterns compiled to SQL, run by the rules job:
 | Command outside the allowed set | deny | One call outside the allowed commands |
 
 A rule finds candidates; whether a candidate is a breach is a model judgment (Breach, Needs
-review, Not a breach, Not judged yet), shown first in the risk view. Until sub-project 3 every
-risk is "Not judged yet".
+review, Not a breach, Not judged yet), shown first in the risk view. A risk its rule's judge has
+not read is "Not judged yet".
 
 As built:
 
+- Risk judgments (sub-project 3): each rule has a map judge `risk-<rule>` at version 1, its
+  criterion kept in code beside the rules and phrased so that a breach is answered violates. The
+  run-judges command, after the judge runs, judges each risk its rule's judge has not judged with
+  its version, in trees whose rules have run since their last import; the subject is
+  `<session_id>:<rule>:<first_seq>`. The pass has one budget of input tokens (`RISK_JUDGE_BUDGET`,
+  200,000 by default); the judges take a batch each in turn, newest risks first, each under a lease
+  renewed before each batch and after each chunk of calls. A call that did not reach the model is
+  not stored, so its risk is tried again on the next pass. The model reads the rule and why it
+  fired, then the events from the step before the first event to the last (only the matched steps
+  and the one before when they span more than 30 steps) and the input of each turn they are in, in
+  order. An input is a group of its own, `<user>`, `<task from="parent agent">` in a sub-agent's
+  session or `<harness>` when it opens with a tag; the events the rule matched are marked; where
+  steps are left out the record says how many; at most 40,000 characters are read, the earliest
+  unmarked steps left out first and unmarked inputs last. The content of the secret file an exfil
+  risk starts by reading is replaced by a note. Violates is Breach, unsure is Needs review, ok is
+  Not a breach; the risk view adds the reason, the question asked, the events read, the model and
+  the time.
 - The words of a command (`rm`, `curl`, `sudo` and the like) are matched as whole words of the
   lower-case command: not inside another word, a path or an option, so `--rm` and `perform` are
   not `rm`. A secret file is one whose path has `.env`, `credentials`, `secret`, `id_rsa` or
