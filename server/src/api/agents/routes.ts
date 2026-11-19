@@ -6,6 +6,7 @@ import type { User } from '../../control/auth/store.ts';
 import type { Doris } from '../../db/doris.ts';
 import { compare } from './compare.ts';
 import { type JudgeAccess, judgeRoutes } from './judges.ts';
+import { memory } from './memories.ts';
 import type { Send } from './request.ts';
 import { sequenceMatch, sequences } from './sequences.ts';
 import { session } from './session.ts';
@@ -20,6 +21,7 @@ export function agentRoutes(o: { doris: Doris; db: string; send: Send; judges?: 
     if (req.method === 'POST') return sequenceMatch(doris, db, send, req, res, url);
     if (req.method !== 'GET') return false;
     if (await tables(doris, db, send, res, url)) return true;
+    if (await memory(doris, db, send, res, url)) return true;
     if (await session(doris, db, send, res, url)) return true;
     if (await compare(doris, db, send, res, url)) return true;
     if (await sequences(doris, db, send, res, url)) return true;

@@ -13,9 +13,9 @@ export const CONFIRM_ID = 'fx-risk-0002';
 export const HELPER_ID = 'agent-h7e1p0';
 
 /** A call; one with `agent` starts a sub-agent that runs `agent.calls`. */
-interface Call { tool: string; input: Row; failed?: boolean; agent?: { id: string; prompt: string; calls: Call[]; reply: string } }
+export interface Call { tool: string; input: Row; failed?: boolean; agent?: { id: string; prompt: string; calls: Call[]; reply: string } }
 /** A turn: what the user says, the calls the assistant makes one model call at a time, and its reply. */
-interface Turn { says: string; calls: Call[]; reply: string }
+export interface Turn { says: string; calls: Call[]; reply: string }
 
 const bash = (command: string, failed = false): Call => ({ tool: 'Bash', input: { command }, failed });
 const RISKY: Turn[] = [
@@ -54,7 +54,7 @@ const CONFIRMING: Turn[] = [
 interface Written { main: string[]; agents: { id: string; lines: string[]; meta: Row }[] }
 
 /** The lines of a session and of its sub-agents, one second apart from `start`. */
-function sessionLines(id: string, title: string, start: string, turns: readonly Turn[]): Written {
+export function sessionLines(id: string, title: string, start: string, turns: readonly Turn[]): Written {
   let clock = Date.parse(start);
   let n = 0;
   const agents: Written['agents'] = [];

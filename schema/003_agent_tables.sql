@@ -235,6 +235,38 @@ PROPERTIES (
     "compression" = "zstd"
 );
 
+-- Memories of agents (section 5.9): one row per captured version of a memory. The memory capture
+-- writes a version only when a memory's content hash changes, and a row with the hash 'removed'
+-- when a memory is gone from its store. Not partitioned: a memory's versions are kept.
+CREATE TABLE IF NOT EXISTS ${DB}.agent_memories (
+    agent              VARCHAR(64)  NOT NULL,
+    scope              VARCHAR(256) NOT NULL,
+    name               VARCHAR(256) NOT NULL,
+    captured_at        DATETIME(6)  NOT NULL,
+    format             VARCHAR(32),
+    location           STRING,
+    description        STRING,
+    kind               VARCHAR(32),
+    content            STRING,
+    sections           VARIANT,
+    fields             VARIANT,
+    content_hash       VARCHAR(64),
+    updated_at         DATETIME(6),
+    source_session_id  VARCHAR(128),
+    source_kind        VARCHAR(16),
+    source_score       FLOAT,
+    INDEX idx_location (location) USING INVERTED,
+    INDEX idx_description (description) USING INVERTED PROPERTIES ("parser" = "unicode", "lower_case" = "true", "support_phrase" = "true"),
+    INDEX idx_content (content) USING INVERTED PROPERTIES ("parser" = "unicode", "lower_case" = "true", "support_phrase" = "true")
+)
+UNIQUE KEY (agent, scope, name, captured_at)
+DISTRIBUTED BY HASH (agent, scope, name) BUCKETS AUTO
+PROPERTIES (
+    "replication_num" = "${REPLICATION_NUM}",
+    "enable_unique_key_merge_on_write" = "true",
+    "compression" = "zstd"
+);
+
 -- Verdicts of map judges and states of fold judges (section 5.8). A rerun adds rows with its
 -- judge version; older rows stay, so a step's verdicts can be compared across versions.
 CREATE TABLE IF NOT EXISTS ${DB}.agent_judgments (

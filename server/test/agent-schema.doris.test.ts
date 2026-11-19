@@ -23,9 +23,16 @@ after(async () => {
 
 const columns = async (table: string) => (await doris.query(`DESC ${db}.${table}`)).map((r) => String(r.Field));
 
-test('eight unique-key tables with the spec columns', { skip: !enabled }, async () => {
+test('nine unique-key tables with the spec columns', { skip: !enabled }, async () => {
   assert.deepEqual((await doris.query(`SHOW TABLES FROM ${db}`)).map((r) => String(Object.values(r)[0])).sort(),
-    ['agent_contexts', 'agent_events', 'agent_judges', 'agent_judgments', 'agent_messages', 'agent_prompts', 'agent_risks', 'agent_sessions']);
+    ['agent_contexts', 'agent_events', 'agent_judges', 'agent_judgments', 'agent_memories', 'agent_messages', 'agent_prompts', 'agent_risks', 'agent_sessions']);
+  assert.deepEqual((await columns('agent_memories')), [
+    'agent', 'scope', 'name', 'captured_at', 'format', 'location', 'description', 'kind', 'content', 'sections', 'fields',
+    'content_hash', 'updated_at', 'source_session_id', 'source_kind', 'source_score',
+  ]);
+  const memories = String(Object.values((await doris.query(`SHOW CREATE TABLE ${db}.agent_memories`))[0]!)[1]);
+  assert.match(memories, /UNIQUE KEY\(`agent`, `scope`, `name`, `captured_at`\)/);
+  assert.doesNotMatch(memories, /PARTITION BY/, 'not partitioned');
   assert.deepEqual((await columns('agent_risks')), ['session_id', 'rule', 'first_seq', 'rule_version', 'rule_name', 'root_id', 'ts', 'turn', 'events', 'steps', 'what', 'why', 'found_at']);
   assert.deepEqual((await columns('agent_judges')), ['judge', 'version', 'name', 'form', 'pick', 'reads', 'criterion', 'model', 'created_at', 'created_by']);
   assert.deepEqual((await columns('agent_judgments')), [

@@ -5,7 +5,8 @@ import { DataTable, PAIR } from '../../components/agents/DataTable.tsx';
 import { ExportDialog } from '../../components/agents/ExportDialog.tsx';
 import { SqlDialog } from '../../components/agents/SqlDialog.tsx';
 import { TableFilters } from '../../components/agents/TableFilters.tsx';
-import { openTarget, PAGES, type PageDef, sessionUrl, shownColumns } from '../../lib/agents/pages.ts';
+import { memoryUrl, sourceOf } from '../../lib/agents/memories.ts';
+import { openTarget, type PageDef, SESSION_PAGES, sessionUrl, shownColumns } from '../../lib/agents/pages.ts';
 import { parseTableState, queryOf, serializeTableState, sortBy, type TableState } from '../../lib/agents/table.ts';
 import type { Go } from '../../Root.tsx';
 
@@ -56,8 +57,16 @@ export function TablePage({ def, search, go }: { def: PageDef; search: string; g
   };
   const back: From = { from: here(), label: def.label };
   const open = (row: api.Row) => {
+    if (def.name === 'memories') {
+      go(memoryUrl({ agent: String(row.agent), scope: String(row.scope), name: String(row.name) }), { state: back });
+      return;
+    }
     const t = openTarget(def.name, row);
     go(sessionUrl(t.root, t.sel, null, t.risk ?? null), { state: back });
+  };
+  const openSource = (row: api.Row) => {
+    const s = sourceOf(row);
+    if (s.root) go(sessionUrl(s.root, null), { state: back });
   };
   const openRisk = (row: api.Row) => go(sessionUrl(String(row.session_id), null, null, 'first'), { state: back });
   const pick = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length < PAIR ? [...p, id] : p));
@@ -70,11 +79,13 @@ export function TablePage({ def, search, go }: { def: PageDef; search: string; g
       <div className="ag-bar">
         <div className="ag-title">
           <h1>{def.label}</h1>
-          <span className="ag-pages" role="group" aria-label="Pages">
-            {Object.values(PAGES).map((p) => (
-              <button type="button" key={p.name} aria-current={p.name === def.name ? 'page' : undefined} onClick={() => go(`/agents/${p.name}`)}>{p.label}</button>
-            ))}
-          </span>
+          {SESSION_PAGES.includes(def) && (
+            <span className="ag-pages" role="group" aria-label="Pages">
+              {SESSION_PAGES.map((p) => (
+                <button type="button" key={p.name} aria-current={p.name === def.name ? 'page' : undefined} onClick={() => go(`/agents/${p.name}`)}>{p.label}</button>
+              ))}
+            </span>
+          )}
           <span className="muted">{def.unit}</span>
         </div>
         <div className="ag-tools">
@@ -93,10 +104,12 @@ export function TablePage({ def, search, go }: { def: PageDef; search: string; g
       <TableFilters def={def} state={state} total={fresh ? fresh.total : error ? 0 : null} onChange={change} />
       {error && <div className="error" role="alert">{error}</div>}
       <div className={`ag-grid${fresh || !data ? '' : ' stale'}`}>
-        <DataTable def={def} columns={columns} rows={rows} sort={state.sort} dir={state.dir} onSort={(c) => change(sortBy(state, c))} onOpen={open}
+        <DataTable def={def} columns={columns} rows={rows} sort={state.sort} dir={state.dir} onSort={(c) => change(sortBy(state, c))} onOpen={open} onSource={openSource}
           more={fresh ? fresh.total - fresh.rows.length : 0} onMore={more} loadingMore={loadingMore}
           empty={!data && !error ? 'Loading…' : def.name === 'risks' && !filtered
             ? 'No risks in this time range. The safety rules run with the run-rules command (see the README).'
+            : def.name === 'memories' && !filtered
+            ? 'No memory was updated in this time range. Memories are captured with the capture-memories command (see the README).'
             : filtered || def.name !== 'sessions'
             ? 'Nothing matches. Widen the time range or clear the filter.'
             : 'No sessions in this time range. Widen the range, or import transcripts with the import-transcripts command (see the README).'}

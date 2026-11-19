@@ -1,5 +1,5 @@
-// The Sessions, Steps, Messages and Risks pages as data: their columns in display order, which are shown
-// at first, how a cell and a condition on it are written, and what a row opens.
+// The Sessions, Steps, Messages, Risks and Memories pages as data: their columns in display order,
+// which are shown at first, how a cell and a condition on it are written, and what a row opens.
 
 import type { Row, TableName } from '../../api/agents.ts';
 import { num, plainLine, text } from './format.ts';
@@ -32,6 +32,8 @@ export interface PageDef {
   search: string;
   defaultSort: string;
   columns: ColumnDef[];
+  /** The time range the page opens on, when not the past 7 days. */
+  defaultRange?: '1h' | '24h' | '7d' | '30d';
 }
 
 const col = (name: string, label: string, kind: CellKind, shown: boolean, values?: readonly string[]): ColumnDef =>
@@ -126,7 +128,35 @@ export const RISKS: PageDef = {
   ],
 };
 
-export const PAGES: Record<TableName, PageDef> = { sessions: SESSIONS, steps: STEPS, messages: MESSAGES, risks: RISKS };
+export const MEMORIES: PageDef = {
+  name: 'memories', label: 'Memories', noun: 'memory', defaultSort: 'updated_at', defaultRange: '30d',
+  unit: 'One row per memory an agent keeps, at its latest version.',
+  search: 'Search names, descriptions and contents',
+  columns: [
+    col('updated_at', 'Updated', 'time', true),
+    col('agent', 'Agent', 'enum', true, ['claude-code', 'gemini-cli']),
+    col('scope', 'Scope', 'text', true),
+    { ...col('name', 'Memory', 'text', true), fill: true },
+    col('kind', 'Kind', 'enum', true),
+    col('still_valid', 'Still valid', 'enum', true, ['unjudged', 'unused', 'unrecorded']),
+    col('source_session_id', 'Source session', 'text', true),
+    col('description', 'Description', 'text', false),
+    col('source_kind', 'Source', 'enum', false, ['recorded', 'inferred', 'none']),
+    col('source_score', 'Share of words', 'number', false),
+    col('format', 'Format', 'enum', false, ['claude-auto-memory', 'gemini-md']),
+    col('captured_at', 'Captured', 'time', false),
+  ],
+};
+
+export const PAGES: Record<TableName, PageDef> = { sessions: SESSIONS, steps: STEPS, messages: MESSAGES, risks: RISKS, memories: MEMORIES };
+/** The pages of sessions, which a narrow page offers as its siblings. */
+export const SESSION_PAGES: readonly PageDef[] = [SESSIONS, STEPS, MESSAGES, RISKS];
+
+/** What keeps the rows of a page apart: a memory by its key, else a session with the row's number. */
+export function rowKey(def: PageDef, row: Row): string {
+  if (def.name === 'memories') return [row.agent, row.scope, row.name].map(text).join('\n');
+  return `${text(row.session_id)}:${text(def.name === 'steps' ? row.seq : def.name === 'messages' ? row.msg_seq : '')}`;
+}
 
 export const columnOf = (def: PageDef, name: string): ColumnDef | undefined => def.columns.find((c) => c.name === name);
 

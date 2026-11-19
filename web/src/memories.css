@@ -1,0 +1,21 @@
+/* The Memories pages: a memory's fields and where its agent keeps them, whether it still holds, its
+   content and its versions; the memories a session wrote, and the source link of the table. */
+.mem-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 16px 24px; display: flex; flex-direction: column; gap: 18px; max-width: 1100px; }
+.mem-body h2 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.mem-body .ag-table td { white-space: normal; vertical-align: top; overflow-wrap: anywhere; }
+.mem-fields td:first-child { width: 110px; color: var(--text-2); }
+.mem-fields tbody tr, .mem-versions tbody tr { cursor: default; }
+.mem-state { padding: 10px 14px; border: 1px solid var(--border); border-left-width: 4px; border-radius: 6px; background: var(--panel); }
+.mem-state.ok { border-left-color: var(--ok); }
+.mem-state.warn { border-left-color: var(--ag-warn); }
+.mem-state.bad { border-left-color: var(--ag-bad); }
+.mem-state p { margin: 4px 0 0; font-size: 13px; line-height: 1.5; }
+.mem-uses { margin-top: 10px; }
+.mem-section h3 { margin: 10px 0 4px; font-size: 13px; font-weight: 600; }
+.mem-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.5; }
+.ag-wrote { margin: 4px 0 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.ag-wrote button { padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text); font-size: 12px; cursor: pointer; }
+.ag-wrote button:hover { border-color: var(--accent); color: var(--accent); }
+.ag-srclink { border: 0; padding: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
+.ag-srclink:hover { text-decoration: underline; }
+.ag-pill.ok { background: var(--jg-ok-soft); color: var(--jg-ok); }

@@ -10,6 +10,7 @@ import {
   type Branch, branchKey, buildTree, type Item, itemsKey, itemsOf, type JumpKind, jumpTargets, type LaneRow, laneRows, nextTarget, pagesToRead, reveal,
   rowKeyOf, STEPS_PAGE, type Tree,
 } from '../../lib/agents/lanes.ts';
+import { memoryUrl } from '../../lib/agents/memories.ts';
 import { sessionName, sessionUrl } from '../../lib/agents/pages.ts';
 import { riskAt, riskKey, riskMarks, riskRowKey } from '../../lib/agents/risks.ts';
 import { parseMarks, parseSel, type Selection, selKey, stepKey, turnKey } from '../../lib/agents/select.ts';
@@ -56,6 +57,7 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
   const [showSql, setShowSql] = useState(false);
   // The risks the safety rules found in the tree, and the rules, as the tree answer brought them.
   const [risks, setRisks] = useState<{ list: api.Risk[]; cut: boolean; rules: api.RuleInfo[] }>({ list: [], cut: false, rules: [] });
+  const [wrote, setWrote] = useState<NonNullable<api.TreeAnswer['memories']>>([]);
   // What the callbacks of the lanes read; the rows keep one identity, so they are not drawn again.
   const live = useRef({ tree, rows: rowsByTurn, reading: new Map<string, Promise<void>>(), places: new Map<string, Place>() });
   // The items of each turn, kept until that turn's rows change, so reading one turn does not rebuild the others.
@@ -76,6 +78,7 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
       if (a.openAll) setOpen(new Set([...t.main.turns.map((x) => turnKey(x.sid, x.no)), ...[...t.branches.values()].filter((b) => b.parent !== null).map((b) => branchKey(b.sid))]));
       setTreeSql(a.sql);
       setRisks({ list: a.risks ?? [], cut: a.risksCut ?? false, rules: a.rules ?? [] });
+      setWrote(a.memories ?? []);
       setTree(t);
     }, (e: Error) => { if (!ac.signal.aborted) setError(e.message); });
     return () => ac.abort();
@@ -243,6 +246,11 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
           {' · '}{duration(num(m.active_us))} active · {tokens(num(m.input_tokens) + num(m.output_tokens))} tokens · peak context {tokens(num(m.peak_ctx_tokens))}
           {m.model ? ` · ${text(m.model)}` : ''}{m.user_id ? ` · ${text(m.user_id)}` : ''}{exactness(tree) ? ` · ${exactness(tree)}` : ''}
         </p>
+        {wrote.length > 0 && (
+          <p className="ag-wrote">{wrote.map((w) => (
+            <button type="button" key={`${w.agent}\n${w.scope}\n${w.name}`} onClick={() => go(memoryUrl(w), { state: { from: sessionUrl(id, param, marksParam), label: 'Session' } satisfies From })}>Wrote memory {w.name}</button>
+          ))}</p>
+        )}
         {(risks.list.length > 0 || JUMPS.some((j) => counts[j.kind] > 0)) && (
           <p className="ag-jump">
             {/* Safety risks come first: they are what a reader of the session must not miss. */}
