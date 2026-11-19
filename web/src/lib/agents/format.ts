@@ -49,7 +49,8 @@ export function duration(us: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-export const plural = (n: number, word: string): string => `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : 's'}`;
+/** A count with its noun: 1 step, 2,712 steps, 3 matches. */
+export const plural = (n: number, word: string): string => `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : word.endsWith('ch') ? 'es' : 's'}`;
 
 /** The size of a file: 512 bytes, 2.9 KB, 1.2 MB. */
 export function fileSize(bytes: number): string {

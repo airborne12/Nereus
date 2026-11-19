@@ -50,17 +50,32 @@ function parseCondition(raw: string, def: PageDef): Condition | null {
   return { column: m[1]!, op: m[2] as Op, value: m[3]! };
 }
 
-/** The state an address holds; anything it does not say, or says wrongly, is the page's default. */
-export function parseTableState(search: string, def: PageDef): TableState {
-  const p = new URLSearchParams(search);
-  const base = defaultState(def);
+/** The time range an address holds: `t` for a range ending now, or `from` and `to` in epoch ms. */
+export function parseRange(p: URLSearchParams): TableRange {
   const preset = p.get('t');
   const from = Number(p.get('from'));
   const to = Number(p.get('to'));
   // A fixed range must fit what a date can hold, or no request could be built from it.
   const fits = Number.isFinite(from) && Number.isFinite(to) && to > from && from >= -MAX_TIME && to <= MAX_TIME;
-  const range: TableRange = (RANGE_PRESETS as readonly string[]).includes(preset ?? '') ? { preset: preset as RangePreset }
-    : p.has('from') && fits ? { from, to } : base.range;
+  return (RANGE_PRESETS as readonly string[]).includes(preset ?? '') ? { preset: preset as RangePreset }
+    : p.has('from') && fits ? { from, to } : { preset: DEFAULT_PRESET };
+}
+
+/** Writes a time range into the parameters of an address; the default range is left out. */
+export function writeRange(p: URLSearchParams, range: TableRange): void {
+  if ('preset' in range) {
+    if (range.preset !== DEFAULT_PRESET) p.set('t', range.preset);
+  } else {
+    p.set('from', String(Math.round(range.from)));
+    p.set('to', String(Math.round(range.to)));
+  }
+}
+
+/** The state an address holds; anything it does not say, or says wrongly, is the page's default. */
+export function parseTableState(search: string, def: PageDef): TableState {
+  const p = new URLSearchParams(search);
+  const base = defaultState(def);
+  const range = parseRange(p);
   const sort = p.get('sort');
   const cols = (p.get('cols') ?? '').split(',').filter((name) => columnOf(def, name));
   return {
@@ -76,12 +91,7 @@ export function parseTableState(search: string, def: PageDef): TableState {
 /** The query string of a state; what equals the default is left out. */
 export function serializeTableState(s: TableState, def: PageDef): string {
   const p = new URLSearchParams();
-  if ('preset' in s.range) {
-    if (s.range.preset !== DEFAULT_PRESET) p.set('t', s.range.preset);
-  } else {
-    p.set('from', String(Math.round(s.range.from)));
-    p.set('to', String(Math.round(s.range.to)));
-  }
+  writeRange(p, s.range);
   if (s.q.trim()) p.set('q', s.q.trim());
   for (const c of s.conditions) p.append('f', conditionParam(c));
   if (s.sort !== def.defaultSort) p.set('sort', s.sort);

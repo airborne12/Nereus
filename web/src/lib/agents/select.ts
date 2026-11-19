@@ -26,3 +26,23 @@ export function parseSel(key: string | null | undefined): Selection | null {
   if (!Number.isSafeInteger(n)) return null;
   return kind === 'turn' ? { kind, sid: m[2]!, turn: n } : { kind, sid: m[2]!, seq: n };
 }
+
+/** A row marked on the session page, with where it sits: `stepNo` is the ordinal of its model call, null for a turn. */
+export interface Mark { key: string; sid: string; turn: number; stepNo: number | null }
+
+/**
+ * The marks an address carries: a session id, a semicolon, then `t<turn>`, `s<turn>.<step>.<seq>`
+ * or `c<turn>.<step>.<seq>` joined by commas. Items it spells wrongly are left out.
+ */
+export function parseMarks(raw: string | null | undefined): Mark[] {
+  const at = (raw ?? '').lastIndexOf(';');
+  if (at < 1) return [];
+  const sid = raw!.slice(0, at);
+  return raw!.slice(at + 1).split(',').flatMap((item): Mark[] => {
+    const turn = /^t(\d+)$/.exec(item);
+    if (turn) return [{ key: turnKey(sid, Number(turn[1])), sid, turn: Number(turn[1]), stepNo: null }];
+    const m = /^([sc])(\d+)\.(\d+)\.(\d+)$/.exec(item);
+    if (!m) return [];
+    return [{ key: m[1] === 's' ? stepKey(sid, Number(m[4])) : cutKey(sid, Number(m[4])), sid, turn: Number(m[2]), stepNo: Number(m[3]) }];
+  });
+}
