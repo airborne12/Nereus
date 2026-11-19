@@ -120,10 +120,12 @@ test('the validity fold judges each later read of a memory once, and the pages r
   const fold: FoldModel = { fold: async (_m, _s, text) => { asked.push(text); return { evidence: 'conflicts', state: 'outdated', reason: 'The flag was renamed.', inputTokens: 600, outputTokens: 20 }; } };
   const load = deps.load;
   const leases = deps.leases;
-  assert.deepEqual(await judgeMemories({ doris, db, load, model: fold, leases, now: () => new Date('2026-11-19T12:00:00Z') }), { judged: 1, stopped: false, held: 0, failed: [], missed: null });
+  const writing = await judgeMemories({ doris, db, load, model: fold, leases, now: () => new Date('2026-11-17T15:05:00Z') });
+  assert.equal(writing.judged, 0, 'a read in the last turn of a session that was active five minutes ago waits');
+  assert.deepEqual(await judgeMemories({ doris, db, load, model: fold, leases, now: () => new Date('2026-11-19T12:00:00Z') }), { judged: 1, stopped: false, held: 0, failed: [], missed: null, unanswered: null });
   assert.match(asked[0]!, /<memory name="build-cache-flag">\nThe build reuses its cache only with the keep flag\n\nRun make with --keep to reuse the cache\.\n<\/memory>/);
   assert.match(asked[0]!, /<user>\nWhy does the deploy pipeline take so long on the staging machines\?\n<\/user>\n<step judged="true">\nCalled Read: \/home\/u\/\.claude\/projects\/-home-u-work\/memory\/build-cache-flag\.md\n/);
-  assert.deepEqual(await judgeMemories({ doris, db, load, model: fold, leases }), { judged: 0, stopped: false, held: 0, failed: [], missed: null }, 'a read is judged once');
+  assert.deepEqual(await judgeMemories({ doris, db, load, model: fold, leases }), { judged: 0, stopped: false, held: 0, failed: [], missed: null, unanswered: null }, 'a read is judged once');
   const { rows } = tableSql(memoriesPage(db), { from: '2026-11-01T00:00:00Z', to: '2026-11-20T00:00:00Z', q: '', conditions: [], limit: 100, offset: 0 }, 'list');
   const states = Object.fromEntries((await doris.query(rows.sql)).map((r) => [String(r.name), r.still_valid]));
   assert.deepEqual([states['build-cache-flag'], states['staging-deploy']], ['outdated', 'unused']);
@@ -131,4 +133,17 @@ test('the validity fold judges each later read of a memory once, and the pages r
   const history = await doris.query(s.history.sql);
   assert.deepEqual(history.map((h) => [Number(h.version), h.session_id, h.evidence, h.state, h.title]), [[1, READER_ID, 'conflicts', 'outdated', 'Slow staging deploys']]);
   assert.equal(memoryState((await doris.query(s.versions.sql))[0]!, await doris.query(s.uses.sql), history), 'outdated');
+});
+
+test('a new version counts only the reads after the capture that still saw the version before, even when its time was not moved', { skip: !enabled }, async () => {
+  const fold: FoldModel = { fold: async () => ({ evidence: 'conflicts', state: 'outdated', reason: 'Old content.', inputTokens: 600, outputTokens: 20 }) };
+  const edited = BUILD.replace('Run make with --keep', 'Run make with --reuse');
+  const report = await captureStores({ ...deps, now: () => new Date('2026-11-19T13:00:00Z') }, stores([['build-cache-flag', edited], ['staging-deploy', `${STAGING} Ask before a rebuild.`]]));
+  assert.deepEqual([report.written, report.unchanged], [1, 3]);
+  assert.equal((await judgeMemories({ doris, db, load: deps.load, model: fold, leases: deps.leases, now: () => new Date('2026-11-19T13:30:00Z') })).judged, 0);
+  const { rows } = tableSql(memoriesPage(db), { from: '2026-11-01T00:00:00Z', to: '2026-11-20T00:00:00Z', q: '', conditions: [], limit: 100, offset: 0 }, 'list');
+  assert.equal((await doris.query(rows.sql)).find((r) => r.name === 'build-cache-flag')!.still_valid, 'unused');
+  const s = memorySql(db, { agent: 'claude-code', scope: '-home-u-work', name: 'build-cache-flag' });
+  const v = await doris.query(s.versions.sql);
+  assert.equal(memoryState(v[0]!, await doris.query(s.uses.sql), await doris.query(s.history.sql), String(v[1]!.captured_at)), 'unused');
 });

@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { evidenceLabel, memoryPath, memoryUrl, sourceOf, stateLabel, stateNote, stateTone, whereKept } from '../src/lib/agents/memories.ts';
+import { evidenceLabel, judgedBy, memoryPath, memoryUrl, sourceOf, stateLabel, stateNote, stateTone, whereKept } from '../src/lib/agents/memories.ts';
 import { MEMORIES, PAGES, rowKey, SESSION_PAGES } from '../src/lib/agents/pages.ts';
 import { parseTableState, serializeTableState } from '../src/lib/agents/table.ts';
 
@@ -61,10 +61,13 @@ test('Memories opens on the past 30 days, since a memory is updated seldom; the 
   assert.equal(serializeTableState({ ...parseTableState('', PAGES.sessions), range: { preset: '30d' } }, PAGES.sessions), '?t=30d');
 });
 
-test('what the validity fold found in words: the evidence of a session, and what each state means', () => {
-  assert.deepEqual(['supports', 'conflicts', 'none', 'else'].map(evidenceLabel), ['Supports', 'Conflicts', 'No bearing', 'No bearing']);
-  assert.equal(stateNote('holds', 'claude-code'), 'The sessions that read it since it was written bear it out.');
-  assert.equal(stateNote('doubt', 'claude-code'), 'A session that read it gave evidence against it that does not settle it.');
-  assert.equal(stateNote('outdated', 'claude-code'), 'A session that read it showed it no longer holds; the agent or a person should revise it.');
+test('what the validity fold found in words: the evidence of a session, and what each state means, as the judge found it', () => {
+  assert.deepEqual(['supports', 'conflicts', 'none', null, 'else'].map(evidenceLabel), ['Supports', 'Conflicts', 'No bearing', 'No judgment', 'No judgment']);
+  assert.equal(stateNote('holds', 'claude-code'), 'The validity judge found no session that read it since it was written to show it wrong.');
+  assert.equal(stateNote('doubt', 'claude-code'), 'The validity judge found evidence against it in a session that read it, not enough to settle it.');
+  assert.equal(stateNote('outdated', 'claude-code'), 'The validity judge found that a session that read it shows it no longer holds; the agent or a person should revise it.');
+  assert.equal(judgedBy([]), null);
+  assert.equal(judgedBy([{ judge_version: 1, model: 'claude-haiku-5-5', state: null }, { judge_version: 1, model: 'claude-haiku-5-5', state: 'holds' }]),
+    'Judged by the validity judge, version 1, with claude-haiku-5-5, in 2 updates.');
   assert.deepEqual(MEMORIES.columns.find((c) => c.name === 'still_valid')!.values, ['holds', 'doubt', 'outdated', 'unjudged', 'unused', 'unrecorded']);
 });

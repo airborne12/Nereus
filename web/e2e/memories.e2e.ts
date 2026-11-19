@@ -195,7 +195,8 @@ test("once the validity fold has judged a read, the memory's state and its updat
   assert.equal((await cells('build-cache-flag'))[5], 'Out of date');
   await row('build-cache-flag').click();
   await page.getByRole('heading', { name: 'build-cache-flag', level: 1 }).waitFor();
-  assert.match(await page.locator('.mem-state').innerText(), /^Out of date\s+A session that read it showed it no longer holds/);
+  assert.match(await page.locator('.mem-state').innerText(),
+    /^Out of date\s+The validity judge found that a session that read it shows it no longer holds; the agent or a person should revise it\.\s+Judged by the validity judge, version 1, with claude-haiku-5-5, in 1 update\.$/);
   const updates = page.getByRole('table', { name: 'Updates' });
   assert.deepEqual((await updates.locator('tbody tr').first().locator('td').allInnerTexts()).map((t) => t.trim()),
     ['2026-11-19 11:00:00', '1', 'Slow staging deploys', 'Conflicts', 'Out of date', 'The keep flag was renamed to reuse.']);

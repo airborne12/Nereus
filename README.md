@@ -336,9 +336,15 @@ that read a memory's file with the Read tool is one more piece of evidence; the 
 memory, what was known of it before, and the turn of that session from the step that read it, and
 answers whether the session supports it, conflicts with it or has no bearing on it, and the state
 after: holds, doubt or outdated. The reads of a memory are judged one after another, oldest first,
-under a lease per memory; a new version of a memory starts again from "holds as written".
+under a lease per memory; a new version of a memory starts again from "holds as written". A read
+counts once its turn is over: a later turn of its session exists, or the session has been quiet for
+ten minutes. A new version counts only the reads after the capture that still saw the version
+before, since an edit does not always move the memory's own time. Only a read of the memory's own
+path counts; a read by another path (relative, `~`, through a link) is not seen.
 `MEMORY_JUDGE_BUDGET` caps the input tokens of this pass (100,000 unless set; 0 skips it); a call
-that does not reach the model leaves that memory's later reads for the next pass.
+that does not reach the model leaves that memory's later reads for the next pass, and an answer
+that is not an update (a refusal, a cut or malformed answer) is stored as "No judgment" with why,
+and the state stays as it was.
 
 ### Memories
 
@@ -483,7 +489,8 @@ tokens are disabled for them, with the reason, and the server refuses them.
 **Memories** (`/agents/memories`) lists the latest version of every memory still kept: Updated,
 Agent, Scope, Memory (name and description), Kind, Still valid and Source session. It opens on the
 past 30 days, since a memory is updated seldom. Still valid is the latest state of the validity
-fold (Holds, In doubt, Out of date); before it has judged a read, "Not used since written" until a
+fold (Holds, In doubt, Out of date), which a memory's page names as the judge's finding with its
+version and model; before it has judged a read, "Not used since written" until a
 session reads the memory's file again and "Not judged yet" after; and "Use not recorded" for
 Gemini CLI, which loads its memories whole into every session. Source
 session is the recorded session, "inferred · N % of words", or "Not recorded"; a session opens.

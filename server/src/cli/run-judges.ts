@@ -38,7 +38,7 @@ export const memoryBudget = (env: Record<string, string | undefined>): number =>
 const missedLine = (what: string, m: Missed | null | undefined): string[] =>
   m ? [`${m.calls} ${what} call(s) did not reach the model and will be tried again on the next pass: ${m.reason}`] : [];
 
-/** What the command prints: one line, then one line per run that did not finish, and per stop, missed calls and failure of the risk and memory passes. */
+/** What the command prints: one line, then one line per run that did not finish, and per stop, missed calls, calls without a judgment and failure of the risk and memory passes. */
 export function summary(report: { queued: number; runs: readonly RunReport[]; risks?: RiskReport; memories?: ValidityReport }, budget = RISK_BUDGET, memBudget = VALIDITY_BUDGET): string[] {
   const judged = report.runs.reduce((n, r) => n + r.judged, 0);
   const { risks, memories } = report;
@@ -58,6 +58,7 @@ export function summary(report: { queued: number; runs: readonly RunReport[]; ri
     ...(risks?.failed ?? []).map((f) => `risk judge of rule ${f.rule} failed: ${f.error}`),
     ...(memories?.stopped ? [`memory validity stopped before going over its budget of ${memBudget} input tokens`] : []),
     ...missedLine('memory validity', memories?.missed),
+    ...(memories?.unanswered ? [`${memories.unanswered.calls} read(s) of memories the model answered without a judgment, stored as such: ${memories.unanswered.reason}`] : []),
     ...(memories?.failed ?? []).map((f) => `validity of memory ${f.memory} failed: ${f.error}`),
   ];
 }

@@ -59,6 +59,9 @@ test('one memory: its latest version with fields and sections, its versions, the
   const judged = call(stub([VERSION], uses, [{ version: 1, state: 'doubt', evidence: 'conflicts', reason: 'Another flag.' }]).doris, `/api/agents/memories/claude-code/${encodeURIComponent('-home-u')}/build`);
   await judged.done;
   assert.deepEqual([judged.answers[0]!.body.state, judged.answers[0]!.body.history.length], ['doubt', 1]);
+  const late = call(stub([VERSION, { ...older, captured_at: '2026-11-16 00:00:00' }], uses).doris, `/api/agents/memories/claude-code/${encodeURIComponent('-home-u')}/build`);
+  await late.done;
+  assert.equal(late.answers[0]!.body.state, 'unused', 'a read before the capture that still saw the version before does not count');
   assert.equal(b.versions[0].content, undefined, 'the versions list carries no content');
 });
 

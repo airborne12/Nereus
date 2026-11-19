@@ -41,11 +41,15 @@ test('the budget of the risk pass comes from RISK_JUDGE_BUDGET, a whole number o
 });
 
 test('the reads of memories judged join the line, and a stop, missed calls or a memory that failed get their own', () => {
-  const memories = { judged: 4, stopped: true, held: 1, failed: [{ memory: 'claude-code/p/build', error: 'Doris is down' }], missed: { calls: 1, reason: 'The model could not be reached: 529' } };
+  const memories = {
+    judged: 4, stopped: true, held: 1, failed: [{ memory: 'claude-code/p/build', error: 'Doris is down' }], missed: { calls: 1, reason: 'The model could not be reached: 529' },
+    unanswered: { calls: 2, reason: 'The model declined to judge this session.' },
+  };
   assert.deepEqual(summary({ queued: 0, runs: [], memories }, 5_000, 9_000), [
     '0 run(s), 0 step(s) judged; 4 read(s) of memories judged; 1 memory left to another runner',
     'memory validity stopped before going over its budget of 9000 input tokens',
     '1 memory validity call(s) did not reach the model and will be tried again on the next pass: The model could not be reached: 529',
+    '2 read(s) of memories the model answered without a judgment, stored as such: The model declined to judge this session.',
     'validity of memory claude-code/p/build failed: Doris is down',
   ]);
   assert.equal(memoryBudget({}), VALIDITY_BUDGET);

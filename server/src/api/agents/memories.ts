@@ -43,7 +43,7 @@ export async function memory(doris: Doris, db: string, send: Send, res: ServerRe
   send(res, 200, {
     memory: { ...ref, ...latest, sections: json(latest.sections) ?? [], fields: json(latest.fields) ?? {} },
     versions: versions!.map(({ content: _c, sections: _s, fields: _f, ...rest }) => rest),
-    uses, history, state: memoryState(latest, uses!, history!), sql: [s.versions, s.uses, s.history], elapsedMs,
+    uses, history, state: memoryState(latest, uses!, history!, versions![1]?.captured_at), sql: [s.versions, s.uses, s.history], elapsedMs,
   });
   return true;
 }

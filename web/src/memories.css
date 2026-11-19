@@ -10,6 +10,7 @@
 .mem-state.warn { border-left-color: var(--ag-warn); }
 .mem-state.bad { border-left-color: var(--ag-bad); }
 .mem-state p { margin: 4px 0 0; font-size: 13px; line-height: 1.5; }
+.mem-state p.mem-judged { color: var(--text-2); font-size: 12px; }
 .mem-uses, .mem-history { margin-top: 4px; }
 .mem-valid h3 { margin: 14px 0 2px; font-size: 13px; font-weight: 600; }
 .mem-section h3 { margin: 10px 0 4px; font-size: 13px; font-weight: 600; }

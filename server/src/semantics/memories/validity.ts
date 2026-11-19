@@ -40,32 +40,48 @@ export interface Prior { state: string; reason: string }
 /** The subject of a version of a memory `m` in agent_judgments: its key hashed, and the start of its content hash. */
 export const subjectSql = (m: string): string => `concat(md5(concat_ws('\\n', ${m}.agent, ${m}.scope, ${m}.name)), ':', left(${m}.content_hash, 16))`;
 
-/** The latest state of each version of a memory, as a derived table to join on its subject. */
+/** The latest state of each version of a memory, as a derived table to join on its subject; a call that gave no judgment has none. */
 export const latestStateSql = (db: string): string =>
-  `(SELECT subject, max_by(state, version) AS state FROM ${db}.agent_judgments WHERE judge = ${sqlString(VALIDITY.judge)} GROUP BY subject)`;
+  `(SELECT subject, max_by(state, version) AS state FROM ${db}.agent_judgments WHERE judge = ${sqlString(VALIDITY.judge)} AND state IS NOT NULL GROUP BY subject)`;
+
+/** The latest version of each memory as a derived table, with `prev_at`, the capture of the version before it. */
+export const latestVersionsSql = (db: string): string => [
+  '(SELECT a.agent, a.scope, a.name, a.captured_at, max(b.captured_at) AS prev_at',
+  `  FROM (SELECT agent, scope, name, max(captured_at) AS captured_at FROM ${db}.agent_memories GROUP BY agent, scope, name) a`,
+  `  LEFT JOIN ${db}.agent_memories b ON b.agent = a.agent AND b.scope = a.scope AND b.name = a.name AND b.captured_at < a.captured_at`,
+  '  GROUP BY a.agent, a.scope, a.name, a.captured_at)',
+].join('\n');
+
+/** The time after which a read is of memory row `m`: its update, or later the capture `l.prev_at` that still saw the version before. */
+export const sinceSql = (m: string, l: string): string => `greatest(${m}.updated_at, coalesce(${l}.prev_at, ${m}.updated_at))`;
 
 const recorded = READ_RECORDED.map(sqlString).join(', ');
 
-/** The latest state of a version of a memory, with its version number and why. */
+/** Every update of this judge version to a version of a memory, newest first, with the read each came from. */
 export const priorSql = (db: string, subject: string): Statement => ({
-  title: 'State of the memory so far',
-  sql: `SELECT version, state, reason FROM ${db}.agent_judgments WHERE judge = ${sqlString(VALIDITY.judge)} AND subject = ${sqlString(subject)} ORDER BY version DESC LIMIT 1`,
+  title: 'The fold of the memory so far',
+  sql: `SELECT version, state, reason, session_id, seq FROM ${db}.agent_judgments WHERE judge = ${sqlString(VALIDITY.judge)} AND judge_version = ${VALIDITY.version} AND subject = ${sqlString(subject)} ORDER BY version DESC`,
 });
 
-/** The reads still to judge: Read calls of the file of each memory's latest version after its update, not judged by this version of the judge, oldest first. */
-export function dueReadsSql(db: string): Statement {
+/**
+ * The reads still to judge: Read calls of the file of each memory's latest version after its update,
+ * in a turn that is over (a later turn exists or the session has been quiet since `settled`), not
+ * judged by this version of the judge, oldest first.
+ */
+export function dueReadsSql(db: string, settled: string): Statement {
   return {
     title: 'Reads of memories to judge',
     sql: [
       'WITH kept AS (',
-      'SELECT m.agent, m.scope, m.name, m.content_hash, m.description, m.content, m.location, m.updated_at',
-      `FROM (SELECT agent, scope, name, max(captured_at) AS captured_at FROM ${db}.agent_memories GROUP BY agent, scope, name) l`,
+      `SELECT m.agent, m.scope, m.name, m.content_hash, m.description, m.content, m.location, m.updated_at, ${sinceSql('m', 'l')} AS since`,
+      `FROM ${latestVersionsSql(db)} l`,
       `JOIN ${db}.agent_memories m ON m.agent = l.agent AND m.scope = l.scope AND m.name = l.name AND m.captured_at = l.captured_at`,
       `WHERE m.content_hash <> ${sqlString(REMOVED)} AND m.format IN (${recorded})`,
       ')',
       `SELECT m.agent, m.scope, m.name, m.content_hash, m.description, m.content, ${subjectSql('m')} AS subject, e.session_id, e.parent_seq AS seq, min(e.ts) AS first_read`,
       'FROM kept m',
-      `JOIN ${db}.agent_events e ON e.kind = 'tool_call' AND e.name = ${sqlString(READ)} AND e.resource = m.location AND e.ts > m.updated_at`,
+      `JOIN ${db}.agent_events e ON e.kind = 'tool_call' AND e.name = ${sqlString(READ)} AND e.resource = m.location AND e.ts > m.since`,
+      `JOIN ${db}.agent_sessions s ON s.session_id = e.session_id AND (e.turn < s.turns OR s.last_event_at < ${sqlString(settled)})`,
       `LEFT JOIN (SELECT DISTINCT subject, session_id, seq FROM ${db}.agent_judgments WHERE judge = ${sqlString(VALIDITY.judge)} AND judge_version = ${VALIDITY.version}) d`,
       `  ON d.subject = ${subjectSql('m')} AND d.session_id = e.session_id AND d.seq = e.parent_seq`,
       'WHERE d.subject IS NULL',
