@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import type * as api from '../api.ts';
 import { Icon, type IconName } from './Icon.tsx';
 
-export type Page = 'agent-sessions' | 'agent-steps' | 'agent-messages' | 'agent-risks' | 'agent-sequences' | 'agent-judges'
+export type Page = 'agent-sessions' | 'agent-steps' | 'agent-messages' | 'agent-risks' | 'agent-sequences' | 'agent-judges' | 'agent-memories'
   | 'search' | 'saved' | 'chart' | 'alerts' | 'sessions' | 'service-map' | 'dashboards' | 'settings';
 
 /** The pages under Sessions in the Agent trajectories area. */
@@ -102,6 +102,13 @@ export function AppShell({ page, user, favorites, agents, onHome, onNavigate, on
                   aria-label="Judges" aria-current={page === 'agent-judges' ? 'page' : undefined} onClick={() => onNavigate('agent-judges')}>
                   <Icon name="judge" />
                   {!collapsed && <span>Judges</span>}
+                </button>
+              </li>
+              <li>
+                <button type="button" className={`nav-item${page === 'agent-memories' ? ' active' : ''}`} title="Memories"
+                  aria-label="Memories" aria-current={page === 'agent-memories' ? 'page' : undefined} onClick={() => onNavigate('agent-memories')}>
+                  <Icon name="memory" />
+                  {!collapsed && <span>Memories</span>}
                 </button>
               </li>
             </ul>

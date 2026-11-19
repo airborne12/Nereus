@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import type { Row } from '../../api/agents.ts';
 import { duration, num, stamp, text, timeOf, tokens } from '../../lib/agents/format.ts';
-import { type ColumnDef, columnOf, isNumeric, type PageDef, sessionName } from '../../lib/agents/pages.ts';
+import { sourceOf, stateLabel, stateTone } from '../../lib/agents/memories.ts';
+import { type ColumnDef, columnOf, isNumeric, type PageDef, rowKey, sessionName } from '../../lib/agents/pages.ts';
 import { judgmentLabel } from '../../lib/agents/risks.ts';
 
 /** Sessions that can be ticked for a comparison. */
@@ -18,9 +19,27 @@ function clip(value: string, className = 'ag-clip'): ReactNode {
   return <span className={className} title={short}>{short}</span>;
 }
 
+/** A cell of the Memories table: the memory with its description, its state, and the session it came from. */
+function memoryCell(c: ColumnDef, row: Row, onSource?: (row: Row) => void): ReactNode | undefined {
+  if (c.name === 'name') return <><b>{text(row.name)}</b>{row.description ? <span className="ag-dim"> · {clip(text(row.description))}</span> : null}</>;
+  if (c.name === 'still_valid') {
+    const tone = stateTone(row.still_valid);
+    return <span className={tone === 'dim' ? 'ag-dim' : `ag-pill ${tone === 'ok' ? 'ok' : tone}`}>{stateLabel(row.still_valid)}</span>;
+  }
+  if (c.name === 'source_session_id') {
+    const s = sourceOf(row);
+    if (!s.root) return <span className={s.session ? '' : 'ag-dim'} title={s.session ? 'This session is not imported' : undefined}>{s.text}</span>;
+    return <button type="button" className="ag-srclink" title={s.inferred ? 'The session holding most of its words; not recorded by the agent' : 'Recorded by the agent'}
+      onClick={(e) => { e.stopPropagation(); onSource?.(row); }}>{s.text}</button>;
+  }
+  return undefined;
+}
+
 /** One cell: the value written for its kind, with the few columns that carry a signal drawn as one. */
-function cell(def: PageDef, c: ColumnDef, row: Row, onRisk?: (row: Row) => void): ReactNode {
+function cell(def: PageDef, c: ColumnDef, row: Row, onRisk?: (row: Row) => void, onSource?: (row: Row) => void): ReactNode {
   const v = row[c.name];
+  const memory = def.name === 'memories' ? memoryCell(c, row, onSource) : undefined;
+  if (memory !== undefined) return memory;
   if (def.name === 'sessions' && c.name === 'title') return <b title={`session_id ${text(row.session_id)}`}>{clip(sessionName(row))}</b>;
   if (c.name === 'title') return clip(text(v) || text(row.root_id ?? row.session_id));
   if (c.name === 'tool_errors') return num(v) ? <span className="ag-pill bad">{num(v)}</span> : zero;
@@ -52,9 +71,6 @@ function cell(def: PageDef, c: ColumnDef, row: Row, onRisk?: (row: Row) => void)
   return clip(text(v));
 }
 
-const rowKey = (def: PageDef, row: Row): string =>
-  `${text(row.session_id)}:${text(def.name === 'steps' ? row.seq : def.name === 'messages' ? row.msg_seq : '')}`;
-
 interface Props {
   def: PageDef;
   /** Names of the columns shown, in the page's order. */
@@ -66,6 +82,8 @@ interface Props {
   onOpen: (row: Row) => void;
   /** Sessions only: opens a session on its first safety risk. */
   onRisk?: (row: Row) => void;
+  /** Memories only: opens the session a memory came from. */
+  onSource?: (row: Row) => void;
   /** Rows that match and are not read yet. */
   more: number;
   onMore: () => void;
@@ -79,7 +97,7 @@ interface Props {
 }
 
 /** A data table in the convention of observability products: sticky sortable header, one row per record. */
-export function DataTable({ def, columns, rows, sort, dir, onSort, onOpen, onRisk, more, onMore, loadingMore, empty, picked, onPick, onClearPicked }: Props) {
+export function DataTable({ def, columns, rows, sort, dir, onSort, onOpen, onRisk, onSource, more, onMore, loadingMore, empty, picked, onPick, onClearPicked }: Props) {
   const cols = columns.map((name) => columnOf(def, name)).filter((c): c is ColumnDef => c !== undefined);
   const width = cols.length + (picked ? 1 : 0);
   return (
@@ -117,7 +135,7 @@ export function DataTable({ def, columns, rows, sort, dir, onSort, onOpen, onRis
                     aria-label="Tick this session to compare it" />
                 </td>
               )}
-              {cols.map((c) => <td key={c.name} className={isNumeric(c.kind) ? 'num' : c.fill ? 'ag-fill' : ''}>{cell(def, c, row, onRisk)}</td>)}
+              {cols.map((c) => <td key={c.name} className={isNumeric(c.kind) ? 'num' : c.fill ? 'ag-fill' : ''}>{cell(def, c, row, onRisk, onSource)}</td>)}
             </tr>
           );
         })}

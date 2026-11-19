@@ -4,6 +4,7 @@ import { Root } from './Root.tsx';
 import './styles.css';
 import './agents.css';
 import './judges.css';
+import './memories.css';
 
 function render() {
   createRoot(document.getElementById('root')!).render(

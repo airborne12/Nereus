@@ -19,7 +19,7 @@ const AGENTS = import.meta.env.MODE !== 'demo';
 const HOME: Page = AGENTS ? 'agent-sessions' : 'search';
 
 export const PATHS: Record<Page, string> = {
-  'agent-sessions': '/agents/sessions', 'agent-steps': '/agents/steps', 'agent-messages': '/agents/messages', 'agent-risks': '/agents/risks', 'agent-sequences': '/agents/sequences', 'agent-judges': '/agents/judges',
+  'agent-sessions': '/agents/sessions', 'agent-steps': '/agents/steps', 'agent-messages': '/agents/messages', 'agent-risks': '/agents/risks', 'agent-sequences': '/agents/sequences', 'agent-judges': '/agents/judges', 'agent-memories': '/agents/memories',
   search: '/search', saved: '/search/list', chart: '/chart', alerts: '/alerts', sessions: '/sessions',
   'service-map': '/service-map', dashboards: '/dashboards/list', settings: '/team',
 };
@@ -31,6 +31,8 @@ function route(path: string): { page: Page; dashboard: number | null } {
   if (/^\/agents\/(sessions\/[^/]+|compare)$/.test(path)) return { page: 'agent-sessions', dashboard: null };
   // A judge and the form of a new one stay under Judges.
   if (/^\/agents\/judges\/[^/]+$/.test(path)) return { page: 'agent-judges', dashboard: null };
+  // A memory stays under Memories.
+  if (/^\/agents\/memories\/[^/]+\/[^/]+\/[^/]+$/.test(path)) return { page: 'agent-memories', dashboard: null };
   const hit = (Object.entries(PATHS) as [Page, string][]).find(([, p]) => p === path);
   return { page: hit ? hit[0] : HOME, dashboard: null };
 }
