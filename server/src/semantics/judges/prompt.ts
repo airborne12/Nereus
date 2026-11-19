@@ -29,10 +29,12 @@ export const VERDICT_SCHEMA = {
 export interface Excerpt { subject: string; session_id: string; seq: number; text: string; inputSeqs: number[]; hash: string }
 
 type Row = Record<string, unknown>;
-interface Event { seq: number; kind: string; step: number; name: string; status: string; target: string; args: string; blocks: { kind: string; text: string }[] }
+/** An event of the record with its blocks of text. */
+export interface Event { seq: number; kind: string; step: number; name: string; status: string; target: string; args: string; blocks: { kind: string; text: string }[] }
 interface Step { step: number; events: Event[] }
 
-function eventsOf(rows: readonly Row[]): Event[] {
+/** The events of some rows of a reads statement, one per sequence number, in order. */
+export function eventsOf(rows: readonly Row[]): Event[] {
   const bySeq = new Map<number, Event>();
   for (const r of rows) {
     const seq = Number(r.seq);
@@ -46,7 +48,7 @@ function eventsOf(rows: readonly Row[]): Event[] {
 }
 
 /** Text of the record with the characters of its tags escaped, so it cannot open or close one. */
-const esc = (text: string): string => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+export const esc = (text: string): string => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
 /** Whether a call's arguments say more than its target: a command is its own only argument. */
 function moreThanTarget(args: string, target: string): boolean {
@@ -59,7 +61,8 @@ function moreThanTarget(args: string, target: string): boolean {
   }
 }
 
-function lines(e: Event): string[] {
+/** The lines of a model call or a tool call in the record. */
+export function eventLines(e: Event): string[] {
   if (e.kind === 'llm_call') return e.blocks.map((b) => `Assistant: ${esc(b.text)}`);
   const call = `Called ${esc(e.name)}${e.target ? `: ${esc(e.target)}` : ''}${e.status === 'error' ? ' (failed)' : ''}`;
   return [call, ...(moreThanTarget(e.args, e.target) ? [`Arguments: ${esc(e.args)}`] : []), ...e.blocks.map((b) => `Result: ${esc(b.text)}`)];
@@ -70,7 +73,7 @@ function render(request: readonly Event[], steps: readonly Step[], judged: numbe
   return [
     ...(asked.length ? [`<request>\n${asked.join('\n')}\n</request>`] : []),
     ...(omitted ? [`<omitted steps="${omitted}"/>`] : []),
-    ...steps.map((s) => `<step${s.step === judged ? ' judged="true"' : ''}>\n${s.events.flatMap(lines).join('\n')}\n</step>`),
+    ...steps.map((s) => `<step${s.step === judged ? ' judged="true"' : ''}>\n${s.events.flatMap(eventLines).join('\n')}\n</step>`),
   ].join('\n');
 }
 
@@ -96,7 +99,7 @@ export function excerptsOf(rows: readonly Row[], steps: readonly StepRef[]): Exc
 
 /** The message the model gets: the criterion, the record, and the criterion again after it. */
 export const userText = (criterion: string, excerpt: string): string =>
-  `Criterion: ${criterion}\n\n<trajectory>\n${excerpt}\n</trajectory>\n\nJudge the step marked judged="true" against the criterion: ${criterion}`;
+  `Criterion: ${criterion}\n\n<trajectory>\n${excerpt}\n</trajectory>\n\nJudge what is marked judged="true" against the criterion: ${criterion}`;
 
-/** About how many input tokens judging one step takes. */
-export const estimateTokens = (criterion: string, excerpt: string): number => Math.ceil((SYSTEM.length + userText(criterion, excerpt).length) / 4);
+/** About how many input tokens judging one record takes, with the step judges' system prompt or another. */
+export const estimateTokens = (criterion: string, excerpt: string, system: string = SYSTEM): number => Math.ceil((system.length + userText(criterion, excerpt).length) / 4);

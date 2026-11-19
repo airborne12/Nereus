@@ -28,6 +28,12 @@ test('a step is judged with the criterion, the record, a verdict schema and low 
   }]);
 });
 
+test('another system prompt can be given, as the judges of risks do', async () => {
+  const { c, sent } = client(() => message({ content: [text('{"verdict":"ok","reason":"Asked first."}')] }));
+  await claudeJudge(c).judge('claude-haiku-5-5', 'Was it agreed?', 'x', 'You check a risk.');
+  assert.equal((sent[0] as { system: string }).system, 'You check a risk.');
+});
+
 test('an answer that is not a verdict is unsure, and says why', async () => {
   const cases: [unknown, string][] = [
     [message({ stop_reason: 'refusal', content: [] }), 'The model declined to judge this step.'],

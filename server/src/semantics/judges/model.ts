@@ -8,7 +8,8 @@ import type { Verdict } from './judge.ts';
 import { SYSTEM, userText, VERDICT_SCHEMA } from './prompt.ts';
 
 export interface ModelAnswer { verdict: Verdict; reason: string; inputTokens: number; outputTokens: number }
-export interface JudgeModel { judge(model: string, criterion: string, excerpt: string): Promise<ModelAnswer> }
+/** A model that judges one record; `system` replaces the system prompt of the step judges. */
+export interface JudgeModel { judge(model: string, criterion: string, excerpt: string, system?: string): Promise<ModelAnswer> }
 
 /** The model cannot be used at all: the run stops and says so. */
 export class ModelAccessError extends Error {}
@@ -47,10 +48,10 @@ const noTokens = { inputTokens: 0, outputTokens: 0 };
 /** A judge model on the Claude API, through a client of the Anthropic SDK. */
 export function claudeJudge(client: Pick<Anthropic, 'messages'>): JudgeModel {
   return {
-    async judge(model, criterion, excerpt) {
+    async judge(model, criterion, excerpt, system) {
       try {
         const m = await client.messages.create({
-          model, max_tokens: MAX_TOKENS, system: SYSTEM,
+          model, max_tokens: MAX_TOKENS, system: system ?? SYSTEM,
           messages: [{ role: 'user', content: userText(criterion, excerpt) }],
           output_config: { effort: 'low', format: { type: 'json_schema', schema: VERDICT_SCHEMA } },
         });
