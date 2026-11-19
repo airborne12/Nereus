@@ -54,7 +54,7 @@ before(async () => {
   const main = writeFixture(dir);
   for (const file of [writeRisks(dir), main]) await importFile(file, { doris, db, load });
   const meta = await freshMetaDb();
-  assert.deepEqual(await runRules({ doris, db, load, leases: new Leases(meta.pool) }), { trees: 2, risks: 6, held: 0 });
+  assert.deepEqual(await runRules({ doris, db, load, leases: new Leases(meta.pool) }), { trees: 2, risks: 6, held: 0, failed: [] });
   const late = join(dir, `${LATE}.jsonl`);
   writeFileSync(late, readFileSync(main, 'utf8'));
   await importFile(late, { doris, db, load });
@@ -189,7 +189,8 @@ test('a command that needed a confirmation shows what the user said, and what mu
   const rule = pane().getByRole('region', { name: 'The rule' });
   assert.equal(await rule.locator('.ag-rlabel').innerText(), 'MUST COME FIRST');
   assert.deepEqual(await rule.locator('.ag-rstep').allInnerTexts(), [
-    'Assistant asks (reply has "?")', 'User confirms ("yes", "go ahead", "ok", "okay", "confirm", "proceed", "可以", "好的", "是的", "确认", "继续", "同意")',
+    'Assistant asks (reply has "?")',
+    'User confirms (opens with "yes", "go ahead", "ok", "okay", "confirm", "proceed", "可以", "好的", "是的", "确认", "继续", "同意"; none of "no", "not", "never", "stop", "wait", "cancel", "don\'t", "dont", "不", "别", "勿", "停", "取消")',
     'Bash · "rm" or "drop table" or "delete from" or "truncate" or "push --force"',
   ]);
   // The turn of the input and the step of the command are marked.

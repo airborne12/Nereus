@@ -18,12 +18,18 @@ const LEASE_SECONDS = 300;
 const PASS = 100;
 
 export interface RulesDeps { doris: Doris; db: string; load: Load; leases: LeaseStore; now?: () => Date }
-export interface RulesReport { trees: number; risks: number; held: number }
+/** A tree whose run failed, and why. */
+export interface Failed { root: string; error: string }
+export interface RulesReport { trees: number; risks: number; held: number; failed: Failed[] }
 
-/** The trees the rules have not run on since their last import, oldest activity first. */
-export function dueSql(db: string, limit: number): Statement {
-  return { title: 'Due', sql: `SELECT session_id FROM ${db}.agent_sessions\nWHERE kind = 'main' AND safety_risks IS NULL\nORDER BY last_event_at, session_id\nLIMIT ${Math.trunc(limit)}` };
+/** The trees the rules have not run on since their last import, oldest activity first, but for those in `skip`. */
+export function dueSql(db: string, limit: number, skip: readonly string[] = []): Statement {
+  const left = skip.length ? ` AND session_id NOT IN (${skip.map(sqlString).join(', ')})` : '';
+  return { title: 'Due', sql: `SELECT session_id FROM ${db}.agent_sessions\nWHERE kind = 'main' AND safety_risks IS NULL${left}\nORDER BY last_event_at, session_id\nLIMIT ${Math.trunc(limit)}` };
 }
+
+/** Makes every tree due, to run the rules again after their code changed. */
+export const allDueSql = (db: string): string => `UPDATE ${db}.agent_sessions SET safety_risks = NULL WHERE kind = 'main'`;
 
 /** Runs every rule on one tree and replaces its risks; answers how many it found. */
 export async function runRulesOn(deps: RulesDeps, rootId: string): Promise<number> {
@@ -50,18 +56,29 @@ export function countsSql(db: string, rootId: string, ids: readonly string[], ri
   return `UPDATE ${db}.agent_sessions SET safety_risks = CASE session_id ${counts} ELSE 0 END WHERE session_id IN (${ids.map((id) => sqlString(id)).join(', ')})`;
 }
 
+/** Whether a tree is still due once its lease is taken: another runner may have run it since the list was read. */
+async function stillDue(deps: RulesDeps, rootId: string): Promise<boolean> {
+  const rows = await deps.doris.query(`SELECT session_id FROM ${deps.db}.agent_sessions WHERE session_id = ${sqlString(sessionId(rootId))} AND safety_risks IS NULL`);
+  return rows.length > 0;
+}
+
 /** One pass over the trees that are due. A tree another runner holds is left to it. */
-export async function runRules(deps: RulesDeps): Promise<RulesReport> {
-  const due = (await deps.doris.query(dueSql(deps.db, PASS).sql)).map((r) => String(r.session_id));
-  let report: RulesReport = { trees: 0, risks: 0, held: 0 };
+export async function runRules(deps: RulesDeps, skip: readonly string[] = []): Promise<RulesReport> {
+  const due = (await deps.doris.query(dueSql(deps.db, PASS, skip).sql)).map((r) => String(r.session_id));
+  let report: RulesReport = { trees: 0, risks: 0, held: 0, failed: [] };
   for (const rootId of due) {
     if (!(await deps.leases.take(RULES_JOB, rootId, LEASE_SECONDS))) {
       report = { ...report, held: report.held + 1 };
       continue;
     }
     try {
-      const found = await runRulesOn(deps, rootId);
-      report = { ...report, trees: report.trees + 1, risks: report.risks + found };
+      if (await stillDue(deps, rootId)) {
+        const found = await runRulesOn(deps, rootId);
+        report = { ...report, trees: report.trees + 1, risks: report.risks + found };
+      }
+    } catch (e) {
+      // The tree stays due; the pass goes on with the others.
+      report = { ...report, failed: [...report.failed, { root: rootId, error: (e as Error).message }] };
     } finally {
       await deps.leases.release(RULES_JOB, rootId);
     }

@@ -25,16 +25,23 @@ export interface Rule {
   steps: RuleStep[];
 }
 
-/** What a page shows of a rule. Only the confirmation rule has confirmations. */
-export type RuleInfo = Rule & { confirm?: string[] };
+/** What a page shows of a rule. Only the confirmation rule has words of agreement and of refusal. */
+export type RuleInfo = Rule & { confirm?: string[]; refuse?: string[] };
 
 const IRREVERSIBLE = ['rm', 'drop table', 'delete from', 'truncate', 'push --force'];
 const SECRETS = ['.env', 'credentials', 'secret', 'id_rsa', 'token'];
 const OUTBOUND = ['curl', 'wget', 'scp', 'nc'];
 const FORBIDDEN = ['sudo', 'rm -rf', 'chmod 777', '--no-verify'];
-/** What counts as the user agreeing: whole words, and phrases of a language written without spaces. */
+/**
+ * The user agrees when the answer opens with one of these and holds none of the words of refusal:
+ * whole words, and phrases of a language written without spaces.
+ */
 const CONFIRM_WORDS = ['yes', 'go ahead', 'ok', 'okay', 'confirm', 'proceed'];
 const CONFIRM_PHRASES = ['可以', '好的', '是的', '确认', '继续', '同意'];
+const REFUSE_WORDS = ['no', 'not', 'never', 'stop', 'wait', 'cancel', "don't", 'dont'];
+const REFUSE_PHRASES = ['不', '别', '勿', '停', '取消'];
+/** An input that opens with a tag, such as `<task-notification>`, was written by the harness, not by the user. */
+const HARNESS_RE = '^\\s*<[a-z][a-z-]*>';
 
 export const RULES: readonly Rule[] = [
   {
@@ -59,7 +66,9 @@ export const RULES: readonly Rule[] = [
   },
 ];
 
-export const ruleCatalogue = (): RuleInfo[] => RULES.map((r) => (r.kind === 'confirm' ? { ...r, confirm: [...CONFIRM_WORDS, ...CONFIRM_PHRASES] } : { ...r }));
+export const ruleCatalogue = (): RuleInfo[] => RULES.map((r) => (r.kind === 'confirm'
+  ? { ...r, confirm: [...CONFIRM_WORDS, ...CONFIRM_PHRASES], refuse: [...REFUSE_WORDS, ...REFUSE_PHRASES] }
+  : { ...r }));
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -80,24 +89,32 @@ function compiled(s: RuleStep): Step {
 const EVENT_COLUMNS = (c: string): string =>
   `${c}.seq, ${c}.parent_seq AS call_seq, ${c}.ts, ${c}.turn, ${c}.step, ${c}.kind, ${c}.what, ${c}.status, left(${c}.target, ${TARGET_CHARS}) AS target`;
 
-/** The confirmation rule: every matching command whose last user input before it is not a confirmation of a question. */
+const anyOf = (words: readonly string[]): string => words.map(escapeRe).join('|');
+
+/**
+ * The confirmation rule: every matching command whose last user input before it does not agree to
+ * a question. Messages of the harness are not the user's, and a sub-agent has no user.
+ */
 function confirmSql(db: string, rule: Rule, ids: readonly string[]): string {
   // The reply just before that input asked something, and the input agrees.
   const asked = "r.kind = 'llm_call' AND (instr(r.target, '?') > 0 OR instr(r.target, '？') > 0)";
-  const agreed = [`regexp(lower(u.target), ${sqlString(`(^|[^a-z])(${CONFIRM_WORDS.map(escapeRe).join('|')})([^a-z]|$)`)})`, ...CONFIRM_PHRASES.map((p) => `instr(u.target, ${sqlString(p)}) > 0`)];
+  const agreed = `(regexp(lower(u.target), ${sqlString(`^\\s*(${anyOf(CONFIRM_WORDS)})([^a-z]|$)`)}) OR regexp(u.target, ${sqlString(`^\\s*(${anyOf(CONFIRM_PHRASES)})`)}))`;
+  const refused = `(regexp(lower(u.target), ${sqlString(`(^|[^a-z])(${anyOf(REFUSE_WORDS)})([^a-z]|$)`)}) OR regexp(u.target, ${sqlString(anyOf(REFUSE_PHRASES))}))`;
+  const said = `e.kind = 'user_input' AND s.kind = 'main' AND NOT regexp(e.target, ${sqlString(HARNESS_RE)})`;
   return [
     `WITH ${eventsCtes(db, sessionScope(ids), 'events', 'text').join(',\n')},`,
     'marked AS (',
-    "  SELECT e.*, max(if(e.kind = 'user_input', e.pos, NULL)) OVER (PARTITION BY e.session_id ORDER BY e.pos ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS said_at",
+    `  SELECT e.*, s.kind AS session_kind, max(if(${said}, e.pos, NULL)) OVER (PARTITION BY e.session_id ORDER BY e.pos ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS said_at`,
     '  FROM events e',
+    `  JOIN ${db}.agent_sessions s ON s.session_id = e.session_id`,
     ')',
-    `SELECT a.session_id, ${EVENT_COLUMNS('a')},`,
+    `SELECT a.session_id, a.session_kind, ${EVENT_COLUMNS('a')},`,
     `       u.seq AS said_seq, u.ts AS said_ts, u.turn AS said_turn, u.step AS said_step, left(u.target, ${TARGET_CHARS}) AS said, coalesce(${asked}, false) AS asked`,
     'FROM marked a',
     'LEFT JOIN events u ON u.session_id = a.session_id AND u.pos = a.said_at',
     'LEFT JOIN events r ON r.session_id = a.session_id AND r.pos = a.said_at - 1',
     `WHERE ${meets(compiled(rule.steps[0]!), 'a').join(' AND ')}`,
-    `  AND NOT coalesce(${asked} AND (${agreed.join(' OR ')}), false)`,
+    `  AND NOT coalesce(${asked} AND ${agreed} AND NOT ${refused}, false)`,
     'ORDER BY a.session_id, a.seq',
   ].join('\n');
 }
@@ -169,7 +186,10 @@ export function risksOf(rule: Rule, rows: readonly Record<string, unknown>[], at
   }
   return rows.map((r) => {
     const action = stepOf(r);
-    if (r.said_seq === null || r.said_seq === undefined) return risk(action, [action], r.session_id, 'The user said nothing before this command.');
+    if (r.said_seq === null || r.said_seq === undefined) {
+      const why = r.session_kind === 'subagent' ? 'This command ran in a sub-agent, where no user can confirm it.' : 'The user said nothing before this command.';
+      return risk(action, [action], r.session_id, why);
+    }
     const said: MatchStep = { kind: 'user', seq: Number(r.said_seq), call: null, ts: String(r.said_ts), turn: Number(r.said_turn), step: Number(r.said_step), what: 'User input', status: '', target: String(r.said ?? '') };
     const asked = r.asked === true || Number(r.asked) === 1;
     const why = `The last thing the user said before it was "${clip(said.target)}"${asked ? ', which is not a confirmation.' : ', and the assistant did not ask before running it.'}`;

@@ -49,6 +49,8 @@ export function stepSaid(s: RuleStep): string {
 export type PicturePart = { pill: string; tone: 'ok' | 'pre' | 'act' } | { arrow: string };
 export interface RulePicture { label: string; tone: 'ok' | 'bad'; parts: PicturePart[] }
 
+const quotedList = (words: readonly string[] = []): string => words.map((w) => `"${w}"`).join(', ');
+
 /** A rule drawn as a row of steps: what must come first, or the order that is not allowed, the last step being the act. */
 export function rulePicture(rule: RuleInfo): RulePicture {
   if (rule.kind === 'confirm') {
@@ -56,7 +58,7 @@ export function rulePicture(rule: RuleInfo): RulePicture {
       label: 'Must come first', tone: 'ok',
       parts: [
         { pill: 'Assistant asks (reply has "?")', tone: 'ok' }, { arrow: '→ next' },
-        { pill: `User confirms (${(rule.confirm ?? []).map((w) => `"${w}"`).join(', ')})`, tone: 'ok' }, { arrow: '⇢ later, no other user input between' },
+        { pill: `User confirms (opens with ${quotedList(rule.confirm)}; none of ${quotedList(rule.refuse)})`, tone: 'ok' }, { arrow: '⇢ later, no other user input between' },
         { pill: stepSaid(rule.steps[0]!), tone: 'act' },
       ],
     };

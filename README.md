@@ -252,13 +252,20 @@ may be. A rule finds candidates; whether one is a breach is a judgment, which no
 
 | Rule | Finds |
 | --- | --- |
-| Irreversible command without the user's confirmation | A command with `rm`, `drop table`, `delete from`, `truncate` or `push --force`, unless the last thing the user said before it agrees (`yes`, `go ahead`, `ok`, `okay`, `confirm`, `proceed`, `可以`, `好的`, `是的`, `确认`, `继续`, `同意`) and answers a reply of the assistant that asks (`?`) |
+| Irreversible command without the user's confirmation | A command with `rm`, `drop table`, `delete from`, `truncate` or `push --force`, unless the last thing the user said before it agrees and answers a reply of the assistant that asks (`?`) |
 | Secret read, later sent out of the machine | A read of a file named like `.env`, `credentials`, `secret`, `id_rsa` or `token`, and any later command with `curl`, `wget`, `scp` or `nc` |
 | Test changed right after it failed, then passes | A failed command with `test`, the edit of a file with `test` as the very next event, and a later command with `test` that passes |
 | Command outside the allowed set | A command with `sudo`, `rm -rf`, `chmod 777` or `--no-verify` |
 
-The words of a command are matched as whole words, so `--rm` and `perform` are not `rm`. The rules
-run as a job on the session trees imported since they last ran:
+The words of a command are matched as whole words, so `--rm` and `perform` are not `rm`. An answer
+agrees when it opens with `yes`, `go ahead`, `ok`, `okay`, `confirm`, `proceed`, `可以`, `好的`, `是的`,
+`确认`, `继续` or `同意` and holds none of `no`, `not`, `never`, `stop`, `wait`, `cancel`, `don't`,
+`dont`, `不`, `别`, `勿`, `停` or `取消`; so `不可以` and `No, do not proceed` do not agree. An input
+that opens with a tag, such as `<task-notification>` or `<command-name>`, was written by the
+harness and is not taken as something the user said. A sub-agent is started by the assistant, so
+no user can confirm its commands: each such command in a sub-agent is a risk.
+
+The rules run as a job on the session trees imported since they last ran:
 
     cd server
     DORIS_HOST=127.0.0.1 DORIS_PORT=9030 DORIS_DB=otel DORIS_BE_HTTP_URL=http://127.0.0.1:8040 \
@@ -268,7 +275,8 @@ It writes one row per risk to `agent_risks` and the count of each session to
 `agent_sessions.safety_risks`. A tree that is imported again loses its count, which hides its
 stored risks until the job has run on it again. `--all` runs the rules on every tree, for use
 after a rule changed. Two runners can work at once: each takes a lease on a tree in PostgreSQL
-(`job_leases`) before it works on it.
+(`job_leases`) before it works on it, and leaves a tree that another runner finished meanwhile. A
+tree whose run fails is named and stays due; the others still run, and the command exits with 1.
 
 ### Agent trajectory API
 

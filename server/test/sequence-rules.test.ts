@@ -17,6 +17,7 @@ test('four rules: one that needs a confirmation, two orders, one command that is
   assert.deepEqual(shown[3]!.steps, [{ kind: 'call', tool: 'Bash', words: ['sudo', 'rm -rf', 'chmod 777', '--no-verify'] }]);
   assert.ok(shown.every((r) => r.source.startsWith('Paper ') && !JSON.stringify(r).includes('"re"')));
   assert.deepEqual(shown[0]!.confirm, ['yes', 'go ahead', 'ok', 'okay', 'confirm', 'proceed', '可以', '好的', '是的', '确认', '继续', '同意']);
+  assert.deepEqual(shown[0]!.refuse, ['no', 'not', 'never', 'stop', 'wait', 'cancel', "don't", 'dont', '不', '别', '勿', '停', '取消']);
 });
 
 test('a command word is matched as a word, not inside another', () => {
@@ -43,14 +44,20 @@ test('an order rule is its pattern over the sessions of one tree, a row per even
   assert.ok(ruleSql('otel', rule('deny'), ['m']).sql.includes(String.raw`(sudo|rm -rf|chmod 777|--no-verify)`));
 });
 
-test('the confirmation rule looks at the last user input before the command, and at what came just before that input', () => {
+test('the confirmation rule looks at the last thing the user said before the command, and at what came just before it', () => {
   const s = ruleSql('otel', rule('confirm'), ['m']);
   assert.match(s.sql, /^WITH events AS \(/);
   assert.match(s.sql, /LEFT JOIN otel\.agent_messages m ON m\.session_id = e\.session_id AND m\.msg_seq = e\.msg_seq/);
-  assert.match(s.sql, /max\(if\(e\.kind = 'user_input', e\.pos, NULL\)\) OVER \(PARTITION BY e\.session_id ORDER BY e\.pos ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING\) AS said_at/);
+  // A message of the harness is not the user, and a sub-agent has no user.
+  assert.ok(s.sql.includes(String.raw`max(if(e.kind = 'user_input' AND s.kind = 'main' AND NOT regexp(e.target, '^\\s*<[a-z][a-z-]*>'), e.pos, NULL)) OVER (PARTITION BY e.session_id ORDER BY e.pos ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS said_at`));
+  assert.match(s.sql, /  FROM events e\n {2}JOIN otel\.agent_sessions s ON s\.session_id = e\.session_id\n\)/);
+  assert.match(s.sql, /^SELECT a\.session_id, a\.session_kind, a\.seq, /m);
   assert.match(s.sql, /LEFT JOIN events u ON u\.session_id = a\.session_id AND u\.pos = a\.said_at\nLEFT JOIN events r ON r\.session_id = a\.session_id AND r\.pos = a\.said_at - 1\n/);
   assert.ok(s.sql.includes(String.raw`WHERE a.kind = 'tool_call' AND a.what = 'Bash' AND regexp(lower(a.target), '(^|[^a-z0-9_./-])(rm|drop table|delete from|truncate|push --force)([^a-z0-9_]|$)')`));
-  assert.match(s.sql, /AND NOT coalesce\(r\.kind = 'llm_call' AND \(instr\(r\.target, '\?'\) > 0 OR instr\(r\.target, '？'\) > 0\) AND \(regexp\(lower\(u\.target\), '\(\^\|\[\^a-z\]\)\(yes\|go ahead\|ok\|okay\|confirm\|proceed\)\(\[\^a-z\]\|\$\)'\) OR instr\(u\.target, '可以'\) > 0 OR /);
+  // An answer agrees when it opens with a word of agreement and holds no word of refusal.
+  assert.ok(s.sql.includes(String.raw`  AND NOT coalesce(r.kind = 'llm_call' AND (instr(r.target, '?') > 0 OR instr(r.target, '？') > 0)`
+    + String.raw` AND (regexp(lower(u.target), '^\\s*(yes|go ahead|ok|okay|confirm|proceed)([^a-z]|$)') OR regexp(u.target, '^\\s*(可以|好的|是的|确认|继续|同意)'))`
+    + String.raw` AND NOT (regexp(lower(u.target), '(^|[^a-z])(no|not|never|stop|wait|cancel|don\'t|dont)([^a-z]|$)') OR regexp(u.target, '不|别|勿|停|取消')), false)`));
   assert.match(s.sql, /ORDER BY a\.session_id, a\.seq$/);
 });
 
@@ -80,9 +87,13 @@ test('the rows of an order rule become one risk per breach', () => {
 const action = { session_id: 's', seq: 40, call_seq: 39, ts: '2026-11-17 11:00:09.000000', turn: 3, step: 9, kind: 'tool_call', what: 'Bash', status: 'ok', target: 'rm -rf build' };
 
 test('a command that needed a confirmation says what the user said last', () => {
-  const none = risksOf(rule('confirm'), [{ ...action, said_seq: null, said_ts: null, said_turn: null, said_step: null, said: null, asked: 0 }], AT)[0]!;
+  const nothing = { said_seq: null, said_ts: null, said_turn: null, said_step: null, said: null, asked: 0 };
+  const none = risksOf(rule('confirm'), [{ ...action, session_kind: 'main', ...nothing }], AT)[0]!;
   assert.deepEqual([none.first_seq, none.events, none.ts, none.turn, none.why], [40, [40], action.ts, 3, 'The user said nothing before this command.']);
   assert.equal(none.what, 'Bash rm -rf build');
+  // What started a sub-agent came from the assistant: no user can confirm its commands.
+  const sub = risksOf(rule('confirm'), [{ ...action, session_kind: 'subagent', ...nothing }], AT)[0]!;
+  assert.deepEqual([sub.events, sub.what, sub.why], [[40], 'Bash rm -rf build', 'This command ran in a sub-agent, where no user can confirm it.']);
 
   const said = { said_seq: 31, said_ts: '2026-11-17 11:00:00.000000', said_turn: 3, said_step: 8, said: 'Tidy it up' };
   const unasked = risksOf(rule('confirm'), [{ ...action, ...said, asked: 0 }], AT)[0]!;

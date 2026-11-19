@@ -4,10 +4,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Doris } from '../src/db/doris.ts';
-import { countsSql, dueSql, runRules } from '../src/jobs/rules.ts';
+import { allDueSql, countsSql, dueSql, runRules } from '../src/jobs/rules.ts';
 
 test('the trees that are due are the main sessions without a count of risks', () => {
   assert.equal(dueSql('otel', 100).sql, "SELECT session_id FROM otel.agent_sessions\nWHERE kind = 'main' AND safety_risks IS NULL\nORDER BY last_event_at, session_id\nLIMIT 100");
+  // Trees that failed in an earlier pass are left out.
+  assert.equal(dueSql('otel', 100, ['x', 'y']).sql, "SELECT session_id FROM otel.agent_sessions\nWHERE kind = 'main' AND safety_risks IS NULL AND session_id NOT IN ('x', 'y')\nORDER BY last_event_at, session_id\nLIMIT 100");
+  assert.equal(allDueSql('otel'), "UPDATE otel.agent_sessions SET safety_risks = NULL WHERE kind = 'main'");
 });
 
 test('the main session counts the risks of its whole tree, a sub-agent its own', () => {
@@ -15,12 +18,14 @@ test('the main session counts the risks of its whole tree, a sub-agent its own',
   assert.equal(sql, "UPDATE otel.agent_sessions SET safety_risks = CASE session_id WHEN 'm' THEN 3 WHEN 'agent-1' THEN 2 WHEN 'agent-2' THEN 0 ELSE 0 END WHERE session_id IN ('m', 'agent-1', 'agent-2')");
 });
 
-/** A Doris that knows two due trees; the deny rule finds one command in the first. */
-function stubs(o: { held?: string[]; failOn?: string } = {}) {
+/** A Doris that knows two due trees; the deny rule finds one command in the first. `done`: trees another runner finished since. */
+function stubs(o: { held?: string[]; failOn?: string; done?: string[] } = {}) {
   const log: string[] = [];
   const doris = {
     query: async (sql: string) => {
       if (o.failOn && sql.includes(o.failOn)) throw new Error('doris is away');
+      const still = /^SELECT session_id FROM otel\.agent_sessions WHERE session_id = '(\w+)' AND safety_risks IS NULL$/.exec(sql);
+      if (still) return o.done?.includes(still[1]!) ? [] : [{ session_id: still[1] }];
       if (sql.includes('safety_risks IS NULL')) return [{ session_id: 'a' }, { session_id: 'b' }];
       if (sql.startsWith('SELECT session_id FROM otel.agent_sessions WHERE root_id')) return sql.includes("'a'") ? [{ session_id: 'a' }, { session_id: 'agent-1' }] : [{ session_id: 'b' }];
       if (sql.startsWith('DELETE') || sql.startsWith('UPDATE')) { log.push(sql.slice(0, sql.indexOf(' ', 7) + 1).trim() + (sql.includes("'a'") ? ' a' : ' b')); return []; }
@@ -43,7 +48,7 @@ function stubs(o: { held?: string[]; failOn?: string } = {}) {
 
 test('a pass runs the rules on each due tree: old risks out, new ones in, the counts last', async () => {
   const s = stubs();
-  assert.deepEqual(await runRules(s.deps), { trees: 2, risks: 1, held: 0 });
+  assert.deepEqual(await runRules(s.deps), { trees: 2, risks: 1, held: 0, failed: [] });
   assert.deepEqual(s.taken, ['rules:a', 'rules:b']);
   assert.deepEqual(s.log, ['DELETE FROM a', 'load agent_risks', 'UPDATE otel.agent_sessions a', 'release rules:a', 'DELETE FROM b', 'UPDATE otel.agent_sessions b', 'release rules:b']);
   assert.equal(s.loads.length, 1, 'a tree without risks loads nothing');
@@ -56,13 +61,19 @@ test('a pass runs the rules on each due tree: old risks out, new ones in, the co
 
 test('a tree another runner holds is left to it', async () => {
   const s = stubs({ held: ['a'] });
-  assert.deepEqual(await runRules(s.deps), { trees: 1, risks: 0, held: 1 });
+  assert.deepEqual(await runRules(s.deps), { trees: 1, risks: 0, held: 1, failed: [] });
   assert.deepEqual(s.log, ['DELETE FROM b', 'UPDATE otel.agent_sessions b', 'release rules:b']);
 });
 
-test('a failure gives the lease back and leaves the tree due', async () => {
-  const s = stubs({ failOn: 'DELETE' });
-  await assert.rejects(runRules(s.deps), /doris is away/);
-  // Nothing was loaded and no count was written, so the next pass takes the tree again.
-  assert.deepEqual(s.log, ['release rules:a']);
+test('a tree another runner finished after this pass read the list is left alone', async () => {
+  const s = stubs({ done: ['a'] });
+  assert.deepEqual(await runRules(s.deps), { trees: 1, risks: 0, held: 0, failed: [] });
+  assert.deepEqual(s.log, ['release rules:a', 'DELETE FROM b', 'UPDATE otel.agent_sessions b', 'release rules:b']);
+});
+
+test('a tree that fails is named, gives its lease back, stays due, and the pass goes on', async () => {
+  const s = stubs({ failOn: "DELETE FROM otel.agent_risks WHERE session_id IN ('a'" });
+  assert.deepEqual(await runRules(s.deps), { trees: 1, risks: 0, held: 0, failed: [{ root: 'a', error: 'doris is away' }] });
+  // Nothing of tree a was loaded and no count was written, so a later run takes it again.
+  assert.deepEqual(s.log, ['release rules:a', 'DELETE FROM b', 'UPDATE otel.agent_sessions b', 'release rules:b']);
 });

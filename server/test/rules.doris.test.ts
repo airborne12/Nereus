@@ -1,7 +1,8 @@
 // The safety rules and the rules job on a live Doris and PostgreSQL. Each rule finds its breach in
-// the hand-written session (spec 12, item 7); on generated sessions every rule finds what a loop
-// over the events finds; the job writes the risks, counts them on the sessions, and takes a tree
-// again after it was imported again; the pages read the result over HTTP. Skipped unless DORIS_TEST=1.
+// the sessions written by hand (spec 12, item 7); on generated sessions every rule finds what a
+// loop over the events finds; the job writes the risks, counts them on the sessions, and takes a
+// tree again after it was imported again; the pages read the result over HTTP. Skipped unless
+// DORIS_TEST=1.
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -17,27 +18,29 @@ import { ContentStore } from '../src/control/content/store.ts';
 import { Doris, configFromEnv } from '../src/db/doris.ts';
 import { streamLoad, streamLoadConfigFromEnv } from '../src/db/stream-load.ts';
 import { Leases } from '../src/jobs/leases.ts';
-import { dueSql, RULES_JOB, runRules, type RulesDeps } from '../src/jobs/rules.ts';
+import { runUntilDone } from '../src/cli/run-rules.ts';
+import { allDueSql, dueSql, RULES_JOB, runRules, type RulesDeps } from '../src/jobs/rules.ts';
 import { IngestKeys } from '../src/rum/http.ts';
-import type { Step } from '../src/semantics/sequences/pattern.ts';
-import { type Risk, risksOf, type Rule, ruleCatalogue, RULES, ruleSql, type RuleStep, wordsRe } from '../src/semantics/sequences/rules.ts';
+import { type Risk, risksOf, type Rule, RULES, ruleSql } from '../src/semantics/sequences/rules.ts';
 import { createApp } from '../src/server.ts';
 import { MAIN_ID, writeFixture } from './fixtures/claude-transcript.ts';
-import { RISK_ID, writeRisks } from './fixtures/risk-transcript.ts';
+import { CONFIRM_ID, HELPER_ID, RISK_ID, writeConfirmations, writeRisks } from './fixtures/risk-transcript.ts';
 import { RISKY, sequenceLines } from './fixtures/sequence-transcript.ts';
 import { freshMetaDb } from './meta-helper.ts';
 import { applySchemaFile } from './schema-helper.ts';
-import { bySession, type Ev, find, meets, readEvents, spoken } from './sequence-reference.ts';
+import { bySession, type Ev, find, meets, readEvents, type Spoken, spoken } from './sequence-reference.ts';
 
 const enabled = process.env.DORIS_TEST === '1';
 const db = `nereus_rules_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 const GENERATED = ['fx-riskgen-0001', 'fx-riskgen-0002'];
+const TREES = [...GENERATED, MAIN_ID, RISK_ID, CONFIRM_ID].sort();
 let doris: Doris;
 let deps: RulesDeps;
 let pool: pg.Pool;
 let dir = '';
 let riskFile = '';
 let all: Ev[] = [];
+let transcripts = new Map<string, Spoken>();
 let base = '';
 let key = '';
 let close: () => Promise<void> = async () => {};
@@ -56,8 +59,9 @@ before(async () => {
     writeFileSync(file, `${sequenceLines(id, 11 + i * 31, 60, '2026-11-17', RISKY).join('\n')}\n`);
     return file;
   });
-  for (const file of [riskFile, writeFixture(dir), ...generated]) await importFile(file, { doris, db, load });
-  all = await readEvents(doris, db, spoken(dir));
+  for (const file of [riskFile, writeConfirmations(dir), writeFixture(dir), ...generated]) await importFile(file, { doris, db, load });
+  transcripts = spoken(dir);
+  all = await readEvents(doris, db, transcripts);
   const meta = await freshMetaDb();
   pool = meta.pool;
   deps = { doris, db, load, leases: new Leases(pool) };
@@ -103,23 +107,54 @@ test('each rule finds its breach in the session written by hand, and not the cas
   assert.deepEqual([tidy!.first_seq, tidy!.turn, tidy!.rule_version, tidy!.root_id], [tidy!.steps[1]!.seq, 2, 1, RISK_ID]);
 });
 
-/** A step of a rule as the loop takes it. */
-const loose = ({ words, ...rest }: RuleStep): Step => (words ? { ...rest, re: wordsRe(words) } : rest);
-const AGREES = ruleCatalogue()[0]!.confirm!;
+test('a confirmation is an answer that opens with agreement and refuses nothing; the harness and a sub-agent are not the user', { skip: !enabled }, async () => {
+  const not = (said: string) => `The last thing the user said before it was "${said}", which is not a confirmation.`;
+  const risks = await found(rule('confirm'), [CONFIRM_ID, HELPER_ID]);
+  // "rm -r cache" ran after the user's "yes" and a message of the harness; "rm release.tar" was agreed to.
+  assert.deepEqual(risks.map((r) => [r.session_id, r.what, r.why]), [
+    [HELPER_ID, 'Bash rm -r tmp/cache', 'This command ran in a sub-agent, where no user can confirm it.'],
+    [CONFIRM_ID, 'User input: 不可以 → Bash rm logs/old.log', not('不可以')],
+    [CONFIRM_ID, 'User input: No, do not proceed → Bash psql -c "DROP TABLE tmp_runs"', not('No, do not proceed')],
+    [CONFIRM_ID, 'User input: 我觉得现在可以先看看日志 → Bash truncate -s 0 queue.db', not('我觉得现在可以先看看日志')],
+    [CONFIRM_ID, 'User input: 好的，先别删 → Bash rm -r dist', not('好的，先别删')],
+  ]);
+  assert.deepEqual(risks[0]!.steps.map((s) => [s.kind, s.target]), [['call', 'rm -r tmp/cache']]);
+});
+
+// The loop's own reading of an agreement (spec 8.6): its words are written here again, not taken from the code.
+const AGREE = ['yes', 'go ahead', 'ok', 'okay', 'confirm', 'proceed'];
+const AGREE_ZH = ['可以', '好的', '是的', '确认', '继续', '同意'];
+const REFUSE = ['no', 'not', 'never', 'stop', 'wait', 'cancel', "don't", 'dont'];
+const REFUSE_ZH = ['不', '别', '勿', '停', '取消'];
+
+/** A message of the harness opens with a tag such as `<task-notification>`. */
+function fromHarness(text: string): boolean {
+  const t = text.trimStart();
+  const end = t.indexOf('>');
+  return t.startsWith('<') && end > 1 && /^[a-z][a-z-]*$/.test(t.slice(1, end));
+}
+
+/** An answer agrees when it opens with a word of agreement and holds no word of refusal. */
+function agrees(text: string): boolean {
+  const t = text.trimStart().toLowerCase();
+  const opens = AGREE.some((w) => t.startsWith(w) && !/[a-z]/.test(t[w.length] ?? '')) || AGREE_ZH.some((w) => t.startsWith(w));
+  const words = t.split(/[^a-z']+/).map((w) => w.replace(/^'+|'+$/g, ''));
+  return opens && !REFUSE.some((w) => words.includes(w)) && !REFUSE_ZH.some((w) => t.includes(w));
+}
 
 /** The breaches of a rule in one session, by a loop: the event the risk is keyed by, and its events. */
 function expected(r: Rule, events: readonly Ev[]): string[] {
   const line = (key: Ev, taken: readonly Ev[]) => `${key.session_id} ${r.id} ${key.seq} [${taken.map((e) => e.seq).join(',')}]`;
-  if (r.kind !== 'confirm') return find(r.steps.map(loose), events).map((m) => line(m.taken[0]!, m.taken));
+  if (r.kind !== 'confirm') return find(r.steps, events).map((m) => line(m.taken[0]!, m.taken));
+  // A sub-agent has no user: what it was told came from the assistant.
+  const sub = transcripts.get(events[0]!.session_id)!.sub;
   return events.flatMap((e, i) => {
-    if (!meets(loose(r.steps[0]!), e, [])) return [];
-    const u = events.slice(0, i).map((x) => x.kind).lastIndexOf('user');
+    if (!meets(r.steps[0]!, e, [])) return [];
+    const u = sub ? -1 : events.slice(0, i).findLastIndex((x) => x.kind === 'user' && !fromHarness(x.target));
     const said = u >= 0 ? events[u]! : null;
     const before = u > 0 ? events[u - 1]! : null;
     const asked = before !== null && before.kind === 'reply' && /[?？]/.test(before.target);
-    // Whole words for a language with spaces, the phrase anywhere for one without.
-    const agreed = said !== null && AGREES.some((w) => (/^[ -~]+$/.test(w) ? new RegExp(`(^|[^a-z])${w}([^a-z]|$)`).test(said.target.toLowerCase()) : said.target.includes(w)));
-    return asked && agreed ? [] : [line(e, said ? [said, e] : [e])];
+    return said !== null && asked && agrees(said.target) ? [] : [line(e, said ? [said, e] : [e])];
   });
 }
 
@@ -134,7 +169,7 @@ test('on generated sessions every rule finds what a loop over the events finds',
   }
   assert.ok(total >= 40, `${total} breaches in the generated sessions`);
   // Some commands were confirmed: the confirmation rule finds fewer than there are such commands.
-  const commands = all.filter((e) => GENERATED.includes(e.session_id) && meets(loose(rule('confirm').steps[0]!), e, [])).length;
+  const commands = all.filter((e) => GENERATED.includes(e.session_id) && meets(rule('confirm').steps[0]!, e, [])).length;
   const unconfirmed = bySession(all.filter((e) => GENERATED.includes(e.session_id))).flatMap((events) => expected(rule('confirm'), events)).length;
   assert.ok(unconfirmed < commands && unconfirmed > 0, `${unconfirmed} of ${commands}`);
 });
@@ -144,23 +179,24 @@ const counts = async () => Object.fromEntries((await doris.query(`SELECT session
 const due = async () => (await doris.query(dueSql(db, 100).sql)).map((r) => String(r.session_id)).sort();
 
 test('the job writes the risks of every due tree and counts them on its sessions', { skip: !enabled }, async () => {
-  assert.deepEqual(await due(), [...GENERATED, MAIN_ID, RISK_ID].sort());
+  assert.deepEqual(await due(), TREES);
   assert.ok(Object.values(await counts()).every((n) => n === null), 'an import leaves the count unset');
   const report = await runRules(deps);
-  assert.deepEqual([report.trees, report.held], [4, 0]);
+  assert.deepEqual([report.trees, report.held, report.failed], [5, 0, []]);
   const rows = await stored();
   assert.equal(rows.length, report.risks);
   const loop = bySession(all).flatMap((events) => RULES.flatMap((r) => expected(r, events)));
   assert.deepEqual(rows.map((r) => `${r.session_id} ${r.rule} ${r.first_seq} ${String(r.events).replaceAll(' ', '')}`).sort(), loop.sort());
-  // Six risks in the session written by hand; none in the first fixture, whose count is 0 and not unset.
+  // Six risks in the first session written by hand, five in the second, one of them in its sub-agent;
+  // none in the first fixture, whose count is 0 and not unset.
   const n = await counts();
-  assert.deepEqual([n[RISK_ID], n[MAIN_ID]], [6, 0]);
-  assert.equal(GENERATED.reduce((sum, id) => sum + n[id]!, 0) + 6, report.risks);
+  assert.deepEqual([n[RISK_ID], n[CONFIRM_ID], n[HELPER_ID], n[MAIN_ID]], [6, 5, 1, 0]);
+  assert.equal(GENERATED.reduce((sum, id) => sum + n[id]!, 0) + 6 + 5, report.risks);
   assert.ok(Object.values(n).every((v) => v !== null), 'the sub-agent of the first fixture is counted too');
   assert.deepEqual(await due(), []);
   const tidy = rows.find((r) => r.session_id === RISK_ID && r.rule === 'confirm')!;
   assert.deepEqual(JSON.parse(String(tidy.steps)).map((s: { kind: string; target: string }) => [s.kind, s.target]), [['user', 'Tidy it up'], ['call', 'rm -rf build']]);
-  assert.deepEqual(await runRules(deps), { trees: 0, risks: 0, held: 0 });
+  assert.deepEqual(await runRules(deps), { trees: 0, risks: 0, held: 0, failed: [] });
 });
 
 test('a tree imported again is due again, and its risks are replaced', { skip: !enabled }, async () => {
@@ -170,13 +206,23 @@ test('a tree imported again is due again, and its risks are replaced', { skip: !
   // Another runner holds the tree: this one leaves it.
   const other = new Leases(pool, 'another runner');
   assert.equal(await other.take(RULES_JOB, RISK_ID, 60), true);
-  assert.deepEqual(await runRules(deps), { trees: 0, risks: 0, held: 1 });
+  assert.deepEqual(await runRules(deps), { trees: 0, risks: 0, held: 1, failed: [] });
   assert.deepEqual(await due(), [RISK_ID]);
   await other.release(RULES_JOB, RISK_ID);
-  assert.deepEqual(await runRules(deps), { trees: 1, risks: 6, held: 0 });
+  assert.deepEqual(await runRules(deps), { trees: 1, risks: 6, held: 0, failed: [] });
   const strip = (rows: Record<string, unknown>[]) => rows.map((r) => `${r.session_id} ${r.rule} ${r.first_seq} ${r.what}`);
   assert.deepEqual(strip(await stored()), strip(before));
   assert.equal((await counts())[RISK_ID], 6);
+
+  // The transcript changed: turn 6 runs without sudo. The risk of that command is gone, not kept beside the others.
+  writeRisks(dir, true);
+  await importFile(riskFile, { doris, db, load: deps.load, force: true });
+  assert.deepEqual(await runRules(deps), { trees: 1, risks: 5, held: 0, failed: [] });
+  const mine = (rows: Record<string, unknown>[]) => strip(rows.filter((r) => r.session_id === RISK_ID));
+  assert.deepEqual(mine(await stored()), mine(before).filter((x) => !x.includes('sudo')));
+  writeRisks(dir);
+  await importFile(riskFile, { doris, db, load: deps.load, force: true });
+  assert.deepEqual(await runRules(deps), { trees: 1, risks: 6, held: 0, failed: [] });
 });
 
 async function get(path: string): Promise<{ status: number; body: any; text: string }> {
@@ -236,6 +282,15 @@ test('the pages read the risks: the Risks table, the count on Sessions, the risk
   assert.deepEqual((await get(`/api/agents/sessions/${RISK_ID}`)).body.risks, []);
   const pending = (await get(`/api/agents/sessions?${RANGE}&${own}`)).body.rows[0];
   assert.deepEqual([pending.safety_risks, pending.risk_rules], [null, null]);
-  assert.deepEqual(await runRules(deps), { trees: 1, risks: 6, held: 0 });
+  assert.deepEqual(await runRules(deps), { trees: 1, risks: 6, held: 0, failed: [] });
   assert.equal((await get(`/api/agents/risks?${RANGE}&${own}`)).body.total, 6);
+});
+
+test('--all makes every tree due again, and the passes run each of them once', { skip: !enabled }, async () => {
+  const risks = (await stored()).length;
+  await doris.query(allDueSql(db));
+  assert.deepEqual(await due(), TREES);
+  const report = await runUntilDone((skip) => runRules(deps, skip));
+  assert.deepEqual([report.trees, report.risks, report.failed], [5, risks, []]);
+  assert.deepEqual([await due(), (await stored()).length], [[], risks]);
 });

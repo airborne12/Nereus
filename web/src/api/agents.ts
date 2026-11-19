@@ -83,7 +83,7 @@ export interface Risk {
 /** A step of a safety rule: `words` are whole words of a command, `any` texts anywhere in a target. */
 export interface RuleStep { kind: RiskStep['kind']; tool?: string; status?: 'ok' | 'failed'; has?: string; any?: string[]; words?: string[]; link?: 'next' | 'later' }
 /** A safety rule: a command that needs a confirmation, an order that is not allowed, or a command that never is. */
-export interface RuleInfo { id: string; version: number; kind: 'confirm' | 'forbid' | 'deny'; name: string; source: string; steps: RuleStep[]; confirm?: string[] }
+export interface RuleInfo { id: string; version: number; kind: 'confirm' | 'forbid' | 'deny'; name: string; source: string; steps: RuleStep[]; confirm?: string[]; refuse?: string[] }
 
 export interface TreeAnswer {
   sessions: Row[];

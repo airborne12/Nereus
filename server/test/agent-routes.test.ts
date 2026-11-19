@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { test } from 'node:test';
 import { agentRoutes } from '../src/api/agents/routes.ts';
 import type { Doris } from '../src/db/doris.ts';
+import { RISKS_LIMIT } from '../src/semantics/sequences/risks.ts';
 import { MAX_EXPORT_BYTES, MAX_EXPORT_ROWS } from '../src/semantics/trajectory/export.ts';
 
 /** A Doris that answers counts with `total` and everything else with `rows`, recording the SQL. */
@@ -116,6 +117,16 @@ test('a session tree answers sessions, turns, marks and risks; every step only w
   await small.done;
   assert.deepEqual(small.answers[0]!.body.sql.map((s: any) => s.title), ['Session', 'Turns', 'Marks', 'Risks', 'Steps']);
   assert.equal(small.answers[0]!.body.steps.length, 1);
+});
+
+test('a session tree answers at most 500 risks and says when there were more', async () => {
+  const risk = (i: number) => ({ session_id: 's', rule: 'deny', rule_name: 'x', first_seq: i, rule_version: 1, ts: '2026-11-17 10:00:00', turn: 1, events: `[${i}]`, steps: '[]', what: '', why: '', found_at: '' });
+  const many = Array.from({ length: RISKS_LIMIT + 1 }, (_, i) => risk(i));
+  const doris = { query: async (sql: string) => (sql.includes('agent_risks') ? many : [{ session_id: 's', kind: 'main', steps: 41 }]) } as unknown as Doris;
+  const c = call(doris, '/api/agents/sessions/s');
+  await c.done;
+  const a = c.answers[0]!.body;
+  assert.deepEqual([a.risks.length, a.risksCut, a.risks.at(-1).first_seq, a.risks[0].events], [500, true, 499, [0]]);
 });
 
 test('the Risks table is a table page like the others, with its export', async () => {

@@ -481,8 +481,11 @@ with SQL.
 
 A lease is a row of `job_leases` in PostgreSQL (job, unit, holder, expiry); for the rules job a unit
 is a session tree. A runner takes the lease before it works on a tree and gives it back after; a
-lease that has expired can be taken by anyone. The rules job runs from the command line:
-`node src/cli/run-rules.ts`, with `--all` to run the rules on every tree again.
+lease that has expired can be taken by anyone. Once it holds the lease, a runner checks that the
+tree is still due, so a tree another runner finished meanwhile is not run twice. A tree whose run
+fails is named and stays due; the job goes on with the others and exits with 1. The rules job
+runs from the command line: `node src/cli/run-rules.ts`, with `--all` to run the rules on every
+tree again.
 
 A model call that fails is retried with backoff; after the last attempt the step gets `unsure`
 with the error as reason. Every run records its token counts. Model access is configured in
@@ -709,10 +712,15 @@ As built:
 - The two order rules and the deny rule are patterns of the Sequences compiler (8.5), run over
   every event of the sessions of one tree, whatever their time.
 - The confirmation rule looks, for each irreversible command, at the last user input before it
-  in its session and at the event just before that input. The command is confirmed when that
-  event is a reply with a question mark (`?` or `？`) and the input agrees: `yes`, `go ahead`,
-  `ok`, `okay`, `confirm` or `proceed` as a whole word, or `可以`, `好的`, `是的`, `确认`, `继续`
-  or `同意` anywhere. Otherwise the command is a risk, with the input listed before it.
+  in its session and at the event just before that input. An input that opens with a tag
+  (`<task-notification>`, `<command-name>` and the like) was written by the harness and is passed
+  over. The command is confirmed when that event is a reply with a question mark (`?` or `？`)
+  and the input agrees: it opens with `yes`, `go ahead`, `ok`, `okay`, `confirm` or `proceed` as
+  a whole word, or with `可以`, `好的`, `是的`, `确认`, `继续` or `同意`, and holds neither `no`,
+  `not`, `never`, `stop`, `wait`, `cancel`, `don't` or `dont` as a whole word nor `不`, `别`, `勿`,
+  `停` or `取消`. Otherwise the command is a risk, with the input listed before it.
+- A sub-agent has no user: what started it came from the assistant. Each irreversible command in
+  a sub-agent is a risk, which says so.
 - A rule has a version in code; a risk records the version that found it.
 
 ### 8.7 Judges
@@ -869,9 +877,10 @@ Open questions:
   checked: 157 patterns and 48 drawings against an independent computation on generated sessions.
   Those of the safety rules too: each rule against a loop over generated sessions that hold its
   words.
-- **Risks at scale.** On the acceptance data the rules job took about 10 s for 78 session trees
-  and found 152 risks, 123 of them commands without a confirmation in four trees. Without a
-  judgment every candidate counts on the Sessions table, which is loud; sub-project 3 judges them.
+- **Risks at scale.** On the acceptance data the rules job took about 12 s for 78 session trees
+  and found 169 risks in four trees: 140 commands without a confirmation, 12 of them in
+  sub-agents, and 29 commands outside the allowed set. Without a judgment every candidate counts
+  on the Sessions table, which is loud; sub-project 3 judges them.
 - **Targets at scale.** A pattern's statement reads the target of every tool call in the range.
   When a step is an input or a reply, it also joins the text blocks of those events by key,
   whatever their age, since a text said before keeps its first block; the join looks into every
