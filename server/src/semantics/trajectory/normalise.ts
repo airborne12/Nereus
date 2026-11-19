@@ -151,13 +151,15 @@ export function normalise(session: SessionRecord, records: readonly CaptureRecor
     const ctx = contextOf(c);
     writeContext(seq, c.startTs, ctx);
     const msgs = c.blocks.map((b) => addBlock(b, seq));
+    // A call names the first text it wrote, or its first block when it wrote none.
+    const said = msgs[c.blocks.findIndex((b) => b.kind === 'text')];
     events.set(seq, {
       ...blankEvent(sid, seq, c.startTs, n.turn, n.step, 'llm_call', gapUs(begin)), name: c.model, status: 'ok',
       end_ts: dorisTime(c.endTs), duration_us: Math.max(0, (end - begin) * 1000), model: c.model, stop_reason: c.stopReason,
       request_id: c.requestId, input_tokens: c.usage?.input ?? null, output_tokens: c.usage?.output ?? null,
       cache_read_tokens: c.usage?.cacheRead ?? null, cache_write_tokens: c.usage?.cacheWrite ?? null,
       ctx_msgs: ctx.blocks.length, ctx_prefix: commonPrefix(lastCall?.blocks ?? [], ctx.blocks), ctx_change: ctx.change,
-      ctx_exact: ctx.exact, prompt_hash: c.promptHash, msg_seq: msgs[0] ?? null,
+      ctx_exact: ctx.exact, prompt_hash: c.promptHash, msg_seq: said ?? msgs[0] ?? null,
     });
     ended(end);
     lastCall = { request: ctx.request, blocks: ctx.blocks };

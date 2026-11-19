@@ -137,3 +137,20 @@ test('a context built on an unknown base or an unresolved message stays inexact 
   ]);
   assert.deepEqual([2, 4, 5, 6].map((s) => ev(n, s).ctx_exact), [false, false, false, false]);
 });
+
+test('a model call names its first text block, also when it thought first or said the same before', () => {
+  const think = (apiMsg: string, sec: number) => blk('assistant', 'thinking', apiMsg, '', sec);
+  const n = run([
+    ask('u1', 'go', 0),
+    call(1, [said('a1', 'Done.', 1)], null, 'end_turn'),
+    ask('u2', 'again', 5),
+    // Thinking first, then a text the session already holds: the call still names that text.
+    call(6, [think('a2', 6), said('a2', 'Done.', 6)], null, 'end_turn'),
+    ask('u3', 'more', 10),
+    call(11, [think('a3', 11), use('a3', 't1', 'Read', { file_path: 'a' }, 11)]),
+  ]);
+  const calls = n.events.filter((e) => e.kind === 'llm_call');
+  const kindOf = (m: number | null) => n.messages.find((x) => x.msg_seq === m)?.kind;
+  assert.deepEqual(calls.map((e) => kindOf(e.msg_seq)), ['text', 'text', 'thinking']);
+  assert.equal(calls[1]!.msg_seq, calls[0]!.msg_seq, 'the repeated text is the block stored the first time');
+});

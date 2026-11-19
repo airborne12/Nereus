@@ -108,7 +108,7 @@ function words(row: LaneRow, main: string, a: Actions): ReactNode {
     : <button type="button" onClick={() => a.onMore(row.sid, row.turn)}>Show {Math.min(STEPS_PAGE, row.left)} more of {plural(row.left, 'step')}</button>;
 }
 
-interface RowProps extends Actions { row: LaneRow; selected: boolean; scale: number; main: string }
+interface RowProps extends Actions { row: LaneRow; selected: boolean; marked: boolean; scale: number; main: string }
 
 /**
  * A row is drawn again only when its lane, its content or its selection changes. The callbacks are
@@ -117,7 +117,7 @@ interface RowProps extends Actions { row: LaneRow; selected: boolean; scale: num
 function sameRow(a: RowProps, b: RowProps): boolean {
   const x = a.row;
   const y = b.row;
-  if (a.selected !== b.selected || a.scale !== b.scale || x.type !== y.type || x.key !== y.key || x.lane !== y.lane) return false;
+  if (a.selected !== b.selected || a.marked !== b.marked || a.scale !== b.scale || x.type !== y.type || x.key !== y.key || x.lane !== y.lane) return false;
   if (x.from !== y.from || x.at !== y.at || x.to !== y.to || x.above !== y.above || x.below !== y.below || x.pass.join() !== y.pass.join()) return false;
   if (x.type === 'turn' && y.type === 'turn') return x.turn === y.turn && x.open === y.open && x.inner === y.inner;
   if (x.type === 'step' && y.type === 'step') return x.step === y.step && x.open === y.open && x.child === y.child && x.children.length === y.children.length;
@@ -127,12 +127,13 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   return false;
 }
 
-const Line = memo(function Line({ row, selected, scale, main, ...a }: RowProps) {
+const Line = memo(function Line({ row, selected, marked, scale, main, ...a }: RowProps) {
   const kind = kindOf(row);
   const pad = { '--g': `${indent(row.lane)}px` } as CSSProperties;
   if (row.type === 'more') return <div className="ag-trow more" style={pad}><Graph row={row} selected={false} scale={scale} />{words(row, main, a)}</div>;
   return (
-    <div className={`ag-trow ${row.type}${kind === 'closed' ? ' closed' : ''}${selected ? ' sel' : ''}`} role="treeitem" aria-selected={selected}
+    <div className={`ag-trow ${row.type}${kind === 'closed' ? ' closed' : ''}${selected ? ' sel' : ''}${marked ? ' mk' : ''}`} role="treeitem" aria-selected={selected}
+      title={marked ? 'A step of the pattern match' : undefined}
       aria-expanded={twistOf(row) && !(row.type === 'turn' && row.turn.steps === 0) ? row.type !== 'cut' && row.open : undefined} data-key={row.key} style={pad} onClick={() => a.onSelect(row)}>
       <Graph row={row} selected={selected} scale={scale} />{words(row, main, a)}
     </div>
@@ -143,6 +144,8 @@ interface Props extends Actions {
   rows: LaneRow[];
   /** Key of the selected row. */
   selected: string | null;
+  /** Keys of the rows a pattern match marks. */
+  marked?: ReadonlySet<string>;
   scale: number;
   /** Id of the main session, whose last steps answer the user. */
   main: string;
@@ -163,7 +166,7 @@ function Legend() {
  * The left side of the session page: the trajectory as lanes. Only the rows near the window are
  * drawn. Arrow keys move along the rows and open or close them.
  */
-export function Lanes({ rows, selected, scale, main, onSelect, onTwist, onMore }: Props) {
+export function Lanes({ rows, selected, marked, scale, main, onSelect, onTwist, onMore }: Props) {
   const tree = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ top: 0, height: 900 });
   const tops = useMemo(() => rowTops(rows), [rows]);
@@ -218,7 +221,7 @@ export function Lanes({ rows, selected, scale, main, onSelect, onTwist, onMore }
       <Legend />
       <div className="ag-tree" role="tree" tabIndex={0} aria-label="Turns and steps of the session" ref={tree} onKeyDown={onKey} onScroll={measure}>
         <div style={{ height: tops[start] }} />
-        {rows.slice(start, end).map((r) => <Line key={r.key} row={r} selected={r.key === selected} scale={scale} main={main} onSelect={onSelect} onTwist={onTwist} onMore={onMore} />)}
+        {rows.slice(start, end).map((r) => <Line key={r.key} row={r} selected={r.key === selected} marked={marked?.has(r.key) ?? false} scale={scale} main={main} onSelect={onSelect} onTwist={onTwist} onMore={onMore} />)}
         <div style={{ height: total - tops[end]! }} />
       </div>
     </div>

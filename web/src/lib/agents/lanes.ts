@@ -4,7 +4,7 @@
 
 import type { Row } from '../../api/agents.ts';
 import { num, text, timeOf } from './format.ts';
-import { cutKey, stepKey, turnKey } from './select.ts';
+import { parseSel, cutKey, stepKey, turnKey } from './select.ts';
 
 export interface ToolCall { seq: number; name: string; resource: string; failed: boolean; repeatOf: number | null; repeatVisible: boolean; durationUs: number }
 
@@ -375,4 +375,18 @@ export function nextTarget(targets: readonly JumpTarget[], selected: string | nu
   if (!targets.length) return null;
   const at = targets.findIndex((t) => t.key === selected);
   return targets[(at + 1) % targets.length]!;
+}
+
+/**
+ * The key of the row that stands for a selection or a mark. A turn of a sub-agent has no row of
+ * its own: its branch does, which is the step that started it, or a row under that step when the
+ * step started several.
+ */
+export function rowKeyOf(tree: Tree, key: string): string {
+  const sel = parseSel(key);
+  const branch = sel?.kind === 'turn' ? tree.branches.get(sel.sid) : undefined;
+  const spawn = branch && branch.parent !== null ? tree.spawns.get(branch.sid) : undefined;
+  if (!branch || !spawn) return key;
+  const shared = [...tree.spawns.values()].filter((m) => m.sid === spawn.sid && m.parentSeq === spawn.parentSeq).length > 1;
+  return shared ? turnKey(branch.sid, branch.turns[0]?.no ?? 1) : stepKey(spawn.sid, spawn.parentSeq ?? spawn.seq);
 }

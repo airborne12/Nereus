@@ -216,3 +216,53 @@ test('agent tables are query sources for search and charts', { skip: !enabled },
   const f = await get('/api/fields?source=agent_sessions');
   assert.ok(f.body.fields.some((x: any) => x.name === 'first_input'));
 });
+
+async function post(path: string, body: unknown, type = 'application/json'): Promise<{ status: number; body: any }> {
+  const res = await fetch(`${base}${path}`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': type }, body: JSON.stringify(body) });
+  return { status: res.status, body: await res.json() };
+}
+
+test('Sequences: what happens next, the tools, and a pattern', { skip: !enabled }, async () => {
+  // After a Read: in both copies Read, Bash, Read, Agent, Reply; the Bash fails in the first copy only.
+  const next = await get(`/api/agents/sequences/next?${RANGE}&start=tool:Read&depth=3`);
+  assert.equal(next.status, 200);
+  const leaf = (key: string, times: number) => ({ key, times, kids: [], other: null });
+  assert.deepEqual([next.body.total, next.body.other, next.body.sql.length], [4, null, 1]);
+  assert.deepEqual(next.body.kids, [
+    { key: 'c:Agent', times: 2, other: null, kids: [leaf('r:', 2)] },
+    { key: 'c:Bash', times: 1, other: null, kids: [leaf('c:Read', 1)] },
+    { key: 'f:Bash', times: 1, other: null, kids: [leaf('c:Read', 1)] },
+  ]);
+  const failed = await get(`/api/agents/sequences/next?${RANGE}`);
+  assert.deepEqual([failed.body.start, failed.body.depth, failed.body.total], ['failed', 4, 1]);
+  assert.deepEqual(failed.body.kids, [{ key: 'c:Read', times: 1, other: null, kids: [{ key: 'c:Agent', times: 1, other: null, kids: [leaf('r:', 1)] }] }]);
+
+  const tools = await get(`/api/agents/sequences/tools?${RANGE}`);
+  assert.deepEqual(tools.body.tools, [{ name: 'Read', calls: 4 }, { name: 'Agent', calls: 2 }, { name: 'Bash', calls: 2 }, { name: 'Grep', calls: 1 }]);
+
+  // A read, a failed test run right after it, and the same file read again.
+  const range = { from: '2026-11-17T00:00:00Z', to: '2026-11-18T00:00:00Z' };
+  const pattern = [{ tool: 'Read' }, { tool: 'Bash', status: 'failed', has: 'pytest', link: 'next' }, { tool: 'Read', same: 1, link: 'next' }];
+  const m = await post('/api/agents/sequences/match', { ...range, pattern });
+  assert.equal(m.status, 200);
+  assert.deepEqual([m.body.matches, m.body.sessions, m.body.rows.length, m.body.sql.map((s: any) => s.title)], [1, 1, 1, ['Matches', 'Total']]);
+  const row = m.body.rows[0];
+  assert.deepEqual([row.session_id, row.root_id, row.title, row.agent, row.turn, row.span], [MAIN_ID, MAIN_ID, 'Fix the clock test', 'main', 1, 3]);
+  assert.deepEqual(row.steps.map((s: any) => [s.kind, s.what, s.status, s.target]), [
+    ['call', 'Read', 'ok', 'tests/clock_test.py'], ['call', 'Bash', 'error', 'pytest tests/clock_test.py'], ['call', 'Read', 'ok', 'tests/clock_test.py'],
+  ]);
+  assert.ok(row.steps.every((s: any) => Number.isInteger(s.call) && s.call < s.seq), 'a tool call names the model call that issued it');
+
+  // A reply, the user's next input and a compaction: events that are not tool calls, with their text.
+  const talk = await post('/api/agents/sequences/match', { ...range, pattern: [{ kind: 'reply', has: 'fixed' }, { kind: 'user', link: 'next' }, { kind: 'compaction', link: 'next' }], sort: 'session', dir: 'asc' });
+  assert.deepEqual([talk.body.matches, talk.body.sessions], [2, 2]);
+  assert.deepEqual(talk.body.rows.map((r: any) => r.session_id), [MAIN_ID, OTHER]);
+  assert.deepEqual(talk.body.rows[0].steps.map((s: any) => [s.kind, s.target]), [
+    ['reply', 'Fixed: the clock fixture now uses UTC.'], ['user', 'Thanks. Also keep the public API unchanged.'], ['compaction', ''],
+  ]);
+
+  assert.deepEqual(await post('/api/agents/sequences/match', { ...range, pattern: [{ tool: 'Read' }, { tool: 'Bash' }] }), { status: 400, body: { error: "step 2: 'link' must be next or later" } });
+  assert.equal((await post('/api/agents/sequences/match', {}, 'text/plain')).status, 415);
+  const anonymous = await fetch(`${base}/api/agents/sequences/match`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(anonymous.status, 401);
+});

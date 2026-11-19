@@ -38,11 +38,12 @@ export async function getQuery<T>(path: string, query: URLSearchParams, signal?:
   return parse<T>(await fetch(qs ? `${path}?${qs}` : path, { signal }));
 }
 
-export async function send<T>(method: 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
+export async function send<T>(method: 'POST' | 'DELETE', path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   return parse<T>(await fetch(path, {
     method,
     headers: body === undefined ? {} : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   }));
 }
 
