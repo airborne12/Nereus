@@ -27,7 +27,7 @@ export function riskBudget(env: Record<string, string | undefined>): number {
   return Number(raw);
 }
 
-/** What the command prints: one line, then one line per run that did not finish, a stop of the risk pass and each risk judge that failed. */
+/** What the command prints: one line, then one line per run that did not finish, a stop of the risk pass, its calls that did not reach the model, and each risk judge that failed. */
 export function summary(report: { queued: number; runs: readonly RunReport[]; risks?: RiskReport }, budget = RISK_BUDGET): string[] {
   const judged = report.runs.reduce((n, r) => n + r.judged, 0);
   const { risks } = report;
@@ -41,6 +41,7 @@ export function summary(report: { queued: number; runs: readonly RunReport[]; ri
     head,
     ...report.runs.filter((r) => r.status !== 'done').map((r) => `run ${r.run} of judge ${r.judge} ${r.status}: ${r.error}`),
     ...(risks?.stopped ? [`risk judgments stopped before going over their budget of ${budget} input tokens`] : []),
+    ...(risks?.missed ? [`${risks.missed.calls} risk judgment call(s) did not reach the model and will be tried again on the next pass: ${risks.missed.reason}`] : []),
     ...(risks?.failed ?? []).map((f) => `risk judge of rule ${f.rule} failed: ${f.error}`),
   ];
 }

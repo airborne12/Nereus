@@ -33,7 +33,7 @@ export const riskJudgeOf = (rule: string): RiskJudge | undefined => RISK_JUDGES.
 export const riskSubject = (session: string, rule: string, firstSeq: number): string => `${session}:${rule}:${firstSeq}`;
 const SUBJECT = "concat(r.session_id, ':', r.rule, ':', CAST(r.first_seq AS STRING))";
 
-/** The risks of one rule its judge has not judged with its version, in trees whose rules have run since their last import. */
+/** The risks of one rule its judge has not judged with its version, newest first, in trees whose rules have run since their last import. */
 export const unjudgedRisksSql = (db: string, j: RiskJudge): Statement => ({
   title: 'Risks to judge',
   sql: [
@@ -43,7 +43,7 @@ export const unjudgedRisksSql = (db: string, j: RiskJudge): Statement => ({
     `LEFT JOIN (SELECT DISTINCT subject FROM ${db}.agent_judgments WHERE judge = ${sqlString(j.judge)} AND judge_version = ${j.version}) d`,
     `  ON d.subject = ${SUBJECT}`,
     `WHERE r.rule = ${sqlString(j.rule)} AND m.safety_risks IS NOT NULL AND d.subject IS NULL`,
-    'ORDER BY r.ts, r.session_id, r.first_seq',
+    'ORDER BY r.ts DESC, r.session_id, r.first_seq',
   ].join('\n'),
 });
 
@@ -61,9 +61,9 @@ const SPAN_STEPS = 30;
 
 /**
  * What the model reads for each of some risks: the steps from the one before its first event to
- * its last event (the step before holds the question a confirmation answers), the request of the
- * turn of its first event, and which steps hold the events the rule matched. A block is found as
- * the step reads find it.
+ * its last event (the step before holds the question a confirmation answers), the inputs of each
+ * turn it has events in, the events the rule matched, and the kind of the session. A block is
+ * found as the step reads find it.
  */
 export function riskReadsSql(db: string, risks: readonly RiskRef[]): Statement {
   return {
@@ -83,7 +83,7 @@ export function riskReadsSql(db: string, risks: readonly RiskRef[]): Statement {
       `  FROM exploded x JOIN ${db}.agent_events e ON e.session_id = x.session_id AND e.seq = x.ev`,
       '),',
       'span AS (',
-      '  SELECT session_id, rule, first_seq, min(step) AS lo, max(step) AS hi, min(turn) AS turn',
+      '  SELECT session_id, rule, first_seq, min(step) AS lo, max(step) AS hi',
       '  FROM marked GROUP BY session_id, rule, first_seq',
       '),',
       'seen AS (',
@@ -94,14 +94,17 @@ export function riskReadsSql(db: string, risks: readonly RiskRef[]): Statement {
       '  LEFT JOIN marked mk ON mk.session_id = sp.session_id AND mk.rule = sp.rule AND mk.first_seq = sp.first_seq AND mk.seq = e.seq',
       '  LEFT JOIN (SELECT DISTINCT session_id, rule, first_seq, step FROM marked) ms',
       '    ON ms.session_id = sp.session_id AND ms.rule = sp.rule AND ms.first_seq = sp.first_seq AND ms.step = e.step',
+      '  LEFT JOIN (SELECT DISTINCT session_id, rule, first_seq, turn FROM marked) mt',
+      '    ON mt.session_id = sp.session_id AND mt.rule = sp.rule AND mt.first_seq = sp.first_seq AND mt.turn = e.turn',
       "  WHERE e.kind IN ('user_input', 'llm_call', 'tool_call')",
       `    AND ((e.step BETWEEN sp.lo - 1 AND sp.hi AND (sp.hi - sp.lo <= ${SPAN_STEPS} OR ms.step IS NOT NULL OR e.step = sp.lo - 1))`,
-      "         OR (e.kind = 'user_input' AND e.turn = sp.turn))",
+      "         OR (e.kind = 'user_input' AND mt.turn IS NOT NULL))",
       ')',
       'SELECT v.session_id, v.rule, v.first_seq, p.rule_name, p.why, v.seq, v.kind AS event_kind, v.step, v.name, v.status, v.marked,',
-      '       left(v.target, 2000) AS target, left(v.args, 2000) AS args, m.msg_seq, m.kind, m.is_error, left(m.text, 2000) AS text',
+      '       left(v.target, 2000) AS target, left(v.args, 2000) AS args, m.msg_seq, m.kind, m.is_error, left(m.text, 2000) AS text, ss.kind AS session_kind',
       'FROM seen v',
       'JOIN picked p ON p.session_id = v.session_id AND p.rule = v.rule AND p.first_seq = v.first_seq',
+      `JOIN ${db}.agent_sessions ss ON ss.session_id = v.session_id`,
       `LEFT JOIN ${db}.agent_messages m ON m.session_id = v.session_id AND m.kind IN ('text', 'tool_result')`,
       '  AND (m.event_seq = v.seq OR m.msg_seq = v.msg_seq OR m.msg_seq = v.result_msg)',
       'ORDER BY v.session_id, v.rule, v.first_seq, v.seq, m.msg_seq',

@@ -23,7 +23,7 @@ test('the risks a judge has not judged with its version, in trees whose rules ha
     "LEFT JOIN (SELECT DISTINCT subject FROM otel.agent_judgments WHERE judge = 'risk-confirm' AND judge_version = 1) d",
     "  ON d.subject = concat(r.session_id, ':', r.rule, ':', CAST(r.first_seq AS STRING))",
     "WHERE r.rule = 'confirm' AND m.safety_risks IS NOT NULL AND d.subject IS NULL",
-    'ORDER BY r.ts, r.session_id, r.first_seq',
+    'ORDER BY r.ts DESC, r.session_id, r.first_seq',
   ].join('\n'));
 });
 
@@ -31,9 +31,12 @@ test('what the model reads for a risk: its events in order, the step before the 
   const s = riskReadsSql('otel', [{ session_id: 's-1', rule: 'confirm', first_seq: 12 }, { session_id: 's-2', rule: 'deny', first_seq: 4 }]).sql;
   assert.match(s, /WHERE \(r\.session_id = 's-1' AND r\.rule = 'confirm' AND r\.first_seq = 12\) OR \(r\.session_id = 's-2' AND r\.rule = 'deny' AND r\.first_seq = 4\)/);
   assert.match(s, /FROM picked p LATERAL VIEW explode\(p\.events\) t AS ev/);
-  assert.match(s, /min\(step\) AS lo, max\(step\) AS hi, min\(turn\) AS turn/);
-  // A long risk reads only the steps of its events, the step before the first, and the request.
-  assert.match(s, /AND \(\(e\.step BETWEEN sp\.lo - 1 AND sp\.hi AND \(sp\.hi - sp\.lo <= 30 OR ms\.step IS NOT NULL OR e\.step = sp\.lo - 1\)\)\n {9}OR \(e\.kind = 'user_input' AND e\.turn = sp\.turn\)\)/);
+  assert.match(s, /min\(step\) AS lo, max\(step\) AS hi\n/);
+  // A long risk reads only the steps of its events, the step before the first, and the request of each turn it has events in.
+  assert.match(s, /AND \(\(e\.step BETWEEN sp\.lo - 1 AND sp\.hi AND \(sp\.hi - sp\.lo <= 30 OR ms\.step IS NOT NULL OR e\.step = sp\.lo - 1\)\)\n {9}OR \(e\.kind = 'user_input' AND mt\.turn IS NOT NULL\)\)/);
+  assert.match(s, /LEFT JOIN \(SELECT DISTINCT session_id, rule, first_seq, turn FROM marked\) mt\n {4}ON mt\.session_id = sp\.session_id AND mt\.rule = sp\.rule AND mt\.first_seq = sp\.first_seq AND mt\.turn = e\.turn/);
+  assert.match(s, /, ss\.kind AS session_kind\n/);
+  assert.match(s, /JOIN otel\.agent_sessions ss ON ss\.session_id = v\.session_id\n/);
   assert.match(s, /if\(mk\.seq IS NULL, 0, 1\) AS marked/, 'the events the rule matched are marked, not their whole steps');
   assert.match(s, /LEFT JOIN marked mk ON mk\.session_id = sp\.session_id AND mk\.rule = sp\.rule AND mk\.first_seq = sp\.first_seq AND mk\.seq = e\.seq/);
   assert.match(s, /AND \(m\.event_seq = v\.seq OR m\.msg_seq = v\.msg_seq OR m\.msg_seq = v\.result_msg\)/);

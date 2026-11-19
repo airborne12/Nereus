@@ -22,12 +22,14 @@ test('one line for all runs, then one per run that did not finish', () => {
 });
 
 test('the risks judged join the line, and a stop or a rule that failed gets its own', () => {
-  assert.deepEqual(summary({ queued: 0, runs: [], risks: { judged: 7, stopped: true, held: 1, failed: [{ rule: 'deny', error: 'Doris is down' }] } }, 5_000), [
+  const missed = { calls: 2, reason: 'The model could not be reached: 529 overloaded_error' };
+  assert.deepEqual(summary({ queued: 0, runs: [], risks: { judged: 7, stopped: true, held: 1, failed: [{ rule: 'deny', error: 'Doris is down' }], missed } }, 5_000), [
     '0 run(s), 0 step(s) judged; 7 risk(s) judged; 1 risk judge(s) left to another runner',
     'risk judgments stopped before going over their budget of 5000 input tokens',
+    '2 risk judgment call(s) did not reach the model and will be tried again on the next pass: The model could not be reached: 529 overloaded_error',
     'risk judge of rule deny failed: Doris is down',
   ]);
-  assert.deepEqual(summary({ queued: 0, runs: [], risks: { judged: 0, stopped: false, held: 0, failed: [] } }), ['0 run(s), 0 step(s) judged; 0 risk(s) judged']);
+  assert.deepEqual(summary({ queued: 0, runs: [], risks: { judged: 0, stopped: false, held: 0, failed: [], missed: null } }), ['0 run(s), 0 step(s) judged; 0 risk(s) judged']);
 });
 
 test('the budget of the risk pass comes from RISK_JUDGE_BUDGET, a whole number of input tokens', () => {

@@ -241,7 +241,7 @@ test('once the risk judges have run, the Risks table and the view of a risk show
   // A stub model: the command outside the allowed set is a breach, a missing confirmation needs a person, the rest are not breaches.
   const verdictOf = (x: string) => (x.startsWith(`<rule>${RULE.deny}`) ? 'violates' : x.startsWith(`<rule>${RULE.confirm}`) ? 'unsure' : 'ok');
   const report = await judge({ judge: async (_m, _c, x) => ({ verdict: verdictOf(x), reason: `Stub said ${verdictOf(x)}.`, inputTokens: 900, outputTokens: 20 }) });
-  assert.deepEqual(report, { judged: 6, stopped: false, held: 0, failed: [] });
+  assert.deepEqual(report, { judged: 6, stopped: false, held: 0, failed: [], missed: null });
   await page.goto(`${base}/agents/risks`);
   await total('6 risks');
   assert.deepEqual(await rows().locator('td:nth-child(4)').allInnerTexts(), ['Breach', 'Not a breach', 'Needs review', 'Needs review', 'Breach', 'Not a breach']);

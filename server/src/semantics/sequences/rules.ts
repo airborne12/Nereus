@@ -41,7 +41,7 @@ const CONFIRM_PHRASES = ['可以', '好的', '是的', '确认', '继续', '同�
 const REFUSE_WORDS = ['no', 'not', 'never', 'stop', 'wait', 'cancel', "don't", 'dont'];
 const REFUSE_PHRASES = ['不', '别', '勿', '停', '取消'];
 /** An input that opens with a tag, such as `<task-notification>`, was written by the harness, not by the user. */
-const HARNESS_RE = '^\\s*<[a-z][a-z-]*>';
+export const HARNESS_RE = '^\\s*<[a-z][a-z-]*>';
 
 export const RULES: readonly Rule[] = [
   {
