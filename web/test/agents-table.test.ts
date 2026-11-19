@@ -10,7 +10,7 @@ import {
 } from '../src/lib/agents/table.ts';
 
 test('the pages list their columns in the order of the specification, the time first', () => {
-  assert.deepEqual(shownColumns(SESSIONS, null), ['last_event_at', 'title', 'tool_errors', 'first_input', 'last_output', 'turns', 'steps', 'tokens']);
+  assert.deepEqual(shownColumns(SESSIONS, null), ['last_event_at', 'title', 'tool_errors', 'safety_risks', 'first_input', 'last_output', 'turns', 'steps', 'tokens']);
   assert.deepEqual(shownColumns(STEPS, null), ['ts', 'title', 'agent', 'turn', 'step', 'calls', 'status', 'output', 'ctx_tokens', 'duration_us']);
   assert.equal(shownColumns(MESSAGES, null).length, 11);
   for (const def of [SESSIONS, STEPS, MESSAGES]) assert.equal(def.columns[0]!.kind, 'time', def.name);

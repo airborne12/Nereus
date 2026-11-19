@@ -1,4 +1,4 @@
-// The agent trajectory API: the table pages and their exports, the session page, and Compare.
+// The agent trajectory API: the table pages and their exports, the session page with its risks, and Compare.
 // Rows keep the database column names; big integers arrive as text, so readers convert with Number().
 
 import { ensureOk, getQuery } from './http.ts';
@@ -7,7 +7,7 @@ export type Row = Record<string, unknown>;
 /** One statement that ran, as the SQL dialog shows it. */
 export interface Statement { title: string; sql: string }
 export interface ColumnInfo { name: string; kind: 'text' | 'number' | 'time' }
-export type TableName = 'sessions' | 'steps' | 'messages';
+export type TableName = 'sessions' | 'steps' | 'messages' | 'risks';
 export type ExportFormat = 'csv' | 'jsonl';
 
 /** What a table page asks for: a time range in epoch ms, search text, conditions `column:op:value`, sort and paging. */
@@ -73,6 +73,18 @@ export async function exportFile(page: TableName, q: TableQuery, format: ExportF
 const none = () => new URLSearchParams();
 const sessionPath = (id: string) => `/api/agents/sessions/${encodeURIComponent(id)}`;
 
+/** One event of a risk. `call` is the model call that issued a tool call. */
+export interface RiskStep { kind: 'call' | 'user' | 'reply' | 'compaction'; seq: number; call: number | null; turn: number; step: number; what: string; status: string; target: string }
+/** A place where a session broke a safety rule. */
+export interface Risk {
+  session_id: string; rule: string; rule_name: string; first_seq: number; rule_version: number; ts: string; turn: number;
+  events: number[]; steps: RiskStep[]; what: string; why: string; found_at: string;
+}
+/** A step of a safety rule: `words` are whole words of a command, `any` texts anywhere in a target. */
+export interface RuleStep { kind: RiskStep['kind']; tool?: string; status?: 'ok' | 'failed'; has?: string; any?: string[]; words?: string[]; link?: 'next' | 'later' }
+/** A safety rule: a command that needs a confirmation, an order that is not allowed, or a command that never is. */
+export interface RuleInfo { id: string; version: number; kind: 'confirm' | 'forbid' | 'deny'; name: string; source: string; steps: RuleStep[]; confirm?: string[] }
+
 export interface TreeAnswer {
   sessions: Row[];
   turns: Row[];
@@ -80,6 +92,11 @@ export interface TreeAnswer {
   marks: Row[];
   /** The tree has more marks than were sent. */
   marksCut: boolean;
+  /** The risks the safety rules found in the tree, in the order they happened. */
+  risks: Risk[];
+  risksCut: boolean;
+  /** The rules, sent when the tree has a risk. */
+  rules: RuleInfo[];
   /** Every light step row when the tree is small; null otherwise. */
   steps: Row[] | null;
   openAll: boolean;
