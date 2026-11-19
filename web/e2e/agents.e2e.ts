@@ -173,9 +173,10 @@ test('first run: after the admin account is made, the app opens on Agent traject
   assert.equal(await nav.locator('.nav-item.active').innerText(), 'Sessions');
   for (const item of ['Steps', 'Messages', 'Search', 'Dashboards']) assert.equal(await nav.getByRole('button', { name: item, exact: true }).count(), 1, item);
   // The time column comes first, written at one width, with the time zone beside the range.
-  assert.deepEqual(await headers(), ['Last activity', 'Session', 'Errors', 'First input', 'Last output', 'Turns', 'Steps', 'Tokens']);
-  assert.deepEqual((await cells(0)).slice(1), ['2026-11-17 12:00:04', 'Fix the clock test', '1', 'Fix the failing test in tests/clock_test.py 😀', 'Noted: the public API stays unchanged.', '2', '7', '210']);
-  assert.deepEqual((await cells(1)).slice(6), ['2', '5', '150']);
+  assert.deepEqual(await headers(), ['Last activity', 'Session', 'Errors', 'Risks', 'First input', 'Last output', 'Turns', 'Steps', 'Tokens']);
+  // The safety rules have not run on these sessions: their count of risks is a dash.
+  assert.deepEqual((await cells(0)).slice(1), ['2026-11-17 12:00:04', 'Fix the clock test', '1', '-', 'Fix the failing test in tests/clock_test.py 😀', 'Noted: the public API stays unchanged.', '2', '7', '210']);
+  assert.deepEqual((await cells(1)).slice(7), ['2', '5', '150']);
   assert.equal(await page.locator('.ag-tz').innerText(), 'UTC');
   assert.equal(await page.getByLabel('Time range').inputValue(), '7d');
   await shot(page, 'a1-sessions');
@@ -220,22 +221,22 @@ test('Sessions: search, a condition, sort and columns, all kept in the address',
 
   await page.locator('.ag-table thead th button', { hasText: 'Steps' }).click();
   await page.locator('th[aria-sort="descending"]', { hasText: 'Steps' }).waitFor();
-  await firstCell(6, '7');
+  await firstCell(7, '7');
   await page.locator('.ag-table thead th button', { hasText: 'Steps' }).click();
   await page.locator('th[aria-sort="ascending"]', { hasText: 'Steps' }).waitFor();
-  await firstCell(6, '5');
+  await firstCell(7, '5');
   assert.deepEqual([param('sort'), param('dir')], [['steps'], ['asc']]);
 
   await page.getByRole('button', { name: 'Columns' }).click();
   await page.getByRole('group', { name: 'Columns' }).getByLabel('Model').check();
   await page.getByRole('group', { name: 'Columns' }).getByLabel('First input').uncheck();
   await page.keyboard.press('Escape');
-  assert.deepEqual(await headers(), ['Last activity', 'Session', 'Errors', 'Last output', 'Turns', 'Steps', 'Tokens', 'Model']);
-  assert.deepEqual(param('cols'), ['last_event_at,title,tool_errors,last_output,turns,steps,tokens,model']);
+  assert.deepEqual(await headers(), ['Last activity', 'Session', 'Errors', 'Risks', 'Last output', 'Turns', 'Steps', 'Tokens', 'Model']);
+  assert.deepEqual(param('cols'), ['last_event_at,title,tool_errors,safety_risks,last_output,turns,steps,tokens,model']);
   // The address holds the whole state.
   await page.reload();
   await total('2 sessions');
-  assert.deepEqual(await headers(), ['Last activity', 'Session', 'Errors', 'Last output', 'Turns', 'Steps', 'Tokens', 'Model']);
+  assert.deepEqual(await headers(), ['Last activity', 'Session', 'Errors', 'Risks', 'Last output', 'Turns', 'Steps', 'Tokens', 'Model']);
   assert.equal(await page.locator('th[aria-sort="ascending"]').innerText(), 'Steps↑');
 });
 
@@ -269,7 +270,7 @@ test('SQL: the statements behind the page, one read-only section each, with Copy
   await page.getByRole('button', { name: 'SQL', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Generated SQL' });
   assert.deepEqual(await dialog.locator('.ag-stmt h4 > span:first-child').allInnerTexts(), ['Rows', 'Total']);
-  assert.match(await dialog.getByRole('region', { name: 'Rows' }).locator('pre').innerText(), new RegExp(`FROM ${db}\\.agent_sessions s\\nWHERE s\\.kind = 'main'`));
+  assert.match(await dialog.getByRole('region', { name: 'Rows' }).locator('pre').innerText(), new RegExp(`FROM ${db}\\.agent_sessions s\\nLEFT JOIN [^\\n]+agent_risks[^\\n]+\\nWHERE s\\.kind = 'main'`));
   assert.equal(await dialog.getByRole('button', { name: 'Copy' }).count(), 2);
   await shot(page, 'a2-sql');
   await page.keyboard.press('Escape');
@@ -459,7 +460,7 @@ test('a compaction, the Jump to buttons, the arrow keys and the SQL of the selec
 
   await page.getByRole('button', { name: 'SQL', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Generated SQL' });
-  assert.deepEqual(await dialog.locator('.ag-stmt h4 > span:first-child').allInnerTexts(), ['Session', 'Turns', 'Marks', 'Steps', 'Step', 'Input', 'Output', 'Prompt']);
+  assert.deepEqual(await dialog.locator('.ag-stmt h4 > span:first-child').allInnerTexts(), ['Session', 'Turns', 'Marks', 'Risks', 'Steps', 'Step', 'Input', 'Output', 'Prompt']);
   await page.keyboard.press('Escape');
   // A place that does not exist says so on the right; the lanes stay.
   await page.goto(`${base}/agents/sessions/${MAIN_ID}?sel=${encodeURIComponent(main('s', 3))}`);

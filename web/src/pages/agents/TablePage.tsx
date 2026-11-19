@@ -17,7 +17,7 @@ export interface From { from: string; label: string }
 
 const here = (): string => window.location.pathname + window.location.search;
 
-/** A table page of the Agent trajectories area: Sessions, Steps or Messages. Its state lives in the address. */
+/** A table page of the Agent trajectories area: Sessions, Steps, Messages or Risks. Its state lives in the address. */
 export function TablePage({ def, search, go }: { def: PageDef; search: string; go: Go }) {
   const state = useMemo(() => parseTableState(search, def), [search, def]);
   // The columns shown do not change what is read.
@@ -57,8 +57,9 @@ export function TablePage({ def, search, go }: { def: PageDef; search: string; g
   const back: From = { from: here(), label: def.label };
   const open = (row: api.Row) => {
     const t = openTarget(def.name, row);
-    go(sessionUrl(t.root, t.sel), { state: back });
+    go(sessionUrl(t.root, t.sel, null, t.risk ?? null), { state: back });
   };
+  const openRisk = (row: api.Row) => go(sessionUrl(String(row.session_id), null, null, 'first'), { state: back });
   const pick = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length < PAIR ? [...p, id] : p));
   const columns = shownColumns(def, state.columns);
   const rows = data?.rows ?? [];
@@ -94,10 +95,12 @@ export function TablePage({ def, search, go }: { def: PageDef; search: string; g
       <div className={`ag-grid${fresh || !data ? '' : ' stale'}`}>
         <DataTable def={def} columns={columns} rows={rows} sort={state.sort} dir={state.dir} onSort={(c) => change(sortBy(state, c))} onOpen={open}
           more={fresh ? fresh.total - fresh.rows.length : 0} onMore={more} loadingMore={loadingMore}
-          empty={!data && !error ? 'Loading…' : filtered || def.name !== 'sessions'
+          empty={!data && !error ? 'Loading…' : def.name === 'risks' && !filtered
+            ? 'No risks in this time range. The safety rules run with the run-rules command (see the README).'
+            : filtered || def.name !== 'sessions'
             ? 'Nothing matches. Widen the time range or clear the filter.'
             : 'No sessions in this time range. Widen the range, or import transcripts with the import-transcripts command (see the README).'}
-          {...(def.name === 'sessions' ? { picked, onPick: pick, onClearPicked: () => setPicked([]) } : {})} />
+          {...(def.name === 'sessions' ? { picked, onPick: pick, onClearPicked: () => setPicked([]), onRisk: openRisk } : {})} />
       </div>
       {dialog === 'sql' && <SqlDialog statements={data?.sql ?? []} onClose={closeDialog} />}
       {dialog === 'export' && fresh && <ExportDialog def={def} state={state} now={fresh.now} onClose={closeDialog} />}

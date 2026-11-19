@@ -2,13 +2,14 @@ import { type ReactNode, useEffect, useState } from 'react';
 import type * as api from '../api.ts';
 import { Icon, type IconName } from './Icon.tsx';
 
-export type Page = 'agent-sessions' | 'agent-steps' | 'agent-messages' | 'agent-sequences'
+export type Page = 'agent-sessions' | 'agent-steps' | 'agent-messages' | 'agent-risks' | 'agent-sequences'
   | 'search' | 'saved' | 'chart' | 'alerts' | 'sessions' | 'service-map' | 'dashboards' | 'settings';
 
 /** The pages under Sessions in the Agent trajectories area. */
 const AGENT_SUBS: { page: Page; label: string }[] = [
   { page: 'agent-steps', label: 'Steps' },
   { page: 'agent-messages', label: 'Messages' },
+  { page: 'agent-risks', label: 'Risks' },
 ];
 
 const ITEMS: { page: Page; label: string; icon: IconName; beta?: boolean }[] = [

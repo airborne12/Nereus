@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { Row } from '../../api/agents.ts';
 import { duration, num, stamp, text, timeOf, tokens } from '../../lib/agents/format.ts';
 import { type ColumnDef, columnOf, isNumeric, type PageDef, sessionName } from '../../lib/agents/pages.ts';
+import { judgmentLabel } from '../../lib/agents/risks.ts';
 
 /** Sessions that can be ticked for a comparison. */
 export const PAIR = 2;
@@ -18,11 +19,18 @@ function clip(value: string, className = 'ag-clip'): ReactNode {
 }
 
 /** One cell: the value written for its kind, with the few columns that carry a signal drawn as one. */
-function cell(def: PageDef, c: ColumnDef, row: Row): ReactNode {
+function cell(def: PageDef, c: ColumnDef, row: Row, onRisk?: (row: Row) => void): ReactNode {
   const v = row[c.name];
   if (def.name === 'sessions' && c.name === 'title') return <b title={`session_id ${text(row.session_id)}`}>{clip(sessionName(row))}</b>;
   if (c.name === 'title') return clip(text(v) || text(row.root_id ?? row.session_id));
   if (c.name === 'tool_errors') return num(v) ? <span className="ag-pill bad">{num(v)}</span> : zero;
+  if (c.name === 'safety_risks') {
+    if (v === null || v === undefined) return <span className="ag-zero" title="The safety rules have not run on this session yet">-</span>;
+    // The count names the rules in its title and opens the session on its first risk.
+    return num(v) ? <button type="button" className="ag-riskp" title={text(row.risk_rules)} onClick={(e) => { e.stopPropagation(); onRisk?.(row); }}>{num(v)} ⚠</button> : zero;
+  }
+  if (c.name === 'judgment') return <span className={v === 'breach' ? 'ag-pill bad' : v === 'review' ? 'ag-pill warn' : 'ag-dim'}>{judgmentLabel(v)}</span>;
+  if (c.name === 'rule_name') return <span className="ag-pill bad">{text(v)}</span>;
   if (c.name === 'status') return v === 'failed' ? <span className="ag-pill bad">failed</span> : text(v);
   if (c.name === 'repeated_call') return v ? <span className="ag-pill warn" title={`The same call was made before; its result was ${text(v)}`}>{text(v)}</span> : null;
   if (c.name === 'msg_role') return <span className="ag-role">{text(v)}</span>;
@@ -56,6 +64,8 @@ interface Props {
   dir: 'asc' | 'desc';
   onSort: (column: string) => void;
   onOpen: (row: Row) => void;
+  /** Sessions only: opens a session on its first safety risk. */
+  onRisk?: (row: Row) => void;
   /** Rows that match and are not read yet. */
   more: number;
   onMore: () => void;
@@ -69,7 +79,7 @@ interface Props {
 }
 
 /** A data table in the convention of observability products: sticky sortable header, one row per record. */
-export function DataTable({ def, columns, rows, sort, dir, onSort, onOpen, more, onMore, loadingMore, empty, picked, onPick, onClearPicked }: Props) {
+export function DataTable({ def, columns, rows, sort, dir, onSort, onOpen, onRisk, more, onMore, loadingMore, empty, picked, onPick, onClearPicked }: Props) {
   const cols = columns.map((name) => columnOf(def, name)).filter((c): c is ColumnDef => c !== undefined);
   const width = cols.length + (picked ? 1 : 0);
   return (
@@ -107,7 +117,7 @@ export function DataTable({ def, columns, rows, sort, dir, onSort, onOpen, more,
                     aria-label="Tick this session to compare it" />
                 </td>
               )}
-              {cols.map((c) => <td key={c.name} className={isNumeric(c.kind) ? 'num' : c.fill ? 'ag-fill' : ''}>{cell(def, c, row)}</td>)}
+              {cols.map((c) => <td key={c.name} className={isNumeric(c.kind) ? 'num' : c.fill ? 'ag-fill' : ''}>{cell(def, c, row, onRisk)}</td>)}
             </tr>
           );
         })}
