@@ -331,6 +331,27 @@ does not reach the model is not stored: the command names it and the risk is tri
 next pass. Each judge is taken under a lease that is renewed after every few calls, so two runners
 do not judge the same rule.
 
+### Memories
+
+Nereus captures the memories agents keep and does not write them. A capture reads Claude Code auto
+memories (`~/.claude/projects/<project>/memory/*.md`, whose frontmatter holds `name`, `description`
+and, under `metadata`, `type`, `originSessionId` and `modified`; `MEMORY.md` is the index and not a
+memory) and Gemini CLI memories (one per bullet under "## Gemini Added Memories" in `GEMINI.md`):
+
+    cd server
+    DORIS_HOST=127.0.0.1 DORIS_PORT=9030 DORIS_DB=otel DORIS_BE_HTTP_URL=http://127.0.0.1:8040 \
+      META_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/nereus node src/cli/capture-memories.ts
+
+Without options it reads `~/.claude/projects` and `~/.gemini/GEMINI.md`; `--claude <folder>` and
+`--gemini <file>[=<scope>]` name others. A memory gets a new row of `agent_memories` only when its
+content or metadata changed, and a memory gone from its folder or file gets a row that says so. A
+store (one agent's memories of one scope) is taken under a lease. When the agent did not record
+the session that wrote a memory, the capture looks for it: the memory's words (at most 40, without
+common words and headings) are matched against the first input and the assistant text of the same
+agent's sessions before the memory was updated, and a session holding more than half of them is
+its inferred source, with that share as its score. A memory of fewer than five words is not
+matched. The pages always say whether a source is recorded, inferred or not recorded.
+
 ### Agent trajectory API
 
 Routes under `/api/agents/` (any signed-in user or API key; the Judges writes and tries are for
@@ -339,7 +360,7 @@ query error answers 400.
 
 | Route | Answers |
 | --- | --- |
-| `GET /api/agents/sessions\|steps\|messages\|risks?from=&to=&q=&f=&sort=&dir=&limit=&offset=` | One page of rows (100 by default) and the total. `q`: every word must match, quotes make a phrase. `f=column:op:value`, repeatable, op one of `eq ne lt le gt ge contains`; `limit` at most 1000 |
+| `GET /api/agents/sessions\|steps\|messages\|risks\|memories?from=&to=&q=&f=&sort=&dir=&limit=&offset=` | One page of rows (100 by default) and the total. `q`: every word must match, quotes make a phrase. `f=column:op:value`, repeatable, op one of `eq ne lt le gt ge contains`; `limit` at most 1000 |
 | the same with `format=csv` | Every matching row as CSV: at most 200,000 rows and 128 MiB of text, otherwise 400. Free text that a spreadsheet would run as a formula (it starts with `=`, `+`, `-`, `@`, a tab or a carriage return) gets a leading apostrophe |
 | the same with `format=csv&size=1` | The number of rows of that export, its first five rows, and its SQL |
 | `GET /api/agents/sessions?...&format=jsonl` | The matching sessions and their sub-agents as conversations, one JSON line per stretch between compactions; at most 128 MiB of text, otherwise 400 |
@@ -357,6 +378,7 @@ query error answers 400.
 | `GET /api/agents/judges/<id>?view=first\|all\|changed` | One judge: its versions and runs, the counts with `tokensPerStep` to estimate a rerun, and at most 500 rows of the view, with `cut` when it has more: the first violation in each session (the default), the latest verdict of every step, or the steps whose latest verdict differs from the one before it |
 | `GET /api/agents/judges/<id>/steps/<session>/<seq>` | Every verdict the judge gave one step, newest version first, and what the model reads for it now |
 | `POST /api/agents/judges/preview` | For a draft `{pick, reads, criterion, model}`: how many steps and sessions it picks, five of them spread over the picked steps with what the model reads, and the estimated input tokens of a run; with `try: true` (admins) the model judges the five, and nothing is stored |
+| `GET /api/agents/memories/<agent>/<scope>/<name>` | One memory, each part encoded as a URI component: its latest version with its fields and sections, its versions (at most 50, without their content), the calls that read or wrote its file (at most 100) and its state: `unjudged` (read since it was written), `unused`, `unrecorded` (a format whose reads are not recorded) or `removed` |
 | `POST /api/agents/judges` | Saves a judge `{name, pick, reads, criterion, model, runsOnNew, budget?}` as version 1 and queues a run (admins) |
 | `POST /api/agents/judges/<id>/versions`, `POST /api/agents/judges/<id>/reruns` | A new version `{criterion, model}`, which judges nothing; a rerun `{only, budget?}` (admins): `all` or `violates` for the out-of-date verdicts, `unjudged` for the steps no run of the current version has judged, `failed` for those whose model call failed. A rerun while a run of the judge is open answers 409 |
 
@@ -443,8 +465,19 @@ are cut at 500 rows. A row opens, right under it, what the model read and every 
 step, and opens the step in its session. Members see the judges; the actions that spend model
 tokens are disabled for them, with the reason, and the server refuses them.
 
+**Memories** (`/agents/memories`) lists the latest version of every memory still kept: Updated,
+Agent, Scope, Memory (name and description), Kind, Still valid and Source session. It opens on the
+past 30 days, since a memory is updated seldom. Still valid is
+"Not used since written" until a session reads the memory's file again, "Not judged yet" after,
+and "Use not recorded" for Gemini CLI, which loads its memories whole into every session. Source
+session is the recorded session, "inferred · N % of words", or "Not recorded"; a session opens.
+A memory's page (`/agents/memories/<agent>/<scope>/<name>`) has its fields with where the agent
+keeps each, whether it is still used with the calls that read or wrote its file (each opens its
+step), its content by its own sections, and its versions. A session that wrote a memory says so in
+its header ("Wrote memory <name>").
+
 Browser tests of these pages: `cd web && npm run build && node --test e2e/agents.e2e.ts
-e2e/sequences.e2e.ts e2e/risks.e2e.ts e2e/judges.e2e.ts`. They create and drop their own Doris database and need `DORIS_BE_HTTP_URL` and a PostgreSQL for the
+e2e/sequences.e2e.ts e2e/risks.e2e.ts e2e/judges.e2e.ts e2e/memories.e2e.ts`. They create and drop their own Doris database and need `DORIS_BE_HTTP_URL` and a PostgreSQL for the
 metadata database, as the server's Doris tests do.
 
 Times of the session page on a large session, taken in headless Chromium against a running

@@ -355,6 +355,15 @@ Inference: the memory's words, without common words and headings, are matched ag
 input and the assistant text of sessions of the same agent before `updated_at`; the best session
 over 50 % is recorded as inferred. Pages always show the kind and the score.
 
+As built (capture): a memory's words are those of four or more letters and digits (CJK text is not
+matched), at most 40, and a memory of fewer than five is not matched; a word counts once it is
+found as a whole word in the first input or an assistant text block of a main session of the agent.
+A memory gone from its store gets a row whose `content_hash` is `removed`, and the pages leave it
+out. A store is one agent's memories of one scope: a Claude Code project folder, or one
+`GEMINI.md` (`global` for the user's own); it is captured under a lease by
+`node src/cli/capture-memories.ts`. Gemini CLI memories are named by the first 200 characters of
+their bullet, so an edited bullet is a new memory and the old one is removed.
+
 ### 5.10 Retention and sources
 
 The partitioned tables take a retention parameter of their own (`AGENT_RETENTION_DAYS`).
@@ -814,6 +823,14 @@ with the reason; the server still refuses them.
 Paper A.1 and 3.2.2. The list: Updated, Agent (filter), Scope, Memory (name and description),
 Kind, Still valid, Source session. Source session is a link when recorded, a link with "inferred ·
 N % of words" when inferred, and "Not recorded" otherwise.
+
+As built (pages, before the validity fold): Memories is a page of the navigation after Judges and
+a table page like Risks, not one of the Sessions pages; it opens on the past 30 days. Still valid reads "Not used since written"
+until a Read call of the memory's file comes after its latest version, then "Not judged yet"; a
+format whose reads are not recorded reads "Use not recorded". A recorded source shows the title of
+its session. A memory's page lists the Read, Write and Edit calls on its file, newest first, each
+opening its step, and its versions; "Wrote memory <name>" on a session's header comes from a
+recorded source or a Write or Edit call of the tree on the memory's file.
 
 A memory's page: its fields in a table with "where <agent> keeps it" for each; "Still valid?": the
 current state (Holds, In doubt, Out of date, Not used since written, Use not recorded) and one row
