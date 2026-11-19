@@ -313,3 +313,53 @@
 .ag-trow.gap:hover { background: none; }
 .ag-crow .ag-tm > span:not(.ag-tw) { font-size: 11px; }
 .ag-crow span.ag-tw { cursor: inherit; }
+
+/* ---------- sequences: the drawing of what happens next, a pattern as a row of steps, the table of matches */
+.ag-start { font-size: 12.5px; color: var(--text-2); }
+.ag-start select { width: auto; max-width: 260px; margin-left: 4px; }
+.ag-pkey { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); }
+.ag-pkey i { display: inline-block; width: 22px; margin-left: 8px; border-radius: 3px; }
+.ag-pkey .k1 { height: 6px; background: var(--ag-rail); }
+.ag-pkey .k2 { height: 10px; border: 1px solid var(--ag-bad); background: var(--ag-bad-soft); }
+.ag-pkey .k3 { height: 10px; border: 1px solid var(--text); background: var(--text); }
+.ag-pathbox { padding: 14px 6px 24px; }
+.ag-pathbox .empty { padding: 16px 12px; color: var(--text-2); }
+.ag-paths { display: block; }
+.ag-ph { font: 500 11px var(--font); fill: var(--text-2); letter-spacing: 0.05em; text-transform: uppercase; }
+.ag-pl { fill: none; stroke: var(--ag-rail); stroke-linecap: round; }
+.ag-pl.bad { stroke: var(--ag-bad); opacity: 0.45; }
+.ag-pn rect { fill: var(--panel); stroke: var(--text); stroke-width: 1.2; }
+.ag-pn.bad rect { stroke: var(--ag-bad); fill: var(--ag-bad-soft); }
+.ag-pn.ev rect { fill: var(--text); stroke: var(--text); }
+.ag-pn.dim rect { stroke: var(--border); stroke-dasharray: 3 3; }
+.ag-pn[role="link"] { cursor: pointer; }
+.ag-pn[role="link"]:hover rect, .ag-pn[role="link"]:focus-visible rect { stroke: var(--accent); stroke-width: 2; }
+.ag-pn:focus-visible { outline: none; }
+.ag-pt { font: 500 12px var(--mono); fill: var(--text); }
+.ag-pc { font: 11px var(--mono); fill: var(--text-2); text-anchor: end; }
+.ag-pn.bad .ag-pt { fill: var(--ag-bad); }
+.ag-pn.ev .ag-pt { fill: var(--panel); }
+.ag-pn.ev .ag-pc { fill: var(--panel); opacity: 0.75; }
+.ag-pn.dim .ag-pt { fill: var(--text-2); font-family: var(--font); }
+
+.ag-pbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.ag-pel { display: inline-flex; align-items: center; gap: 7px; padding: 3px 11px 3px 4px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); cursor: pointer; }
+.ag-pel:hover { border-color: var(--text-2); }
+.ag-pel.on { border-color: var(--accent); background: var(--selected); }
+.ag-pel b { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--text); color: var(--panel); font: 600 10.5px/1 var(--mono); }
+.ag-pel code { font: 500 12.5px var(--mono); }
+.ag-pel span { font-size: 12px; color: var(--text-2); }
+.ag-pel.ev code, .ag-matches td code.ev { font-family: var(--font); font-weight: 600; }
+.ag-plink { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--text-2); }
+.ag-plink i { font-style: normal; font-size: 15px; line-height: 1; color: var(--text); }
+.ag-pex { margin-left: auto; font-size: 12px; color: var(--text-2); }
+.ag-pex select { width: auto; max-width: 260px; margin-left: 4px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); color: var(--text); }
+.ag-fform label { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); }
+.ag-matches td code { font: 500 12px var(--mono); }
+/* The more steps a pattern has, the less room the target of each one gets. */
+.ag-clip.narrow { max-width: clamp(64px, calc((100vw - 780px) / var(--k, 3) - 95px), 260px); }
+
+/* A row of the session page that a pattern match marks. */
+.ag-trow.mk { background: var(--ag-hit); }
+.ag-trow.mk.sel { background: var(--selected); }
+.ag-matched { margin: 6px 0 0; font-size: 12px; color: var(--text-2); }

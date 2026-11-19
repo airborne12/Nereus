@@ -19,7 +19,7 @@ const AGENTS = import.meta.env.MODE !== 'demo';
 const HOME: Page = AGENTS ? 'agent-sessions' : 'search';
 
 export const PATHS: Record<Page, string> = {
-  'agent-sessions': '/agents/sessions', 'agent-steps': '/agents/steps', 'agent-messages': '/agents/messages',
+  'agent-sessions': '/agents/sessions', 'agent-steps': '/agents/steps', 'agent-messages': '/agents/messages', 'agent-sequences': '/agents/sequences',
   search: '/search', saved: '/search/list', chart: '/chart', alerts: '/alerts', sessions: '/sessions',
   'service-map': '/service-map', dashboards: '/dashboards/list', settings: '/team',
 };

@@ -10,7 +10,7 @@ import {
   STEPS_PAGE, type Tree,
 } from '../../lib/agents/lanes.ts';
 import { sessionName, sessionUrl } from '../../lib/agents/pages.ts';
-import { parseSel, type Selection, selKey, stepKey, turnKey } from '../../lib/agents/select.ts';
+import { parseMarks, parseSel, type Selection, selKey, stepKey, turnKey } from '../../lib/agents/select.ts';
 import type { Go } from '../../Root.tsx';
 import type { From } from './TablePage.tsx';
 
@@ -101,14 +101,19 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
   })), [rowsByTurn]);
   const targets = useMemo(() => new Map(JUMPS.map((j) => [j.kind, tree ? jumpTargets(tree, j.kind) : []])), [tree]);
   const rows = useMemo(() => (tree ? laneRows(tree, { items, open }) : []), [tree, items, open]);
-  const param = new URLSearchParams(search).get('sel');
+  const params = useMemo(() => new URLSearchParams(search), [search]);
+  const param = params.get('sel');
+  // The rows a match of a pattern marks; they stay marked while the selection moves.
+  const marksParam = params.get('marks');
+  const marks = useMemo(() => parseMarks(marksParam), [marksParam]);
+  const marked = useMemo(() => new Set(marks.map((m) => m.key)), [marks]);
   const sel: Selection | null = useMemo(() => {
     const first = tree?.main.turns[0];
     return parseSel(param) ?? (tree && first ? { kind: 'turn', sid: first.sid, turn: first.no } : null);
   }, [param, tree]);
   const key = sel ? selKey(sel) : null;
 
-  const select = useCallback((k: string) => go(sessionUrl(id, k), { replace: true }), [go, id]);
+  const select = useCallback((k: string) => go(sessionUrl(id, k, marksParam), { replace: true }), [go, id, marksParam]);
   const onSelect = useCallback((row: LaneRow) => select(row.key), [select]);
   const onTwist = useCallback((k: string) => {
     setOpen((prev) => toggled(prev, k));
@@ -164,6 +169,16 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
     way.load.forEach((l) => void ensure(l.sid, l.turn, l.steps));
   }, [tree, key, place, rows, ensure]);
 
+  // The marked rows are opened once, when the page gets them.
+  const opened = useRef<string | null>(null);
+  useEffect(() => {
+    if (!tree || !marksParam || opened.current === marksParam) return;
+    opened.current = marksParam;
+    const ways = marks.map((m) => reveal(tree, m));
+    setOpen((prev) => new Set([...prev, ...ways.flatMap((w) => w.open)]));
+    ways.flatMap((w) => w.load).forEach((l) => void ensure(l.sid, l.turn, l.steps));
+  }, [tree, marksParam, marks, ensure]);
+
   const jump = (kind: JumpKind) => {
     if (!tree) return;
     const target = nextTarget(targets.get(kind) ?? [], key);
@@ -217,10 +232,11 @@ export function SessionPage({ id, search, go }: { id: string; search: string; go
             <button type="button" key={j.kind} onClick={() => jump(j.kind)}>{plural(counts[j.kind], j.noun)}</button>
           ))}{tree.marksCut && <span>Only the first 2,000 of these places are known to this page.</span>}</p>
         )}
+        {marks.length > 0 && <p className="ag-matched">{plural(marks.length, 'event')} of a pattern match marked on the left.</p>}
       </header>
       {error && <div className="error" role="alert">{error}</div>}
       <div className="ag-sbody">
-        <Lanes rows={rows} selected={key} scale={tree.scale} main={tree.main.sid} onSelect={onSelect} onTwist={onTwist} onMore={onMore} />
+        <Lanes rows={rows} selected={key} marked={marked} scale={tree.scale} main={tree.main.sid} onSelect={onSelect} onTwist={onTwist} onMore={onMore} />
         <div className="ag-pane" key={key}>
           {sel && sel.kind !== 'turn' && (
             <p className="ag-crumbs">

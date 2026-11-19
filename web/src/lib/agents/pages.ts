@@ -142,6 +142,10 @@ export function openTarget(page: TableName, row: Row): { root: string; sel: stri
 }
 
 /** The address of a session page. */
-export function sessionUrl(root: string, sel: string | null): string {
-  return `/agents/sessions/${encodeURIComponent(root)}${sel ? `?sel=${encodeURIComponent(sel)}` : ''}`;
+export function sessionUrl(root: string, sel: string | null, marks: string | null = null): string {
+  const p = new URLSearchParams();
+  if (sel) p.set('sel', sel);
+  if (marks) p.set('marks', marks);
+  const qs = p.toString();
+  return `/agents/sessions/${encodeURIComponent(root)}${qs ? `?${qs}` : ''}`;
 }
