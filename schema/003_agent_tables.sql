@@ -212,3 +212,57 @@ PROPERTIES (
     "enable_unique_key_merge_on_write" = "true",
     "compression" = "zstd"
 );
+
+-- Judge versions (section 5.7): one row per version of a judge, never changed. The judge runs
+-- write them from the versions kept in PostgreSQL, so verdicts can be joined with what made them.
+CREATE TABLE IF NOT EXISTS ${DB}.agent_judges (
+    judge       VARCHAR(64)  NOT NULL,
+    version     INT          NOT NULL,
+    name        STRING,
+    form        VARCHAR(8),
+    pick        VARIANT,
+    reads       VARIANT,
+    criterion   STRING,
+    model       VARCHAR(128),
+    created_at  DATETIME(6),
+    created_by  VARCHAR(256)
+)
+UNIQUE KEY (judge, version)
+DISTRIBUTED BY HASH (judge) BUCKETS 1
+PROPERTIES (
+    "replication_num" = "${REPLICATION_NUM}",
+    "enable_unique_key_merge_on_write" = "true",
+    "compression" = "zstd"
+);
+
+-- Verdicts of map judges and states of fold judges (section 5.8). A rerun adds rows with its
+-- judge version; older rows stay, so a step's verdicts can be compared across versions.
+CREATE TABLE IF NOT EXISTS ${DB}.agent_judgments (
+    judge          VARCHAR(64)  NOT NULL,
+    subject        VARCHAR(256) NOT NULL,
+    judge_version  INT          NOT NULL,
+    version        INT          NOT NULL,
+    session_id     VARCHAR(128),
+    seq            BIGINT,
+    verdict        VARCHAR(16),
+    state          VARCHAR(16),
+    evidence       VARCHAR(16),
+    prev_version   INT,
+    reason         STRING,
+    input_seqs     ARRAY<BIGINT>,
+    input_hash     VARCHAR(64),
+    model          VARCHAR(128),
+    input_tokens   INT,
+    output_tokens  INT,
+    judged_at      DATETIME(6)  NOT NULL,
+    INDEX idx_judge (judge) USING INVERTED,
+    INDEX idx_session_id (session_id) USING INVERTED,
+    INDEX idx_verdict (verdict) USING INVERTED
+)
+UNIQUE KEY (judge, subject, judge_version, version)
+DISTRIBUTED BY HASH (subject) BUCKETS AUTO
+PROPERTIES (
+    "replication_num" = "${REPLICATION_NUM}",
+    "enable_unique_key_merge_on_write" = "true",
+    "compression" = "zstd"
+);
