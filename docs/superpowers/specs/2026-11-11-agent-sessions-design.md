@@ -1,7 +1,9 @@
 # Agent trajectories in Nereus: model, import, pages and judgments
 
-Date: 2026-11-11, revised 2026-11-17 after the prototype walk and 2026-11-19 after sub-project 1.
-Status: sub-project 1 is built; sections on the later sub-projects are design.
+Date: 2026-11-11, revised 2026-11-17 after the prototype walk, 2026-11-19 after sub-project 1 and
+after the Sequences page.
+Status: sub-project 1 and the Sequences page of sub-project 2 are built; sections on the rest are
+design.
 
 The pages of section 8 were settled one function at a time on a clickable prototype with invented
 data. Where this document and the prototype differ, this document wins.
@@ -505,8 +507,9 @@ A CSV export holds at most 200,000 rows and 128 MiB of text, a conversations exp
 | Compaction | Replaced blocks and the summary | `GET /api/agents/sessions/<id>/events/<seq>/compaction` |
 | Compare | Two sessions' facts; turns paired by number; steps of a pair of turns, with their context sizes, paired in the semantics layer; the turn's compactions | `GET /api/agents/compare?a=&b=&turn=` |
 | Conversations export | Blocks by session, part number by a window sum over summary blocks; lines assembled in the semantics layer | `GET /api/agents/sessions?format=jsonl` |
-| Next calls | From a starting kind of call, `lead()` over events, grouped by path | `GET /api/agents/sequences/next?start=&depth=` |
-| Pattern match | Pattern compiled to CTEs over numbered events (next: join on `pos + 1`; later: `pos >` with `min`) | `POST /api/agents/sequences/match` |
+| Next calls | From a starting kind of event, `lead()` over the numbered events; every branch of the tree is counted and ranked among the branches of its node in Doris, which answers only the branches the drawing can show | `GET /api/agents/sequences/next?from=&to=&start=&depth=` |
+| Tools | The tools called in the range, most called first | `GET /api/agents/sequences/tools?from=&to=` |
+| Pattern match | Pattern compiled to CTEs over numbered events, one level per step (next: join on `pos + 1`; later: a window that gives every event the position of the nearest later event meeting the step; later with "same target": join on the target with `min`); the table takes one page of matches, then joins their events once | `POST /api/agents/sequences/match` |
 | Judges | Judges with their current version, counts and out-of-date count | `GET /api/agents/judges` |
 | Judge | Versions; verdicts, first violation per session, changed by a rerun | `GET /api/agents/judges/<id>?view=first\|all\|changed` |
 | New judge | Count of picked steps, a try on 5 sampled steps, the token estimate; then create version 1 and enqueue a run | `POST /api/agents/judges/preview`, `POST /api/agents/judges` |
@@ -538,7 +541,7 @@ Dashboard
 ```
 
 A page appears in the navigation with the sub-project that builds it: Sessions, Steps and Messages
-with sub-project 1. The app opens on Sessions. In a window too narrow for the navigation's labels,
+with sub-project 1, Sequences with the first plan of sub-project 2. The app opens on Sessions. In a window too narrow for the navigation's labels,
 a table page itself offers its sibling pages.
 
 A page of the navigation replaces whatever is open. Rules for every page:
@@ -638,7 +641,9 @@ is left out. The dialog shows a preview, the size and the SQL.
 Paper 3.1.2. The page opens on "What happens next": from one kind of event (a failed call by
 default, any tool, or a user input), a tree of the events that came next, four columns, a pill per
 event with its share, curves as thick as the path is common, failed calls red, rare branches as
-one dashed "N other". A pill opens the pattern view with the pattern of that path.
+one dashed "N other". A branch is drawn on its own when it is among the three commonest of its
+event and holds at least one run in fifty. A pill opens the pattern view with the pattern of that
+path. "Write a pattern" opens the pattern view on the starting event alone.
 
 The pattern view: a row of up to six numbered steps joined by arrows. A step is an event kind (user
 input, tool call, reply that ends a turn, compaction) with conditions (tool, status, target has,
@@ -647,6 +652,18 @@ the next event or any later one. Matching: every event that meets step 1 starts 
 each further step takes the nearest event that meets it. Matches are a table (Time, Session, Agent,
 Turn, one column per step, Span); a row opens the session with the match's steps marked. The paper's
 three examples are offered as starting patterns.
+
+The events of a session are numbered inside the time range, so a match never reaches outside it. A
+sub-agent is a session of its own. The target of a tool call is its `resource`, or its arguments
+as text when the tool has none; the target of an input or a reply is its text. "Has" ignores case.
+"Same target" needs a target that is not empty. A failed call is one whose status is `error`.
+The pattern and its sort are in the address; a match opened in its session carries its events in
+the address as `marks`, and they stay marked while the selection moves.
+
+Measured on the real sessions of the acceptance database (31 days, 57 sessions, about 15,000
+events of a sequence; result caches off): the drawing reads in about 75 ms; a pattern's table in
+120 to 200 ms and its total in 30 to 165 ms, for patterns of one to four steps with up to 12,532
+matches.
 
 ### 8.6 Safety rules
 
@@ -790,8 +807,15 @@ Sub-projects 1 to 5 are done when:
     request's full context.
 
 To measure during implementation: the `storage_page_size` of `agent_messages`; the cost of writing
-large text to a merge-on-write table; the "later" join of pattern matching, which grows with the
-square of the calls per session (try a window form); judge cost per thousand steps.
+large text to a merge-on-write table; judge cost per thousand steps.
+
+Measured for the "later" join of pattern matching: as a join on `pos >` with `min`, a four-step
+pattern over one tool with 8,650 calls took about 880 ms; as a window that gives every event the
+position of the nearest later event meeting the step, about 85 ms with the same matches. The
+compiler uses the window, and keeps the join only for a step that shares the target of an earlier
+one, where the target narrows it. A second finding: with one join of the events per step for the
+columns of the table, Doris placed the session conditions on other joins and joined on the position
+alone, which took 3 s; the table now takes its page of matches first and joins the events once.
 
 Open questions:
 
@@ -803,9 +827,12 @@ Open questions:
   sub-project 6.
 - **Large exports.** An export over its cap (7) is refused today. A streamed download or
   `SELECT ... INTO OUTFILE` to object storage would lift the cap.
-- **Unverified statements.** Statements of the Sequences page from prototype version 25 on, and of
-  Risks, Judges, Memories and Dashboard, have not been run on Doris yet. They are checked first in
-  sub-projects 2 to 5.
+- **Unverified statements.** Statements of Risks, Judges, Memories and Dashboard have not been run
+  on Doris yet. They are checked first in sub-projects 2 to 5. Those of the Sequences page are
+  checked: 157 patterns and 48 drawings against an independent computation on generated sessions.
+- **Targets at scale.** A pattern's statement reads the target of every tool call in the range, and
+  the text of every input and reply when a step is one of those. On large ranges the targets of
+  the page's rows alone could be read after the matches are found.
 - **Rule and memory changes.** When a rule's code changes, its old risks are kept with their
   `rule_version`; whether to rerun automatically is open. When the memory-validity criterion
   changes, the fold must replay from the first state; not designed yet.
@@ -819,8 +846,9 @@ One implementation plan per sub-project, in this order.
    adapter; writer, per-session columns and the import command; operations and endpoints; the table
    pages Sessions, Steps and Messages with filters, sort, columns, SQL and export; the session page;
    Compare; acceptance items 1 to 6 and 10.
-2. **Sub-project 2.** Pattern compiler and next-event paths; the Sequences page; the rules job and
-   `agent_risks`; the Risks page, column and the risk view on the session page.
+2. **Sub-project 2.** In two plans. First: pattern compiler and next-event paths; the Sequences
+   page. Second: the rules job and `agent_risks`; the Risks page, column and the risk view on the
+   session page.
 3. **Sub-project 3.** `agent_judges`, `agent_judgments`; the model client and the judge runner with
    budgets; Judges list, page and form; versions, out-of-date and reruns; risk judgments.
 4. **Sub-project 4.** Memory adapters and capture; source inference; the Memories page; the

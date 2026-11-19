@@ -262,9 +262,35 @@ statements that ran (`sql`: title and text) and `elapsedMs`; a query error answe
 | `GET /api/agents/sessions/<id>/steps/<seq>?inputOffset=` | A model call: its input (100 blocks at a time, latest first), output, tool results and prompt |
 | `GET /api/agents/sessions/<id>/events/<seq>/compaction` | The blocks a compaction replaced and its summary |
 | `GET /api/agents/compare?a=&b=&turn=` | Two sessions' trees and turns; with `turn` (0 allowed), that pair of turns' steps paired in order, each with its context size, and the turn's compactions |
+| `GET /api/agents/sequences/next?from=&to=&start=&depth=` | What happens next: from every event of one kind (`failed`, `user` or `tool:<name>`), the events that came after it as a tree of at most `depth` columns (2 to 4), each node with how often its path occurs |
+| `GET /api/agents/sequences/tools?from=&to=` | The tools called in the range, most called first |
+| `POST /api/agents/sequences/match` | The places where the steps of a pattern follow one another; the body is `{from, to, pattern, sort, dir, limit, offset}` |
 
 `agent_sessions`, `agent_events` and `agent_messages` are also sources of search, charts and alerts
 (`/api/search?source=agent_messages&q=role:assistant AND timeout`).
+
+A **pattern** is a list of one to six steps. A step puts conditions on one event, and from the
+second step on says how it follows the step before:
+
+```json
+[{"tool": "Edit"},
+ {"tool": "Bash", "status": "failed", "has": "test", "link": "next"},
+ {"tool": "Edit", "same": 1, "link": "later"}]
+```
+
+| Key | Meaning |
+| --- | --- |
+| `kind` | `call` (a tool call, the default), `user` (a user input), `reply` (a reply that ends a turn) or `compaction` |
+| `tool`, `status` | Tool calls only: the tool's name; `ok` or `failed` |
+| `has` | Text the target contains, whatever its case. The target of a tool call is what it acts on (a file, a command, a URL), or its arguments when the tool has no such thing; the target of an input or a reply is its text |
+| `any` | A list of texts of which the target contains at least one |
+| `same` | The number of an earlier step, from 1, with the same target |
+| `link` | `next`: the very next event of the session; `later`: any later one |
+
+Every event that meets the first step starts at most one match, and each further step takes the
+nearest event that meets it. The events of a session are its user inputs, tool calls, replies
+that end a turn and compactions inside the time range, in order; a sub-agent is a session of
+its own.
 
 ### Agent trajectory pages
 
@@ -291,8 +317,16 @@ repeated calls, compactions and sub-agents; the arrow keys move along the lanes.
 **Compare** (`/agents/compare?a=&b=`) shows two sessions as two rows of facts with their
 difference, then their lanes side by side with the steps of each pair of turns paired in order.
 
-Browser tests of these pages: `cd web && npm run build && node --test e2e/agents.e2e.ts`. They
-create and drop their own Doris database and need `DORIS_BE_HTTP_URL` and a PostgreSQL for the
+**Sequences** (`/agents/sequences`) opens on "what happens next": from a failed call, a user
+input or a call of one tool, the events that came next, drawn as a tree four events deep. A
+line is as thick as its path is common, and the rare branches of an event are drawn as one. An
+event of the drawing opens the **pattern** that finds its path again: a row of numbered steps,
+each of which can be changed, added or removed, with the three example patterns of the paper to
+start from. Below it is a table with one row per match and one column per step. A row opens the
+session with the events of the match marked on its lanes.
+
+Browser tests of these pages: `cd web && npm run build && node --test e2e/agents.e2e.ts
+e2e/sequences.e2e.ts`. They create and drop their own Doris database and need `DORIS_BE_HTTP_URL` and a PostgreSQL for the
 metadata database, as the server's Doris tests do.
 
 Times of the session page on a large session, taken in headless Chromium against a running
