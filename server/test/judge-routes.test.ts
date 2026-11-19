@@ -79,10 +79,21 @@ test('a judge in a view: versions, runs, counts with the rerun estimate, and the
   assert.deepEqual([b.view, b.versions.length, b.runs.length, b.counts, b.rows[0].calls, b.sql.map((s: any) => s.title)],
     ['all', 2, 1, { judged: 40, violations: 6, sessions: 3, stale: 40, staleViolating: 6, tokensPerStep: 950, failed: 2 }, 'Edit tests/a_test.py', ['Verdicts', 'All verdicts']]);
   assert.equal(b.readsText, "the user's request of the turn, and the 3 steps before the judged one");
+  assert.equal(b.cut, false);
   const missing = call({ d, s: store().s }, 'GET', '/api/agents/judges/no-such-judge', MEMBER);
   await missing.done;
   assert.equal(missing.answers[0]!.status, 404);
   await assert.rejects(call({ d, s: store().s }, 'GET', `/api/agents/judges/${JUDGE.id}?view=some`, MEMBER).done, /'view' must be first, all or changed/);
+});
+
+test('a view is cut at 500 rows and says so', async () => {
+  const { d } = doris();
+  const row = (i: number) => ({ ts: '2026-11-18 10:00:00', session_id: `s-${i}`, seq: i, step: 1, verdict: 'ok', made_by: 2, stale: 0, reason: 'fine' });
+  const many = { query: async (sql: string) => (sql.includes('tools_of AS') ? Array.from({ length: 501 }, (_, i) => row(i)) : d.query(sql)) } as unknown as Doris;
+  const c = call({ d: many, s: store().s }, 'GET', `/api/agents/judges/${JUDGE.id}?view=all`, MEMBER);
+  await c.done;
+  const b = c.answers[0]!.body;
+  assert.deepEqual([b.rows.length, b.cut, b.rows.at(-1).session_id], [500, true, 's-499']);
 });
 
 test('the verdicts of one step, with what the model reads for it now', async () => {
@@ -135,6 +146,14 @@ test('admins save a judge, a version or a rerun; members may not', async () => {
     `enqueue ${JUDGE.id} picked ada@example.com undefined`, `enqueue ${JUDGE.id} failed ada@example.com undefined`,
   ]);
   assert.match(calls[0]!, /"criterion":"Does this step run a command that cannot be undone/);
+});
+
+test('the templates and models a new judge starts from', async () => {
+  const c = call({ d: doris().d, s: store().s }, 'GET', '/api/agents/judges/templates', MEMBER);
+  await c.done;
+  const b = c.answers[0]!.body;
+  assert.deepEqual([Object.keys(b.templates), b.models, b.defaultModel, b.budget], [['test', 'confirm'], ['claude-haiku-5-5', 'claude-sonnet-5-5'], 'claude-haiku-5-5', 2_000_000]);
+  assert.equal(b.templates.confirm.pick.tool, 'Bash');
 });
 
 test('a server without judges says so; an unknown judge path is not found', async () => {

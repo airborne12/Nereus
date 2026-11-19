@@ -20,7 +20,7 @@ test('all verdicts: the latest of each step, newest step first, with the step an
   assert.match(s, /SELECT e\.ts, p\.session_id, p\.seq, e\.turn, e\.step, s\.title, s\.root_id, t\.calls, p\.verdict, p\.made_by, p\.made_by < 2 AS stale, p\.reason, p\.violations, p\.was, p\.was_version/);
   assert.match(s, /JOIN otel\.agent_events e ON e\.session_id = p\.session_id AND e\.seq = p\.seq AND e\.kind = 'llm_call'\nLEFT JOIN otel\.agent_sessions s ON s\.session_id = p\.session_id\nLEFT JOIN tools_of t ON t\.session_id = p\.session_id AND t\.seq = p\.seq/);
   assert.match(s, /group_concat\(concat\(c\.name, ' ', left\(coalesce\(c\.resource, CAST\(c\.args AS STRING\), ''\), 80\)\), ', '\) AS calls/);
-  assert.match(s, /ORDER BY e\.ts DESC, p\.session_id, p\.seq\nLIMIT 500$/);
+  assert.match(s, /ORDER BY e\.ts DESC, p\.session_id, p\.seq\nLIMIT 501$/, 'one row more than is shown, to know whether the view is cut');
 });
 
 test('the first violation in each session, with how many steps of it violate', () => {

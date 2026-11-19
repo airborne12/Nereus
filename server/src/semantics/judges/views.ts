@@ -99,7 +99,8 @@ export function verdictsSql(db: string, judge: string, current: number, view: Vi
       `LEFT JOIN ${db}.agent_sessions s ON s.session_id = p.session_id`,
       'LEFT JOIN tools_of t ON t.session_id = p.session_id AND t.seq = p.seq',
       'ORDER BY e.ts DESC, p.session_id, p.seq',
-      `LIMIT ${VIEW_LIMIT}`,
+      // One row more than is shown, so that the page can say the view is cut.
+      `LIMIT ${VIEW_LIMIT + 1}`,
     ].join('\n'),
   };
 }
