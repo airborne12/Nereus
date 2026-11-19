@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { JudgeTemplate } from '../src/api/judges.ts';
 import {
-  canRun, draftBody, draftFrom, editDraft, leftOver, parseJudgeState, parseRecord, runsOnText, serializeJudgeState, stepText, verdictLabel, versionChange,
+  budgetNote, canRun, countKey, draftBody, draftFrom, editDraft, leftOver, parseJudgeState, parseRecord, runsOnText, serializeJudgeState, stepText, tryKey, verdictLabel, versionChange,
 } from '../src/lib/agents/judges.ts';
 
 const TEMPLATES: Record<string, JudgeTemplate> = {
@@ -76,4 +76,18 @@ test('verdicts, versions, steps and schedules in words', () => {
   assert.equal(stepText({ step: 10, calls: 'Edit tests/a_test.py' }), 'step 10 · Edit tests/a_test.py');
   assert.equal(stepText({ step: 3, calls: null }), 'step 3 · reply');
   assert.deepEqual([runsOnText(true), runsOnText(false)], ['new sessions too', 'once']);
+});
+
+test('a count answers the pick and the reads of a draft; a try also its criterion and model, but not its name or schedule', () => {
+  const d = draftFrom('test', TEMPLATES);
+  const with_ = (field: string, value: string | boolean) => editDraft(d, field, value, TEMPLATES);
+  assert.equal(countKey(with_('criterion', 'Other?')), countKey(d));
+  for (const [f, v] of [['has', 'spec'], ['n', '5'], ['reads', 'turn']] as const) assert.notEqual(countKey(with_(f, v)), countKey(d), f);
+  for (const [f, v] of [['name', 'Mine'], ['runsOnNew', false]] as const) assert.equal(tryKey(with_(f, v)), tryKey(d), f);
+  for (const [f, v] of [['criterion', 'Other?'], ['model', 'claude-sonnet-5-5'], ['tool', 'Bash'], ['reads', 'turn']] as const) assert.notEqual(tryKey(with_(f, v)), tryKey(d), f);
+});
+
+test('the run budget is stated when the estimate is over it', () => {
+  assert.equal(budgetNote(1_000, 10, 2_000_000), null);
+  assert.equal(budgetNote(5_000_000, 5_000, 2_000_000), "The run stops at its budget of 2,000,000 input tokens, after about 2,000 of 5,000 steps; the judge's page then offers to judge the rest.");
 });

@@ -41,6 +41,7 @@
 .jg-stage button, .jg-link { padding: 3px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); font-size: 12.5px; cursor: pointer; }
 .jg-stage button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .jg-stage button.go { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+.jg-stage button.go:hover:not(:disabled) { color: var(--accent-fg); }
 .jg-stage button:disabled { opacity: 0.5; cursor: not-allowed; }
 .jg-link, .jg-stage .jg-link { border: 0; padding: 0; background: none; color: var(--accent); }
 .jg-link:hover, .jg-stage .jg-link:hover:not(:disabled) { text-decoration: underline; color: var(--accent); }
@@ -64,7 +65,10 @@
 .jg-verdicts td.jg-step code { overflow-wrap: anywhere; }
 .jg-hint { padding: 12px 0; }
 
-.jg-detail { margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); max-width: 980px; }
+.jg-detail { padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); max-width: 980px; }
+/* The row under a clicked row holds what the model read for it. */
+.jg-verdicts tr.jg-open, .jg-verdicts tr.jg-open:hover { cursor: default; background: none; }
+.jg-verdicts tr.jg-open > td { padding: 4px 10px 12px; white-space: normal; }
 .jg-detail h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
 .jg-why { margin: 6px 0; line-height: 1.5; }
 .jg-record { margin: 6px 0; }

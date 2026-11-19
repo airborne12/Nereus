@@ -784,10 +784,13 @@ As built (server side):
 As built (pages): Judges is a page of the navigation after Sequences. Its list adds Last verdict
 (the time of the newest verdict) and marks a judge whose last run is queued, running, stopped or
 failed. The form counts the picked steps again shortly after a change and keeps the draft in the
-page, not the address; its templates and models come from `GET /api/agents/judges/templates`. A
-judge's page keeps its view and its open row in the address. The three views are always offered;
-"Changed by a rerun" says so when nothing changed. A run is taken by the command, so the page says
-when a run is queued and that the command takes it.
+page, not the address; its templates, models and run budget come from
+`GET /api/agents/judges/templates`, and a count or a try is shown only while the draft still asks
+what it answered. A judge's page keeps its view and its open row in the address; the row opens
+under it, and a view cut at 500 rows says so. The three views are always offered; "Changed by a
+rerun" says so when nothing changed. A run is taken by the command, so the page says when a run is
+queued and that the command takes it. Members see the actions that spend model tokens disabled,
+with the reason; the server still refuses them.
 
 ### 8.8 Memories
 

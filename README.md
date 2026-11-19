@@ -338,8 +338,8 @@ query error answers 400.
 | `GET /api/agents/sequences/tools?from=&to=` | The tools called in the range, most called first |
 | `POST /api/agents/sequences/match` | The places where the steps of a pattern follow one another. The body is `{from, to, pattern, sort, dir, limit, offset}`: `sort` is `time` (the default), `session`, `agent`, `turn`, `span` or `step<n>` for the time of a step, `dir` is `desc` (the default) or `asc`. The answer holds `rows`, one per match with the events of its `steps`, and the counts `matches` and `sessions` |
 | `GET /api/agents/judges` | Every judge with its current version, its last run and the counts of its latest verdicts: steps judged, violations, sessions, out of date |
-| `GET /api/agents/judges/templates` | The criteria a new judge starts from, the models it can use, and the default model |
-| `GET /api/agents/judges/<id>?view=first\|all\|changed` | One judge: its versions and runs, the counts with `tokensPerStep` to estimate a rerun, and at most 500 rows of the view: the first violation in each session (the default), the latest verdict of every step, or the steps whose latest verdict differs from the one before it |
+| `GET /api/agents/judges/templates` | The criteria a new judge starts from, the models it can use, the default model, and the budget of input tokens of a judge's runs |
+| `GET /api/agents/judges/<id>?view=first\|all\|changed` | One judge: its versions and runs, the counts with `tokensPerStep` to estimate a rerun, and at most 500 rows of the view, with `cut` when it has more: the first violation in each session (the default), the latest verdict of every step, or the steps whose latest verdict differs from the one before it |
 | `GET /api/agents/judges/<id>/steps/<session>/<seq>` | Every verdict the judge gave one step, newest version first, and what the model reads for it now |
 | `POST /api/agents/judges/preview` | For a draft `{pick, reads, criterion, model}`: how many steps and sessions it picks, five of them spread over the picked steps with what the model reads, and the estimated input tokens of a run; with `try: true` (admins) the model judges the five, and nothing is stored |
 | `POST /api/agents/judges` | Saves a judge `{name, pick, reads, criterion, model, runsOnNew, budget?}` as version 1 and queues a run (admins) |
@@ -415,12 +415,17 @@ Model, Version, Runs on (once, or new sessions too), Steps judged, Violations, S
 date. **New judge** (`/agents/judges/new`) is a form in five stages: the steps to pick, with a
 live count; what the model reads; the criterion, from a template or one's own, with the model and
 a name; a try on five steps, which shows what the model read and its verdict and stores nothing;
-and the run, with its model calls and estimated input tokens. A judge's page
+and the run, with its model calls and estimated input tokens, and where the run would stop when
+the estimate is over its budget. A count or a try is shown only while the draft still asks what it
+answered. A judge's page
 (`/agents/judges/<id>?view=&row=`) shows the same five stages, each tagged "SQL in Doris" or
 "Model, called by Nereus": the criterion with "Change criterion or model" and the versions; the
 stored verdicts with the last run and, when an older version made some, the reruns of all of them
-or of the violating ones, each with its token estimate; and the three views of the verdicts. A row
-shows what the model read and every verdict of that step, and opens the step in its session.
+or of the violating ones, each with its token estimate, and the offers to judge what the last run
+left or the steps whose model call failed; and the three views of the verdicts, which say when they
+are cut at 500 rows. A row opens, right under it, what the model read and every verdict of that
+step, and opens the step in its session. Members see the judges; the actions that spend model
+tokens are disabled for them, with the reason, and the server refuses them.
 
 Browser tests of these pages: `cd web && npm run build && node --test e2e/agents.e2e.ts
 e2e/sequences.e2e.ts e2e/risks.e2e.ts e2e/judges.e2e.ts`. They create and drop their own Doris database and need `DORIS_BE_HTTP_URL` and a PostgreSQL for the

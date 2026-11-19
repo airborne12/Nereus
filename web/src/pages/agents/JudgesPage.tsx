@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import * as api from '../../api/judges.ts';
 import { SqlDialog } from '../../components/agents/SqlDialog.tsx';
 import { stamp, timeOf } from '../../lib/agents/format.ts';
-import { runsOnText } from '../../lib/agents/judges.ts';
+import { ADMIN_ONLY, runsOnText } from '../../lib/agents/judges.ts';
 import type { Go } from '../../Root.tsx';
 
 const HEAD: [string, string][] = [
@@ -19,7 +19,7 @@ function runNote(r: api.Run | null): string {
 }
 
 /** The Judges page: every judge with what it judges and the counts of its latest verdicts. */
-export function JudgesPage({ go }: { go: Go }) {
+export function JudgesPage({ go, admin }: { go: Go; admin: boolean }) {
   const [data, setData] = useState<api.ListAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSql, setShowSql] = useState(false);
@@ -39,7 +39,7 @@ export function JudgesPage({ go }: { go: Go }) {
           <span className="muted">A model judges what steps mean; the steps it reads and what is done with its verdicts are queries in Doris.</span>
         </div>
         <div className="ag-tools">
-          <button type="button" className="go" onClick={() => go('/agents/judges/new')}>New judge</button>
+          <button type="button" className="go" disabled={!admin} title={admin ? undefined : ADMIN_ONLY} onClick={() => go('/agents/judges/new')}>New judge</button>
           <button type="button" aria-haspopup="dialog" onClick={() => setShowSql(true)}>SQL</button>
         </div>
       </div>

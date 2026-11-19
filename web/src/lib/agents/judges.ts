@@ -66,6 +66,21 @@ export function draftBody(d: Draft): DraftBody {
 
 export const canRun = (d: Draft, steps: number): boolean => steps > 0 && d.name.trim() !== '' && d.criterion.trim() !== '';
 
+/** The part of a draft a count of the picked steps answers: what is picked and what the model reads. */
+export const countKey = (d: Draft): string => JSON.stringify({ pick: d.pick, reads: draftBody(d).reads });
+/** The part of a draft a try answers: that of the count, the criterion and the model. */
+export const tryKey = (d: Draft): string => JSON.stringify({ pick: d.pick, reads: draftBody(d).reads, criterion: d.criterion, model: d.model });
+
+/** What the form says when the estimate of a run is over its budget; null when it is not. */
+export function budgetNote(estimate: number, steps: number, budget: number): string | null {
+  if (steps === 0 || estimate <= budget) return null;
+  const n = Math.floor(budget / (estimate / steps));
+  return `The run stops at its budget of ${budget.toLocaleString('en-US')} input tokens, after about ${n.toLocaleString('en-US')} of ${steps.toLocaleString('en-US')} steps; the judge's page then offers to judge the rest.`;
+}
+
+/** Why a member cannot use the actions that spend model tokens. */
+export const ADMIN_ONLY = 'Only admins make, change and rerun judges, since they spend model tokens.';
+
 /** What the model read, as its parts: the request of the turn, how many steps were left out, and the steps. */
 export interface ReadParts { request: string | null; omitted: number; steps: { judged: boolean; lines: string[] }[] }
 

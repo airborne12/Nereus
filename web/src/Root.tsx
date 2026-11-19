@@ -84,7 +84,7 @@ export function Root() {
     return <LoginPage key={auth.state} mode={auth.state} onDone={(user) => setAuth({ state: 'in', user })} />;
   }
   let body;
-  if (page.startsWith('agent-')) body = <AgentsArea path={loc.path} search={loc.search} go={go} />;
+  if (page.startsWith('agent-')) body = <AgentsArea path={loc.path} search={loc.search} go={go} admin={auth.user.role === 'admin'} />;
   else if (page === 'search') body = <SearchPage key={loc.search.includes('saved=') ? loc.search : 'search'} go={go} onChanged={loadFavorites} />;
   else if (page === 'saved') body = <SavedSearchesPage go={go} onChanged={loadFavorites} />;
   else if (page === 'alerts') body = <AlertsPage go={go} />;

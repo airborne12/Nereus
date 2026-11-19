@@ -1,13 +1,24 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import * as api from '../../api/judges.ts';
 import { ReadRecord, Stage, VerdictTag } from '../../components/agents/JudgePlan.tsx';
 import { SqlDialog } from '../../components/agents/SqlDialog.tsx';
 import { plural } from '../../lib/agents/format.ts';
-import { canRun, type Draft, draftBody, draftFrom, editDraft, MAX_BEFORE, RESULTS, TOOLS, TRY } from '../../lib/agents/judges.ts';
+import {
+  ADMIN_ONLY, budgetNote, canRun, countKey, type Draft, draftBody, draftFrom, editDraft, MAX_BEFORE, RESULTS, TOOLS, TRY, tryKey,
+} from '../../lib/agents/judges.ts';
 import type { Go } from '../../Root.tsx';
 
 /** How long the form waits after a change before it counts the picked steps again. */
 const QUIET_MS = 400;
+
+/** An answer of the preview with the part of the draft it answers. */
+interface Answered { key: string; answer: api.PreviewAnswer }
+
+/** What a preview is sent for a draft: all but its name and schedule. */
+function previewBody(d: Draft): Omit<api.DraftBody, 'name' | 'runsOnNew'> {
+  const { name: _n, runsOnNew: _r, ...body } = draftBody(d);
+  return body;
+}
 
 /** A sample of the picked steps, judged when tried. */
 function Samples({ sample, tried }: { sample: api.Sample[]; tried: boolean }) {
@@ -23,14 +34,18 @@ function Samples({ sample, tried }: { sample: api.Sample[]; tried: boolean }) {
   );
 }
 
-/** The form of a new judge: what it picks, what the model reads, the criterion, a try, the run. */
-export function JudgeForm({ go }: { go: Go }) {
+/**
+ * The form of a new judge: what it picks, what the model reads, the criterion, a try, the run. A
+ * count or a try is shown only while the draft still asks what it answered.
+ */
+export function JudgeForm({ go, admin }: { go: Go; admin: boolean }) {
   const [setup, setSetup] = useState<api.TemplatesAnswer | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [look, setLook] = useState<api.PreviewAnswer | null>(null);
-  const [tried, setTried] = useState<api.PreviewAnswer | null>(null);
+  const [look, setLook] = useState<Answered | null>(null);
+  const [tried, setTried] = useState<Answered | null>(null);
   const [busy, setBusy] = useState<'try' | 'run' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [countError, setCountError] = useState<string | null>(null);
   const [showSql, setShowSql] = useState(false);
 
   useEffect(() => {
@@ -40,24 +55,26 @@ export function JudgeForm({ go }: { go: Go }) {
   }, []);
 
   // The picked steps and what the model would read are counted again shortly after a change.
-  const asked = useMemo(() => (draft ? JSON.stringify({ pick: draft.pick, reads: draftBody(draft).reads }) : ''), [draft]);
+  const asked = draft ? countKey(draft) : '';
   useEffect(() => {
     if (!draft) return undefined;
     const ac = new AbortController();
+    setCountError(null);
     const t = setTimeout(() => {
-      const { name: _n, runsOnNew: _r, ...body } = draftBody(draft);
-      api.preview(body, ac.signal).then((a) => { setLook(a); setError(null); }, (e: Error) => { if (!ac.signal.aborted) setError(e.message); });
+      api.preview(previewBody(draft), ac.signal).then((a) => setLook({ key: asked, answer: a }), (e: Error) => { if (!ac.signal.aborted) setCountError(e.message); });
     }, QUIET_MS);
     return () => { clearTimeout(t); ac.abort(); };
   }, [asked]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!setup || !draft) return <div className="ag-page">{error ? <div className="error" role="alert">{error}</div> : <p className="muted jg-hint">Loading…</p>}</div>;
-  const edit = (field: string, value: string | boolean) => { setDraft(editDraft(draft, field, value, setup.templates)); setTried(null); };
-  const steps = look?.steps ?? 0;
+  const edit = (field: string, value: string | boolean) => setDraft(editDraft(draft, field, value, setup.templates));
+  const fresh = look?.key === asked ? look.answer : null;
+  const shown = tried?.key === tryKey(draft) ? tried.answer : null;
+  const steps = fresh?.steps ?? 0;
   const tryIt = () => {
-    const { name: _n, runsOnNew: _r, ...body } = draftBody(draft);
+    const key = tryKey(draft);
     setBusy('try');
-    api.preview({ ...body, try: true }).then((a) => { setTried(a); setError(null); }, (e: Error) => setError(e.message)).finally(() => setBusy(null));
+    api.preview({ ...previewBody(draft), try: true }).then((a) => { setTried({ key, answer: a }); setError(null); }, (e: Error) => setError(e.message)).finally(() => setBusy(null));
   };
   const run = () => {
     setBusy('run');
@@ -67,6 +84,8 @@ export function JudgeForm({ go }: { go: Go }) {
   const radio = (kind: Draft['reads']['kind'], label: ReactNode) => (
     <label className="jg-radio"><input type="radio" name="reads" checked={draft.reads.kind === kind} onChange={() => edit('reads', kind)} /> {label}</label>
   );
+  const over = budgetNote(fresh?.estimate ?? 0, steps, setup.budget);
+  const counted = fresh ? `${plural(fresh.steps, 'step')} in ${plural(fresh.sessions, 'session')}` : countError ? 'Not counted' : 'Counting…';
 
   return (
     <div className="ag-page">
@@ -77,7 +96,9 @@ export function JudgeForm({ go }: { go: Go }) {
         </div>
         <div className="ag-tools"><button type="button" aria-haspopup="dialog" onClick={() => setShowSql(true)}>SQL</button></div>
       </div>
+      {!admin && <p className="muted jg-hint" role="note">{ADMIN_ONLY}</p>}
       {error && <div className="error" role="alert">{error}</div>}
+      {countError && <div className="error" role="alert">{countError}</div>}
       <div className="jg-body">
         <ol className="jg-plan jg-form">
           <Stage no={1} where="doris" title="Pick the steps to judge">
@@ -85,7 +106,7 @@ export function JudgeForm({ go }: { go: Go }) {
               <label>Tool<select aria-label="Tool" value={draft.pick.tool} onChange={(e) => edit('tool', e.target.value)}>{TOOLS.map(option)}</select></label>
               <label>Target contains<input aria-label="Target contains" value={draft.pick.has} placeholder="any; a | b for either" size={30} onChange={(e) => edit('has', e.target.value)} /></label>
               <label>Result<select aria-label="Result" value={draft.pick.status} onChange={(e) => edit('status', e.target.value)}>{RESULTS.map(option)}</select></label>
-              <span className="jg-count" role="status">{look ? `${plural(look.steps, 'step')} in ${plural(look.sessions, 'session')}` : 'Counting…'}</span>
+              <span className="jg-count" role="status">{counted}</span>
             </div>
           </Stage>
           <Stage no={2} where="doris" title="Choose what the model reads">
@@ -107,20 +128,25 @@ export function JudgeForm({ go }: { go: Go }) {
             <label className="jg-full">Criterion, a question the model answers with violates or does not<textarea aria-label="Criterion" rows={3} value={draft.criterion} onChange={(e) => edit('criterion', e.target.value)} /></label>
           </Stage>
           <Stage no={4} where="model" title={`Try it on ${TRY} steps`}>
-            <button type="button" disabled={!steps || !draft.criterion.trim() || busy !== null} onClick={tryIt}>{busy === 'try' ? 'Trying…' : tried ? 'Try again' : `Try on ${TRY} steps`}</button>
-            <Samples sample={tried?.sample ?? []} tried={tried !== null} />
+            <button type="button" disabled={!admin || !fresh || !steps || !draft.criterion.trim() || busy !== null} title={admin ? undefined : ADMIN_ONLY} onClick={tryIt}>
+              {busy === 'try' ? 'Trying…' : shown ? 'Try again' : `Try on ${TRY} steps`}
+            </button>
+            <Samples sample={shown?.sample ?? []} tried={shown !== null} />
           </Stage>
           <Stage no={5} where="doris" title="Run">
-            <p className="muted">{plural(steps, 'model call')}, about {(look?.estimate ?? 0).toLocaleString('en-US')} input tokens. The run-judges command takes the run (see the README).</p>
+            <p className="muted">{plural(steps, 'model call')}, about {(fresh?.estimate ?? 0).toLocaleString('en-US')} input tokens. The run-judges command takes the run (see the README).</p>
+            {over && <p className="muted">{over}</p>}
             <label className="jg-radio"><input type="checkbox" checked={draft.runsOnNew} onChange={(e) => edit('runsOnNew', e.target.checked)} /> Also judge new sessions as they arrive</label>
             <div className="jg-row">
-              <button type="button" className="go" disabled={!canRun(draft, steps) || busy !== null} onClick={run}>{busy === 'run' ? 'Saving…' : `Run on ${plural(steps, 'step')}`}</button>
+              <button type="button" className="go" disabled={!admin || !fresh || !canRun(draft, steps) || busy !== null} title={admin ? undefined : ADMIN_ONLY} onClick={run}>
+                {busy === 'run' ? 'Saving…' : fresh ? `Run on ${plural(steps, 'step')}` : 'Run'}
+              </button>
               <button type="button" onClick={() => go('/agents/judges')}>Cancel</button>
             </div>
           </Stage>
         </ol>
       </div>
-      {showSql && <SqlDialog statements={(tried ?? look)?.sql ?? []} onClose={() => setShowSql(false)} />}
+      {showSql && <SqlDialog statements={(shown ?? fresh)?.sql ?? []} onClose={() => setShowSql(false)} />}
     </div>
   );
 }

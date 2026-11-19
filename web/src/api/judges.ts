@@ -10,7 +10,8 @@ export type Verdict = 'violates' | 'ok' | 'unsure';
 export type View = 'first' | 'all' | 'changed';
 
 export interface JudgeTemplate { name: string; pick: Pick; reads: Reads; criterion: string; model: string }
-export interface TemplatesAnswer { templates: Record<string, JudgeTemplate>; models: string[]; defaultModel: string }
+/** `budget`: the input tokens a judge's runs may spend. */
+export interface TemplatesAnswer { templates: Record<string, JudgeTemplate>; models: string[]; defaultModel: string; budget: number }
 
 export interface Run {
   id: number; judge: string; version: number; scope: 'picked' | 'new' | 'stale' | 'stale-violating' | 'failed'; status: 'queued' | 'running' | 'done' | 'stopped' | 'failed';
@@ -32,8 +33,9 @@ export interface VerdictRow {
   ts: string; session_id: string; seq: number; turn: number; step: number; title: string | null; root_id: string | null; calls: string | null;
   verdict: Verdict; made_by: number; stale: number | boolean; reason: string; violations: number | null; was: Verdict | null; was_version: number | null;
 }
+/** `cut`: the view has more rows than were sent. */
 export interface JudgeAnswer {
-  judge: Judge; versions: Version[]; runs: Run[]; pickText: string; readsText: string; counts: Counts; view: View; rows: VerdictRow[]; sql: Statement[]; elapsedMs: number;
+  judge: Judge; versions: Version[]; runs: Run[]; pickText: string; readsText: string; counts: Counts; view: View; rows: VerdictRow[]; cut: boolean; sql: Statement[]; elapsedMs: number;
 }
 
 export interface StepVerdict { judge_version: number; verdict: Verdict; reason: string; model: string; input_seqs: number[]; input_tokens: number; output_tokens: number; judged_at: string }

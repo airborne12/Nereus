@@ -5,7 +5,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readJson } from '../../control/auth/http.ts';
 import { AuthError, type User } from '../../control/auth/store.ts';
-import type { JudgeStore } from '../../control/judges/store.ts';
+import { type JudgeStore, RUN_BUDGET } from '../../control/judges/store.ts';
 import type { Doris } from '../../db/doris.ts';
 import { CompileError } from '../../semantics/search/compile.ts';
 import { DEFAULT_MODEL, type JudgeVersion, MODELS, parseDraft, pickText, readsText, TEMPLATES } from '../../semantics/judges/judge.ts';
@@ -13,7 +13,7 @@ import { type JudgeModel, ModelAccessError } from '../../semantics/judges/model.
 import { estimateTokens } from '../../semantics/judges/prompt.ts';
 import { judgeExcerpts, readSteps } from '../../semantics/judges/runner.ts';
 import { countSql, lineageSql, readsSql, sampleSql, type Scope } from '../../semantics/judges/statements.ts';
-import { judgesSql, verdictSql, verdictsSql, type View } from '../../semantics/judges/views.ts';
+import { judgesSql, VIEW_LIMIT, verdictSql, verdictsSql, type View } from '../../semantics/judges/views.ts';
 import { parsed, run, type Send } from './request.ts';
 
 export interface JudgeAccess { store: JudgeStore; model: JudgeModel }
@@ -72,7 +72,7 @@ async function one(d: Deps, j: JudgeAccess, res: ServerResponse, id: string, url
   const current = versions.find((v) => v.version === judge.currentVersion)!;
   d.send(res, 200, {
     judge, versions, runs, pickText: pickText(current.pick), readsText: readsText(current.reads),
-    counts: counted(results[0]![0]), view, rows: parsed(results[1]!), sql: statements, elapsedMs,
+    counts: counted(results[0]![0]), view, rows: parsed(results[1]!.slice(0, VIEW_LIMIT)), cut: results[1]!.length > VIEW_LIMIT, sql: statements, elapsedMs,
   });
 }
 
@@ -149,7 +149,7 @@ export async function judgeRoutes(d: Deps, req: IncomingMessage, res: ServerResp
   const oneMatch = ONE.exec(path);
   const writeMatch = WRITE.exec(path);
   if (req.method === 'GET' && path === '/api/agents/judges') await list(d, j, res);
-  else if (req.method === 'GET' && path === '/api/agents/judges/templates') d.send(res, 200, { templates: TEMPLATES, models: MODELS, defaultModel: DEFAULT_MODEL });
+  else if (req.method === 'GET' && path === '/api/agents/judges/templates') d.send(res, 200, { templates: TEMPLATES, models: MODELS, defaultModel: DEFAULT_MODEL, budget: RUN_BUDGET });
   else if (req.method === 'POST' && path === '/api/agents/judges/preview') await preview(d, j, req, res, user);
   else if (req.method === 'POST' && path === '/api/agents/judges') await write(d, j, req, res, user, null, null);
   else if (req.method === 'GET' && stepMatch) await step(d, j, res, stepMatch[1]!, decodeURIComponent(stepMatch[2]!), Number(stepMatch[3]));
