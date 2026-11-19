@@ -19,6 +19,7 @@ test('tokens, durations, counts and file sizes', () => {
     ['0.0s', '0.4s', '59.9s', '1m 0s', '3m 20s', '1h 0m', '1h 5m']);
   assert.deepEqual([plural(1, 'step'), plural(0, 'step'), plural(2712, 'step')], ['1 step', '0 steps', '2,712 steps']);
   assert.deepEqual([plural(1, 'match'), plural(3, 'match'), plural(2, 'time')], ['1 match', '3 matches', '2 times']);
+  assert.deepEqual([plural(3, 'memory'), plural(1, 'memory'), plural(2, 'key')], ['3 memories', '1 memory', '2 keys'], 'a consonant and y make ies');
   assert.deepEqual([512, 2970, 1_258_291].map(fileSize), ['512 bytes', '2.9 KB', '1.2 MB']);
   assert.deepEqual([num('13'), num(7), num(null), num('x')], [13, 7, 0, 0]);
 });

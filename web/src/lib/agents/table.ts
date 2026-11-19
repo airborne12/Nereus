@@ -34,8 +34,11 @@ export interface TableState {
   columns: string[] | null;
 }
 
+/** The range a page opens on. */
+const presetOf = (def: PageDef): RangePreset => def.defaultRange ?? DEFAULT_PRESET;
+
 export const defaultState = (def: PageDef): TableState =>
-  ({ range: { preset: DEFAULT_PRESET }, q: '', conditions: [], sort: def.defaultSort, dir: 'desc', columns: null });
+  ({ range: { preset: presetOf(def) }, q: '', conditions: [], sort: def.defaultSort, dir: 'desc', columns: null });
 
 export function resolveRange(r: TableRange, now: number): { from: number; to: number } {
   return 'preset' in r ? { from: now - PRESET_MS[r.preset], to: now } : { from: r.from, to: r.to };
@@ -51,19 +54,19 @@ function parseCondition(raw: string, def: PageDef): Condition | null {
 }
 
 /** The time range an address holds: `t` for a range ending now, or `from` and `to` in epoch ms. */
-export function parseRange(p: URLSearchParams): TableRange {
+export function parseRange(p: URLSearchParams, fallback: RangePreset = DEFAULT_PRESET): TableRange {
   const preset = p.get('t');
   const from = Number(p.get('from'));
   const to = Number(p.get('to'));
   // A fixed range must fit what a date can hold, or no request could be built from it.
   const fits = Number.isFinite(from) && Number.isFinite(to) && to > from && from >= -MAX_TIME && to <= MAX_TIME;
   return (RANGE_PRESETS as readonly string[]).includes(preset ?? '') ? { preset: preset as RangePreset }
-    : p.has('from') && fits ? { from, to } : { preset: DEFAULT_PRESET };
+    : p.has('from') && fits ? { from, to } : { preset: fallback };
 }
 
-/** The parameters of an address that say a time range; the default range needs none. */
-export function rangeParams(range: TableRange): [string, string][] {
-  if ('preset' in range) return range.preset === DEFAULT_PRESET ? [] : [['t', range.preset]];
+/** The parameters of an address that say a time range; the page's default range needs none. */
+export function rangeParams(range: TableRange, fallback: RangePreset = DEFAULT_PRESET): [string, string][] {
+  if ('preset' in range) return range.preset === fallback ? [] : [['t', range.preset]];
   return [['from', String(Math.round(range.from))], ['to', String(Math.round(range.to))]];
 }
 
@@ -71,7 +74,7 @@ export function rangeParams(range: TableRange): [string, string][] {
 export function parseTableState(search: string, def: PageDef): TableState {
   const p = new URLSearchParams(search);
   const base = defaultState(def);
-  const range = parseRange(p);
+  const range = parseRange(p, presetOf(def));
   const sort = p.get('sort');
   const cols = (p.get('cols') ?? '').split(',').filter((name) => columnOf(def, name));
   return {
@@ -86,7 +89,7 @@ export function parseTableState(search: string, def: PageDef): TableState {
 
 /** The query string of a state; what equals the default is left out. */
 export function serializeTableState(s: TableState, def: PageDef): string {
-  const p = new URLSearchParams(rangeParams(s.range));
+  const p = new URLSearchParams(rangeParams(s.range, presetOf(def)));
   if (s.q.trim()) p.set('q', s.q.trim());
   for (const c of s.conditions) p.append('f', conditionParam(c));
   if (s.sort !== def.defaultSort) p.set('sort', s.sort);

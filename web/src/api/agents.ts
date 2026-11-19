@@ -7,7 +7,7 @@ export type Row = Record<string, unknown>;
 /** One statement that ran, as the SQL dialog shows it. */
 export interface Statement { title: string; sql: string }
 export interface ColumnInfo { name: string; kind: 'text' | 'number' | 'time' }
-export type TableName = 'sessions' | 'steps' | 'messages' | 'risks';
+export type TableName = 'sessions' | 'steps' | 'messages' | 'risks' | 'memories';
 export type ExportFormat = 'csv' | 'jsonl';
 
 /** What a table page asks for: a time range in epoch ms, search text, conditions `column:op:value`, sort and paging. */
@@ -101,6 +101,8 @@ export interface TreeAnswer {
   risksCut: boolean;
   /** The rules, sent when the tree has a risk. */
   rules: RuleInfo[];
+  /** The memories the sessions of the tree wrote. */
+  memories?: { agent: string; scope: string; name: string }[];
   /** Every light step row when the tree is small; null otherwise. */
   steps: Row[] | null;
   openAll: boolean;
