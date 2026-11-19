@@ -5,10 +5,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Risk, RuleInfo } from '../src/api/agents.ts';
 import { openTarget, RISKS, SESSIONS, sessionUrl, shownColumns } from '../src/lib/agents/pages.ts';
-import { judgmentLabel, riskAt, riskKey, riskMarks, riskRowKey, rulePicture, stepSaid } from '../src/lib/agents/risks.ts';
+import { judgmentBox, judgmentLabel, riskAt, riskKey, riskMarks, riskRowKey, rulePicture, stepSaid } from '../src/lib/agents/risks.ts';
 
 const risk = (rule: string, first: number | string, steps: Risk['steps'] = []): Risk =>
-  ({ session_id: 'agent-h1', rule, rule_name: rule, first_seq: first as number, rule_version: 1, ts: '2026-11-17 10:00:00', turn: 2, events: steps.map((s) => s.seq), steps, what: '', why: '', found_at: '' });
+  ({
+    session_id: 'agent-h1', rule, rule_name: rule, first_seq: first as number, rule_version: 1, ts: '2026-11-17 10:00:00', turn: 2, events: steps.map((s) => s.seq), steps, what: '', why: '', found_at: '',
+    judgment: 'none', judgment_reason: null, judgment_model: null, judged_at: null, judge_version: null, read_events: null,
+  });
 
 test('a risk is named in the address by its session, rule and first event', () => {
   // Big numbers arrive as text.
@@ -42,6 +45,14 @@ test('the row a risk is shown at is the one of the event it is keyed by', () => 
 
 test('a judgment in words; a risk no model has read is not judged yet', () => {
   assert.deepEqual(['breach', 'review', 'ok', 'none', undefined, 'else'].map(judgmentLabel), ['Breach', 'Needs review', 'Not a breach', 'Not judged yet', 'Not judged yet', 'Not judged yet']);
+});
+
+test("a risk's judgment says the verdict and why, the question its judge asked, and what the model read", () => {
+  const judged: Risk = { ...risk('confirm', 31), judgment: 'breach', judgment_reason: 'The user never agreed.', judgment_model: 'claude-haiku-5-5', judged_at: '2026-11-19 10:00:00', judge_version: 1, read_events: 6 };
+  const rule: RuleInfo = { id: 'confirm', version: 1, kind: 'confirm', name: 'Irreversible', source: 'Paper 3.1.2', steps: [], criterion: 'Did it run without asking?' };
+  assert.deepEqual(judgmentBox(judged, rule), { tone: 'breach', label: 'Breach', reason: 'The user never agreed.', asked: 'Did it run without asking?', read: 'Read 6 events with claude-haiku-5-5, judge version 1' });
+  assert.deepEqual(judgmentBox({ ...judged, judgment: 'review', judgment_reason: '', read_events: 1 }, undefined), { tone: 'review', label: 'Needs review', reason: 'The model gave no reason.', asked: null, read: 'Read 1 event with claude-haiku-5-5, judge version 1' });
+  assert.deepEqual(judgmentBox(risk('deny', 31), rule), { tone: 'none', label: 'Not judged yet', reason: 'The rule found this risk; no model has read it yet.', asked: 'Did it run without asking?', read: null });
 });
 
 const RULES: RuleInfo[] = [

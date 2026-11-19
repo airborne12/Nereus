@@ -1,7 +1,7 @@
 import { Fragment } from 'react';
 import type { Risk, RuleInfo } from '../../api/agents.ts';
 import { stamp, timeOf } from '../../lib/agents/format.ts';
-import { eventKey, judgmentLabel, rulePicture } from '../../lib/agents/risks.ts';
+import { eventKey, judgmentBox, rulePicture } from '../../lib/agents/risks.ts';
 
 /** A rule drawn as a row of pills: what must come first, or the order that is not allowed. */
 function RulePicture({ rule }: { rule: RuleInfo }) {
@@ -30,6 +30,20 @@ interface Props {
   onOpen: (key: string) => void;
 }
 
+/** The judgment of a risk: the verdict and why, the question its judge asks, and what the model read and when. */
+function Judgment({ risk, rule }: { risk: Risk; rule: RuleInfo | undefined }) {
+  const box = judgmentBox(risk, rule);
+  const at = timeOf(risk.judged_at);
+  return (
+    <div className={`ag-judge ${box.tone}`} aria-label="Judgment">
+      <b className="ag-verdict">{box.label}</b>
+      <p>{box.reason}</p>
+      {box.asked && <p className="ag-asked"><span>{box.read ? 'Question asked' : 'Its judge will ask'}</span> {box.asked}</p>}
+      {box.read && <p className="ag-read">{box.read}{at === null ? '' : ` · ${stamp(at)}`}</p>}
+    </div>
+  );
+}
+
 /**
  * A safety risk of the session: the judgment first, then the events that broke the rule, each
  * opening its step, then the rule drawn.
@@ -49,10 +63,7 @@ export function RiskPane({ risk, at, total, rule, agent, onShow, onOpen }: Props
       </p>
       <h2>{risk.rule_name}</h2>
       <p className="ag-pmeta">{ms === null ? '' : stamp(ms)}{agent ? ` · in ${agent}` : ''} · turn {risk.turn}</p>
-      <div className="ag-judge none">
-        <b className="ag-verdict">{judgmentLabel('none')}</b>
-        <p>The rule found this risk; no model has read it yet.</p>
-      </div>
+      <Judgment risk={risk} rule={rule} />
       <section className="ag-io" aria-label="What happened">
         <h3><b>What happened</b><span>{risk.why}</span></h3>
         <div className="ag-revs">
