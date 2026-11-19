@@ -10,7 +10,8 @@
 .mem-state.warn { border-left-color: var(--ag-warn); }
 .mem-state.bad { border-left-color: var(--ag-bad); }
 .mem-state p { margin: 4px 0 0; font-size: 13px; line-height: 1.5; }
-.mem-uses { margin-top: 10px; }
+.mem-uses, .mem-history { margin-top: 4px; }
+.mem-valid h3 { margin: 14px 0 2px; font-size: 13px; font-weight: 600; }
 .mem-section h3 { margin: 10px 0 4px; font-size: 13px; font-weight: 600; }
 .mem-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.5; }
 .ag-wrote { margin: 4px 0 0; display: flex; flex-wrap: wrap; gap: 6px; }

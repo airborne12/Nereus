@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { memoryPath, memoryUrl, sourceOf, stateLabel, stateNote, stateTone, whereKept } from '../src/lib/agents/memories.ts';
+import { evidenceLabel, memoryPath, memoryUrl, sourceOf, stateLabel, stateNote, stateTone, whereKept } from '../src/lib/agents/memories.ts';
 import { MEMORIES, PAGES, rowKey, SESSION_PAGES } from '../src/lib/agents/pages.ts';
 import { parseTableState, serializeTableState } from '../src/lib/agents/table.ts';
 
@@ -59,4 +59,12 @@ test('Memories opens on the past 30 days, since a memory is updated seldom; the 
   const at = (preset: '7d' | '30d') => ({ ...parseTableState('', MEMORIES), range: { preset } });
   assert.deepEqual([serializeTableState(at('30d'), MEMORIES), serializeTableState(at('7d'), MEMORIES)], ['', '?t=7d']);
   assert.equal(serializeTableState({ ...parseTableState('', PAGES.sessions), range: { preset: '30d' } }, PAGES.sessions), '?t=30d');
+});
+
+test('what the validity fold found in words: the evidence of a session, and what each state means', () => {
+  assert.deepEqual(['supports', 'conflicts', 'none', 'else'].map(evidenceLabel), ['Supports', 'Conflicts', 'No bearing', 'No bearing']);
+  assert.equal(stateNote('holds', 'claude-code'), 'The sessions that read it since it was written bear it out.');
+  assert.equal(stateNote('doubt', 'claude-code'), 'A session that read it gave evidence against it that does not settle it.');
+  assert.equal(stateNote('outdated', 'claude-code'), 'A session that read it showed it no longer holds; the agent or a person should revise it.');
+  assert.deepEqual(MEMORIES.columns.find((c) => c.name === 'still_valid')!.values, ['holds', 'doubt', 'outdated', 'unjudged', 'unused', 'unrecorded']);
 });

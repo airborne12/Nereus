@@ -29,8 +29,15 @@ const STATES: Record<string, string> = {
 export const stateLabel = (s: unknown): string => STATES[text(s)] ?? STATES.unjudged!;
 export const stateTone = (s: unknown): 'ok' | 'warn' | 'bad' | 'dim' => (s === 'holds' ? 'ok' : s === 'doubt' ? 'warn' : s === 'outdated' ? 'bad' : 'dim');
 
+const EVIDENCE: Record<string, string> = { supports: 'Supports', conflicts: 'Conflicts', none: 'No bearing' };
+/** What a session that read a memory was to it, in words. */
+export const evidenceLabel = (e: unknown): string => EVIDENCE[text(e)] ?? EVIDENCE.none!;
+
 /** What a state means for a memory of `agent`. */
 export function stateNote(state: unknown, agent: string): string {
+  if (state === 'holds') return 'The sessions that read it since it was written bear it out.';
+  if (state === 'doubt') return 'A session that read it gave evidence against it that does not settle it.';
+  if (state === 'outdated') return 'A session that read it showed it no longer holds; the agent or a person should revise it.';
   if (state === 'unrecorded') return `${agent} loads it whole into every session, so which sessions used it is not recorded.`;
   if (state === 'unused') return 'No session has read it since it was last written.';
   if (state === 'removed') return 'It was no longer in its store when it was last captured.';

@@ -20,6 +20,8 @@ import { Doris, configFromEnv } from '../../server/src/db/doris.ts';
 import { streamLoad, streamLoadConfigFromEnv } from '../../server/src/db/stream-load.ts';
 import { Leases } from '../../server/src/jobs/leases.ts';
 import { captureStores } from '../../server/src/jobs/memories.ts';
+import { judgeMemories, type ValidityReport } from '../../server/src/jobs/validity.ts';
+import type { FoldModel } from '../../server/src/semantics/judges/fold-model.ts';
 import { IngestKeys } from '../../server/src/rum/http.ts';
 import { readClaudeMemory } from '../../server/src/semantics/memories/claude-memory.ts';
 import { readGeminiMemories } from '../../server/src/semantics/memories/gemini-memory.ts';
@@ -44,6 +46,7 @@ let page: Page;
 let base = '';
 let dir = '';
 let stop: () => Promise<void> = async () => {};
+let fold: (model: FoldModel) => Promise<ValidityReport> = async () => { throw new Error('not set up'); };
 
 before(async () => {
   const doris = new Doris(configFromEnv());
@@ -68,6 +71,7 @@ before(async () => {
     { agent: 'gemini-cli', scope: 'global', memories: readGeminiMemories('/home/u/.gemini/GEMINI.md', '## Gemini Added Memories\n- Use pnpm here.\n', 'global', LATER) },
   ]);
   assert.deepEqual([report.written, report.inferred], [3, 1]);
+  fold = (model) => judgeMemories({ doris, db, load, model, leases: new Leases(meta.pool), now: () => new Date('2026-11-19T11:00:00Z') });
   const auth = new AuthStore(meta.pool);
   await auth.setup('admin@example.com', 'Ada Admin', 'adminpass1');
   const webDir = new URL('../dist', import.meta.url).pathname;
@@ -181,6 +185,23 @@ test("a Gemini CLI memory's use is not recorded, and its page says where Gemini 
   ]);
   await page.goto(`${base}/agents/memories/claude-code/-home-u-work/no-such-memory`);
   await page.getByRole('alert').filter({ hasText: 'no such memory' }).waitFor();
+});
+
+test("once the validity fold has judged a read, the memory's state and its updates show it", async () => {
+  const report = await fold({ fold: async () => ({ evidence: 'conflicts', state: 'outdated', reason: 'The keep flag was renamed to reuse.', inputTokens: 600, outputTokens: 20 }) });
+  assert.equal(report.judged, 1);
+  await page.goto(`${base}/agents/memories`);
+  await total('3 memories');
+  assert.equal((await cells('build-cache-flag'))[5], 'Out of date');
+  await row('build-cache-flag').click();
+  await page.getByRole('heading', { name: 'build-cache-flag', level: 1 }).waitFor();
+  assert.match(await page.locator('.mem-state').innerText(), /^Out of date\s+A session that read it showed it no longer holds/);
+  const updates = page.getByRole('table', { name: 'Updates' });
+  assert.deepEqual((await updates.locator('tbody tr').first().locator('td').allInnerTexts()).map((t) => t.trim()),
+    ['2026-11-19 11:00:00', '1', 'Slow staging deploys', 'Conflicts', 'Out of date', 'The keep flag was renamed to reuse.']);
+  await shot('memory-05-judged');
+  await updates.locator('tbody tr').first().click();
+  await page.waitForURL((u) => u.pathname === `/agents/sessions/${READER_ID}` && (u.searchParams.get('sel') ?? '').startsWith(`s:${READER_ID}:`));
 });
 
 test('the dark theme and a 400 px window', async () => {

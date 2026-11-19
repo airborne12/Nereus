@@ -18,7 +18,9 @@ export interface MemoryAnswer {
   versions: MemoryVersion[];
   /** The calls that read or wrote its file, newest first. */
   uses: Row[];
-  /** `unjudged`, `unused`, `unrecorded` or `removed` until the validity fold judges it. */
+  /** The updates the validity fold made to the state of its latest version, newest first. */
+  history: Row[];
+  /** `holds`, `doubt` or `outdated` from the fold; else `unjudged`, `unused`, `unrecorded` or `removed`. */
   state: string;
   sql: Statement[];
   elapsedMs: number;
