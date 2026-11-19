@@ -29,6 +29,9 @@ export interface MemoryRecord {
   source_kind: SourceKind;
 }
 
+/** Formats whose reads are recorded as events, so that a memory's use can be seen and judged. */
+export const READ_RECORDED = ['claude-auto-memory'] as const;
+
 /** The hash of a memory's version: it changes when its content or its metadata as written does. */
 export const memoryHash = (frontmatter: string, content: string): string => sha256(JSON.stringify({ frontmatter, content }));
 

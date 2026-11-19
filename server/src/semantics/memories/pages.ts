@@ -6,14 +6,13 @@
 
 import { sqlString } from '../search/compile.ts';
 import type { ColumnKind, Page, PageColumn, Statement } from '../trajectory/query.ts';
+import { READ_RECORDED } from './model.ts';
 import { REMOVED } from './statements.ts';
 
 export interface MemoryRef { agent: string; scope: string; name: string }
 /** The state of a memory before the validity fold has judged it. */
 export type MemoryState = 'removed' | 'unrecorded' | 'unused' | 'unjudged';
 
-/** Formats whose reads are recorded as events, so that a memory's use can be seen. */
-export const READ_RECORDED = ['claude-auto-memory'] as const;
 const READ = 'Read';
 const WRITES = ['Write', 'Edit', 'MultiEdit'];
 const list = (xs: readonly string[]): string => xs.map(sqlString).join(', ');
