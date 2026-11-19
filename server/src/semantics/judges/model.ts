@@ -15,6 +15,13 @@ export class ModelAccessError extends Error {}
 
 const VERDICTS = new Set<string>(['violates', 'ok', 'unsure']);
 const MAX_TOKENS = 4096;
+/** One attempt of a call, and the attempts after it: a call ends within about three minutes. */
+const CALL_TIMEOUT_MS = 60_000;
+const CALL_RETRIES = 2;
+
+/** A client of the Anthropic SDK whose calls end well within the minutes after which another runner may take a run. */
+export const claudeClient = (options: ConstructorParameters<typeof Anthropic>[0] = {}): Anthropic =>
+  new Anthropic({ timeout: CALL_TIMEOUT_MS, maxRetries: CALL_RETRIES, ...options });
 
 function verdictOf(text: string): { verdict: Verdict; reason: string } | null {
   try {

@@ -9,8 +9,12 @@ import { type Pick, type Reads, TURN_STEPS, wordsOf } from './judge.ts';
 
 /** A judged step: its session and the sequence number of its model call. */
 export interface StepRef { session_id: string; seq: number }
-/** Which steps a run judges: picked steps without a verdict of the run's version, steps without any verdict, or out-of-date verdicts. */
-export type Scope = 'picked' | 'new' | 'stale' | 'stale-violating';
+/**
+ * Which steps a run judges: picked steps without a verdict of the run's version, steps without any
+ * verdict, out-of-date verdicts (all, or the violating ones), or verdicts of the run's version whose
+ * model call never reached the model.
+ */
+export type Scope = 'picked' | 'new' | 'stale' | 'stale-violating' | 'failed';
 /** What a run needs of a judge version to choose its steps. */
 export interface VersionRef { judge: string; version: number; pick: Pick }
 
@@ -99,6 +103,17 @@ export function subjectsSql(db: string, v: VersionRef, scope: Scope): Statement 
       ].join('\n'),
     };
   }
+  if (scope === 'failed') {
+    return {
+      title: 'Steps whose model call failed',
+      sql: [
+        `WITH ${pickedCte(db, v.pick)}`,
+        head,
+        `JOIN (SELECT DISTINCT session_id, seq FROM ${db}.agent_judgments WHERE judge = ${judge} AND judge_version = ${version(v.version)} AND verdict = 'unsure' AND input_tokens = 0) f ON f.session_id = p.session_id AND f.seq = p.seq`,
+        'ORDER BY p.ts, p.session_id, p.seq',
+      ].join('\n'),
+    };
+  }
   const violating = scope === 'stale-violating' ? " AND l.verdict = 'violates'" : '';
   return {
     title: 'Out-of-date verdicts',
@@ -115,7 +130,8 @@ export function subjectsSql(db: string, v: VersionRef, scope: Scope): Statement 
 
 /**
  * How many steps a judge has judged, how many of their latest verdicts an older version than
- * `current` made, and the input tokens a step has taken on average, to estimate a rerun.
+ * `current` made, the input tokens a step has taken on average, to estimate a rerun, and how many
+ * verdicts of `current` are unsure because the model call failed.
  */
 export const lineageSql = (db: string, judge: string, current: number): Statement => ({
   title: 'Verdicts',
@@ -123,12 +139,15 @@ export const lineageSql = (db: string, judge: string, current: number): Statemen
     `WITH ${latestCte(db, judge)},`,
     'spent AS (',
     `  SELECT round(avg(input_tokens)) AS per_step FROM ${db}.agent_judgments WHERE judge = ${sqlString(judge)} AND input_tokens > 0`,
+    '),',
+    'broken AS (',
+    `  SELECT count(*) AS n FROM ${db}.agent_judgments WHERE judge = ${sqlString(judge)} AND judge_version = ${version(current)} AND verdict = 'unsure' AND input_tokens = 0`,
     ')',
     "SELECT count(*) AS judged, sum(if(verdict = 'violates', 1, 0)) AS violations,",
     "       count(DISTINCT if(verdict = 'violates', session_id, NULL)) AS sessions,",
     `       sum(if(made_by < ${version(current)}, 1, 0)) AS stale, sum(if(made_by < ${version(current)} AND verdict = 'violates', 1, 0)) AS stale_violating,`,
-    '       max(spent.per_step) AS tokens_per_step',
-    'FROM latest, spent',
+    '       max(spent.per_step) AS tokens_per_step, max(broken.n) AS failed',
+    'FROM latest, spent, broken',
   ].join('\n'),
 });
 
@@ -147,7 +166,9 @@ function stepCondition(steps: readonly StepRef[]): string {
 
 /**
  * What the model reads for each of some steps: the user's request of the turn, and the model calls
- * and tool calls near the judged one, each with its text and tool results.
+ * and tool calls near the judged one, each with its text, arguments and tool results. A text said
+ * before is stored once under the first event that said it, so a block is also found by the
+ * event's own `msg_seq` and `result_msg`.
  */
 export function readsSql(db: string, reads: Reads, steps: readonly StepRef[]): Statement {
   return {
@@ -159,15 +180,17 @@ export function readsSql(db: string, reads: Reads, steps: readonly StepRef[]): S
       `  WHERE j.kind = 'llm_call' AND (${stepCondition(steps)})`,
       '),',
       'seen AS (',
-      "  SELECT j.session_id, j.seq AS judged, e.seq, e.kind, e.step, e.name, e.status, coalesce(e.resource, CAST(e.args AS STRING), '') AS target",
+      "  SELECT j.session_id, j.seq AS judged, e.seq, e.kind, e.step, e.name, e.status, coalesce(e.resource, CAST(e.args AS STRING), '') AS target,",
+      '         e.msg_seq, e.result_msg, CAST(e.args AS STRING) AS args',
       '  FROM judged j',
       `  JOIN ${db}.agent_events e ON e.session_id = j.session_id AND e.turn = j.turn`,
       `  WHERE e.kind = 'user_input' OR (e.kind IN ('llm_call', 'tool_call') AND ${near(reads)})`,
       ')',
-      `SELECT r.session_id, r.judged, r.seq, r.kind AS event_kind, r.step, r.name, r.status, left(r.target, ${BLOCK_CHARS}) AS target,`,
+      `SELECT r.session_id, r.judged, r.seq, r.kind AS event_kind, r.step, r.name, r.status, left(r.target, ${BLOCK_CHARS}) AS target, left(r.args, ${BLOCK_CHARS}) AS args,`,
       `       m.msg_seq, m.kind, m.is_error, left(m.text, ${BLOCK_CHARS}) AS text`,
       'FROM seen r',
-      `LEFT JOIN ${db}.agent_messages m ON m.session_id = r.session_id AND m.event_seq = r.seq AND m.kind IN ('text', 'tool_result')`,
+      `LEFT JOIN ${db}.agent_messages m ON m.session_id = r.session_id AND m.kind IN ('text', 'tool_result')`,
+      '  AND (m.event_seq = r.seq OR m.msg_seq = r.msg_seq OR m.msg_seq = r.result_msg)',
       'ORDER BY r.session_id, r.judged, r.seq, m.msg_seq',
     ].join('\n'),
   };

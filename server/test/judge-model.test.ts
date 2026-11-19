@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Anthropic from '@anthropic-ai/sdk';
-import { claudeJudge, ModelAccessError } from '../src/semantics/judges/model.ts';
+import { claudeClient, claudeJudge, ModelAccessError } from '../src/semantics/judges/model.ts';
 import { SYSTEM, userText, VERDICT_SCHEMA } from '../src/semantics/judges/prompt.ts';
 
 const usage = { input_tokens: 812, output_tokens: 64 };
@@ -51,6 +51,11 @@ test('a model that cannot be reached after the retries gives unsure with the err
   assert.equal((await failing(busy)).reason, `The model could not be reached: ${busy.message}`);
   const long = new Anthropic.BadRequestError(400, { message: 'prompt is too long' }, undefined, new Headers());
   assert.equal((await failing(long)).reason, `The model refused the request: ${long.message}`);
+});
+
+test('a call is bounded well under the ten quiet minutes after which another runner may take a run', () => {
+  const c = claudeClient({ apiKey: 'not-a-key' });
+  assert.deepEqual([c.timeout, c.maxRetries], [60_000, 2]);
 });
 
 test('a key, a permission or a model that is wrong stops the run instead of filling it with unsure verdicts', async () => {

@@ -24,7 +24,7 @@ import { readSteps } from '../src/semantics/judges/runner.ts';
 import { lineageSql, subjectsSql } from '../src/semantics/judges/statements.ts';
 import { IngestKeys } from '../src/rum/http.ts';
 import { createApp } from '../src/server.ts';
-import { RISK_ID, writeRisks } from './fixtures/risk-transcript.ts';
+import { REPEAT_ID, RISK_ID, writeRepeats, writeRisks } from './fixtures/risk-transcript.ts';
 import { RISKY, sequenceLines } from './fixtures/sequence-transcript.ts';
 import { freshMetaDb } from './meta-helper.ts';
 import { applySchemaFile } from './schema-helper.ts';
@@ -60,7 +60,7 @@ before(async () => {
   const cfg = streamLoadConfigFromEnv();
   const load = (t: string, l: string, r: readonly object[]) => streamLoad(cfg, db, t, l, r);
   dir = mkdtempSync(join(tmpdir(), 'nereus-judges-'));
-  for (const file of [writeRisks(dir), ...GENERATED.map((id, i) => generated(id, 5 + i * 17))]) await importFile(file, { doris, db, load });
+  for (const file of [writeRisks(dir), writeRepeats(dir), ...GENERATED.map((id, i) => generated(id, 5 + i * 17))]) await importFile(file, { doris, db, load });
   const meta = await freshMetaDb();
   store = new JudgeStore(meta.pool);
   deps = { doris, db, load, store, model: stub, runner: 'test-runner', batch: 7 };
@@ -111,15 +111,25 @@ test('the model reads the request of the turn and the steps up to the judged one
   const [edit] = await doris.query(`SELECT parent_seq FROM ${db}.agent_events WHERE session_id = '${RISK_ID}' AND kind = 'tool_call' AND name = 'Edit'`);
   const step = [{ session_id: RISK_ID, seq: Number(edit!.parent_seq) }];
   const read = async (reads: JudgeVersion['reads']) => (await readSteps({ doris, db }, { reads }, step))[0]!;
+  // An edit shows what it changed; a command is its own argument and is not repeated.
+  const [args] = await doris.query(`SELECT CAST(args AS STRING) AS a FROM ${db}.agent_events WHERE session_id = '${RISK_ID}' AND kind = 'tool_call' AND name = 'Edit'`);
+  const edited = `Called Edit: tests/clock_test.py\nArguments: ${String(args!.a)}\nResult: ok`;
+  assert.match(String(args!.a), /"new_string":"CET"/);
   const before = await read({ kind: 'before', n: 1 });
   assert.equal(before.text, [
     '<request>\nMake the clock test pass\n</request>',
     '<step>\nCalled Bash: pytest tests/clock_test.py (failed)\nResult: FAILED\n</step>',
-    '<step judged="true">\nCalled Edit: tests/clock_test.py\nResult: ok\n</step>',
+    `<step judged="true">\n${edited}\n</step>`,
   ].join('\n'));
   assert.equal(before.inputSeqs.length, 5, 'the input, two model calls and their two tool calls');
-  assert.equal((await read({ kind: 'step' })).text, '<request>\nMake the clock test pass\n</request>\n<step judged="true">\nCalled Edit: tests/clock_test.py\nResult: ok\n</step>');
+  assert.equal((await read({ kind: 'step' })).text, `<request>\nMake the clock test pass\n</request>\n<step judged="true">\n${edited}\n</step>`);
   assert.equal((await read({ kind: 'turn' })).text, before.text, 'the whole turn up to the step is the same here');
+});
+
+test('an answer said twice in a session is read in both turns, though the import stores it once', { skip: !enabled }, async () => {
+  const calls = await doris.query(`SELECT parent_seq FROM ${db}.agent_events WHERE session_id = '${REPEAT_ID}' AND kind = 'tool_call' ORDER BY seq`);
+  const [second] = await readSteps({ doris, db }, { reads: { kind: 'step' } }, [{ session_id: REPEAT_ID, seq: Number(calls[1]!.parent_seq) }]);
+  assert.equal(second!.text, '<request>\nyes, go ahead\n</request>\n<step judged="true">\nCalled Bash: rm -rf build\nResult: ok\n</step>');
 });
 
 const lineage = async (judge: string, current: number) => {

@@ -8,7 +8,8 @@ import type { Scope } from '../../semantics/judges/statements.ts';
 import { AuthError } from '../auth/store.ts';
 
 export type RunStatus = 'queued' | 'running' | 'done' | 'stopped' | 'failed';
-export interface JudgeRecord { id: string; name: string; currentVersion: number; runsOnNew: boolean; createdAt: string; createdBy: string }
+/** A judge; `budget` is the budget of its runs, those for new sessions too. */
+export interface JudgeRecord { id: string; name: string; currentVersion: number; runsOnNew: boolean; budget: number; createdAt: string; createdBy: string }
 export interface RunRecord {
   id: number; judge: string; version: number; scope: Scope; status: RunStatus; budget: number; steps: number | null; judged: number;
   inputTokens: number; outputTokens: number; error: string | null; createdAt: string; createdBy: string; startedAt: string | null; finishedAt: string | null;
@@ -20,13 +21,16 @@ export const RUN_BUDGET = 2_000_000;
 export const QUIET_MINUTES = 10;
 
 const time = (col: string, as: string): string => `to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US') AS ${as}`;
-const JUDGE_COLS = `id, name, current_version, runs_on_new, ${time('created_at', 'created_at')}, created_by`;
+const JUDGE_COLS = `id, name, current_version, runs_on_new, budget, ${time('created_at', 'created_at')}, created_by`;
 const VERSION_COLS = `judge, version, name, pick, reads, criterion, model, ${time('created_at', 'created_at')}, created_by`;
 const RUN_COLS = `id, judge, version, scope, status, budget, steps, judged, input_tokens, output_tokens, error, ${time('created_at', 'created_at')}, created_by, `
   + `${time('started_at', 'started_at')}, ${time('finished_at', 'finished_at')}`;
 
 type Row = Record<string, unknown>;
-const judgeOf = (r: Row): JudgeRecord => ({ id: String(r.id), name: String(r.name), currentVersion: Number(r.current_version), runsOnNew: r.runs_on_new === true, createdAt: String(r.created_at), createdBy: String(r.created_by) });
+const judgeOf = (r: Row): JudgeRecord => ({
+  id: String(r.id), name: String(r.name), currentVersion: Number(r.current_version), runsOnNew: r.runs_on_new === true, budget: Number(r.budget),
+  createdAt: String(r.created_at), createdBy: String(r.created_by),
+});
 const versionOf = (r: Row): JudgeVersion => ({
   judge: String(r.judge), version: Number(r.version), name: String(r.name), pick: r.pick as Pick, reads: r.reads as Reads,
   criterion: String(r.criterion), model: String(r.model), createdAt: String(r.created_at), createdBy: String(r.created_by),
@@ -37,6 +41,10 @@ const runOf = (r: Row): RunRecord => ({
   error: r.error === null ? null : String(r.error), createdAt: String(r.created_at), createdBy: String(r.created_by),
   startedAt: r.started_at === null ? null : String(r.started_at), finishedAt: r.finished_at === null ? null : String(r.finished_at),
 });
+
+const OPEN_RUN = 'a run of this judge is already queued or running';
+/** A second open run of a judge breaks the unique index of open runs. */
+const isOpenRun = (e: unknown): boolean => (e as { code?: string; constraint?: string }).code === '23505' && (e as { constraint?: string }).constraint === 'judge_runs_one_open';
 
 /** The id of a judge: its name in lower case with dashes, and a random tail. */
 export function judgeId(name: string, tail: string): string {
@@ -72,7 +80,7 @@ export class JudgeStore {
   async create(d: JudgeDraft, by: string, budget = RUN_BUDGET): Promise<{ judge: JudgeRecord; run: RunRecord }> {
     const id = judgeId(d.name, this.tail());
     return this.inTransaction(async (c) => {
-      const judge = (await c.query(`INSERT INTO judges (id, name, current_version, runs_on_new, created_by) VALUES ($1, $2, 1, $3, $4) RETURNING ${JUDGE_COLS}`, [id, d.name, d.runsOnNew, by])).rows[0];
+      const judge = (await c.query(`INSERT INTO judges (id, name, current_version, runs_on_new, budget, created_by) VALUES ($1, $2, 1, $3, $4, $5) RETURNING ${JUDGE_COLS}`, [id, d.name, d.runsOnNew, budget, by])).rows[0];
       await c.query('INSERT INTO judge_versions (judge, version, name, pick, reads, criterion, model, created_by) VALUES ($1, 1, $2, $3, $4, $5, $6, $7)',
         [id, d.name, JSON.stringify(d.pick), JSON.stringify(d.reads), d.criterion, d.model, by]);
       const run = (await c.query(`INSERT INTO judge_runs (judge, version, scope, budget, created_by) VALUES ($1, 1, 'picked', $2, $3) RETURNING ${RUN_COLS}`, [id, budget, by])).rows[0];
@@ -98,12 +106,17 @@ export class JudgeStore {
     });
   }
 
-  /** A queued run of the judge's current version. */
-  async enqueue(id: string, scope: Scope, by: string, budget = RUN_BUDGET): Promise<RunRecord> {
-    const r = await this.pool.query(`INSERT INTO judge_runs (judge, version, scope, budget, created_by)
-      SELECT id, current_version, $2, $3, $4 FROM judges WHERE id = $1 RETURNING ${RUN_COLS}`, [id, scope, budget, by]);
-    if (!r.rows[0]) throw new AuthError(404, 'no such judge');
-    return runOf(r.rows[0]);
+  /** A queued run of the judge's current version, with the judge's budget unless another is given; refused while a run is open. */
+  async enqueue(id: string, scope: Scope, by: string, budget?: number): Promise<RunRecord> {
+    try {
+      const r = await this.pool.query(`INSERT INTO judge_runs (judge, version, scope, budget, created_by)
+        SELECT id, current_version, $2, coalesce($3, budget), $4 FROM judges WHERE id = $1 RETURNING ${RUN_COLS}`, [id, scope, budget ?? null, by]);
+      if (!r.rows[0]) throw new AuthError(404, 'no such judge');
+      return runOf(r.rows[0]);
+    } catch (e) {
+      if (isOpenRun(e)) throw new AuthError(409, OPEN_RUN);
+      throw e;
+    }
   }
 
   /** Every judge, newest first, with its current version and its last run. */
@@ -149,16 +162,22 @@ export class JudgeStore {
     return r.rows[0] ? runOf(r.rows[0]) : null;
   }
 
-  async started(runId: number, steps: number): Promise<void> {
-    await this.pool.query('UPDATE judge_runs SET steps = $2, heartbeat_at = now() WHERE id = $1', [runId, steps]);
+  // A run is written only by the runner that holds it: false means another runner has taken it.
+
+  async started(runId: number, runner: string, steps: number): Promise<boolean> {
+    const r = await this.pool.query("UPDATE judge_runs SET steps = $3, heartbeat_at = now() WHERE id = $1 AND runner = $2 AND status = 'running'", [runId, runner, steps]);
+    return r.rowCount === 1;
   }
 
   /** How far a run has come, in totals; also tells the queue the runner is alive. */
-  async progress(runId: number, judged: number, inputTokens: number, outputTokens: number): Promise<void> {
-    await this.pool.query('UPDATE judge_runs SET judged = $2, input_tokens = $3, output_tokens = $4, heartbeat_at = now() WHERE id = $1', [runId, judged, inputTokens, outputTokens]);
+  async progress(runId: number, runner: string, judged: number, inputTokens: number, outputTokens: number): Promise<boolean> {
+    const r = await this.pool.query("UPDATE judge_runs SET judged = $3, input_tokens = $4, output_tokens = $5, heartbeat_at = now() WHERE id = $1 AND runner = $2 AND status = 'running'",
+      [runId, runner, judged, inputTokens, outputTokens]);
+    return r.rowCount === 1;
   }
 
-  async finish(runId: number, status: Exclude<RunStatus, 'queued' | 'running'>, error: string | null = null): Promise<void> {
-    await this.pool.query('UPDATE judge_runs SET status = $2, error = $3, finished_at = now() WHERE id = $1', [runId, status, error]);
+  async finish(runId: number, runner: string, status: Exclude<RunStatus, 'queued' | 'running'>, error: string | null = null): Promise<boolean> {
+    const r = await this.pool.query("UPDATE judge_runs SET status = $3, error = $4, finished_at = now() WHERE id = $1 AND runner = $2 AND status = 'running'", [runId, runner, status, error]);
+    return r.rowCount === 1;
   }
 }

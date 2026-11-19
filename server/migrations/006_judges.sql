@@ -5,6 +5,7 @@ CREATE TABLE judges (
   name            TEXT        NOT NULL,
   current_version INT         NOT NULL,
   runs_on_new     BOOLEAN     NOT NULL DEFAULT false,
+  budget          BIGINT      NOT NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_by      TEXT        NOT NULL
 );
@@ -28,7 +29,7 @@ CREATE TABLE judge_runs (
   id            BIGSERIAL   PRIMARY KEY,
   judge         TEXT        NOT NULL REFERENCES judges (id) ON DELETE CASCADE,
   version       INT         NOT NULL,
-  scope         TEXT        NOT NULL CHECK (scope IN ('picked', 'new', 'stale', 'stale-violating')),
+  scope         TEXT        NOT NULL CHECK (scope IN ('picked', 'new', 'stale', 'stale-violating', 'failed')),
   status        TEXT        NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'done', 'stopped', 'failed')),
   budget        BIGINT      NOT NULL,
   steps         INT,
@@ -45,3 +46,5 @@ CREATE TABLE judge_runs (
 );
 
 CREATE INDEX judge_runs_open ON judge_runs (id) WHERE status IN ('queued', 'running');
+-- A judge has at most one open run, so two runners never judge its steps at the same time.
+CREATE UNIQUE INDEX judge_runs_one_open ON judge_runs (judge) WHERE status IN ('queued', 'running');

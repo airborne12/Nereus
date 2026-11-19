@@ -43,8 +43,7 @@ import { type IngestLimits, IngestKeys, rumRoutes } from './rum/http.ts';
 import { agentRoutes } from './api/agents/routes.ts';
 import type { JudgeAccess } from './api/agents/judges.ts';
 import { JudgeStore } from './control/judges/store.ts';
-import { claudeJudge } from './semantics/judges/model.ts';
-import Anthropic from '@anthropic-ai/sdk';
+import { claudeClient, claudeJudge } from './semantics/judges/model.ts';
 import { AuthError, AuthStore } from './control/auth/store.ts';
 import { metaPoolFromEnv, migrate } from './db/meta.ts';
 
@@ -311,7 +310,7 @@ if (import.meta.main) {
   const db = process.env.DORIS_DB ?? 'otel';
   new AlertRunner({ store: content, doris, sources: sourcesFor(db), baseUrl: process.env.PUBLIC_URL ?? null }).start();
   // The model's key comes from the environment (ANTHROPIC_API_KEY), as the SDK reads it.
-  const judges = { store: new JudgeStore(meta), model: claudeJudge(new Anthropic()) };
+  const judges = { store: new JudgeStore(meta), model: claudeJudge(claudeClient()) };
   createApp({ doris, db, auth, content, ingestKeys: new IngestKeys(meta), webDir, judges }).listen(port, () => {
     console.log(`nereus server listening on :${port}`);
   });

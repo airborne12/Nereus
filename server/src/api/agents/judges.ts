@@ -12,7 +12,7 @@ import { type JudgeVersion, parseDraft, pickText, readsText } from '../../semant
 import { type JudgeModel, ModelAccessError } from '../../semantics/judges/model.ts';
 import { estimateTokens } from '../../semantics/judges/prompt.ts';
 import { judgeExcerpts, readSteps } from '../../semantics/judges/runner.ts';
-import { countSql, lineageSql, readsSql, sampleSql } from '../../semantics/judges/statements.ts';
+import { countSql, lineageSql, readsSql, sampleSql, type Scope } from '../../semantics/judges/statements.ts';
 import { judgesSql, verdictSql, verdictsSql, type View } from '../../semantics/judges/views.ts';
 import { parsed, run, type Send } from './request.ts';
 
@@ -40,8 +40,11 @@ function budgetOf(raw: unknown): number | undefined {
 
 const counted = (r: Record<string, unknown> | undefined) => ({
   judged: Number(r?.judged ?? 0), violations: Number(r?.violations ?? 0), sessions: Number(r?.sessions ?? 0),
-  stale: Number(r?.stale ?? 0), staleViolating: Number(r?.stale_violating ?? 0), tokensPerStep: Number(r?.tokens_per_step ?? 0),
+  stale: Number(r?.stale ?? 0), staleViolating: Number(r?.stale_violating ?? 0), tokensPerStep: Number(r?.tokens_per_step ?? 0), failed: Number(r?.failed ?? 0),
 });
+
+/** What a rerun judges: out-of-date verdicts, the violating ones among them, steps no run has judged yet, or steps whose model call failed. */
+const RERUNS: Record<string, Scope> = { all: 'stale', violates: 'stale-violating', unjudged: 'picked', failed: 'failed' };
 
 async function list(d: Deps, j: JudgeAccess, res: ServerResponse): Promise<void> {
   const all = await j.store.overview();
@@ -103,7 +106,7 @@ async function preview(d: Deps, j: JudgeAccess, req: IncomingMessage, res: Serve
   let verdicts: { verdict: string; reason: string }[] = [];
   if (trying) {
     try {
-      verdicts = await judgeExcerpts(j, v, excerpts);
+      verdicts = (await judgeExcerpts(j, v, excerpts)).rows;
     } catch (e) {
       if (e instanceof ModelAccessError) return d.send(res, 503, { error: e.message });
       return d.send(res, 502, { error: `The model could not be used: ${(e as Error).message}` });
@@ -127,8 +130,9 @@ async function write(d: Deps, j: JudgeAccess, req: IncomingMessage, res: ServerR
     const version = await j.store.addVersion(id, { criterion: String(body.criterion ?? ''), model: String(body.model ?? '') }, by);
     return d.send(res, 201, { version });
   }
-  if (body.only !== 'all' && body.only !== 'violates') throw new CompileError("'only' must be all or violates");
-  const queued = await j.store.enqueue(id, body.only === 'violates' ? 'stale-violating' : 'stale', by, budgetOf(body.budget));
+  const scope = RERUNS[String(body.only)];
+  if (!scope) throw new CompileError("'only' must be all, violates, unjudged or failed");
+  const queued = await j.store.enqueue(id, scope, by, budgetOf(body.budget));
   d.send(res, 201, { run: queued });
 }
 

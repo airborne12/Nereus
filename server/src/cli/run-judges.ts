@@ -8,13 +8,12 @@
 // (ANTHROPIC_API_KEY). A run that fails is named and the command exits with 1.
 
 import { hostname } from 'node:os';
-import Anthropic from '@anthropic-ai/sdk';
 import { JudgeStore } from '../control/judges/store.ts';
 import { Doris, configFromEnv } from '../db/doris.ts';
 import { metaPoolFromEnv, migrate } from '../db/meta.ts';
 import { streamLoad, streamLoadConfigFromEnv } from '../db/stream-load.ts';
 import { type RunReport, runJudges } from '../jobs/judges.ts';
-import { claudeJudge } from '../semantics/judges/model.ts';
+import { claudeClient, claudeJudge } from '../semantics/judges/model.ts';
 
 /** What the command prints: one line, then one line per run that did not finish. */
 export function summary(report: { queued: number; runs: readonly RunReport[] }): string[] {
@@ -36,7 +35,7 @@ if (import.meta.main) {
     await migrate(pool);
     const cfg = streamLoadConfigFromEnv();
     const report = await runJudges({
-      doris, db, load: (t, l, r) => streamLoad(cfg, db, t, l, r), store: new JudgeStore(pool), model: claudeJudge(new Anthropic()), runner: `${hostname()}-${process.pid}`,
+      doris, db, load: (t, l, r) => streamLoad(cfg, db, t, l, r), store: new JudgeStore(pool), model: claudeJudge(claudeClient()), runner: `${hostname()}-${process.pid}`,
     });
     const [head, ...problems] = summary(report);
     console.log(head);

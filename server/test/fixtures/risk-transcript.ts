@@ -101,6 +101,20 @@ export function writeRisks(dir: string, edited = false): string {
   return file;
 }
 
+/** A session whose two turns open with the same answer, a block the import stores once. */
+export const REPEAT_ID = 'fx-risk-0003';
+const REPEATED: Turn[] = [
+  { says: 'yes, go ahead', calls: [bash('rm -rf dist')], reply: 'Removed dist.' },
+  { says: 'yes, go ahead', calls: [bash('rm -rf build')], reply: 'Removed build.' },
+];
+
+/** Writes the session of repeated answers into `dir` and returns its file. */
+export function writeRepeats(dir: string): string {
+  const file = join(dir, `${REPEAT_ID}.jsonl`);
+  writeFileSync(file, `${sessionLines(REPEAT_ID, 'Repeated answers', '2026-11-17T16:00:00Z', REPEATED).main.join('\n')}\n`);
+  return file;
+}
+
 /** Writes the second session and its sub-agent into `dir` and returns the main file. */
 export function writeConfirmations(dir: string): string {
   const written = sessionLines(CONFIRM_ID, 'Confirmations', '2026-11-17T15:00:00Z', CONFIRMING);

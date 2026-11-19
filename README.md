@@ -293,20 +293,28 @@ Judges, their versions and their runs are kept in PostgreSQL (`judges`, `judge_v
 version that made them, and the runs copy each version to `agent_judges`. Saving a judge queues a
 run of the steps it picks. Changing its criterion or model saves a new version and judges nothing:
 the verdicts of older versions are out of date until a rerun, of all of them or only of the
-violating ones. A judge can follow new sessions: each run of the command then queues a run of the
-steps it has not judged yet. Runs are taken by a command:
+violating ones. A rerun can also judge the steps a stopped or failed run left, or judge again the
+steps whose model call failed. A judge can follow new sessions: each run of the command then
+queues a run of the steps it has not judged yet, with the budget the judge was saved with. Runs
+are taken by a command:
 
     cd server
     DORIS_HOST=127.0.0.1 DORIS_PORT=9030 DORIS_DB=otel DORIS_BE_HTTP_URL=http://127.0.0.1:8040 \
       META_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/nereus ANTHROPIC_API_KEY=... node src/cli/run-judges.ts
 
 The key is read by the Anthropic SDK from the environment of the command and of the API service,
-which uses it for a try on a few steps. A run stops before it would go over its budget of input
-tokens (2,000,000 unless the request gives another). A call that still fails after the SDK's
-retries gives an `unsure` verdict that says why; a key, permission or model that is wrong fails the
-run. For one step the model reads at most 40,000 characters, each block cut at 2,000, and the
-record is marked as data, not instructions. Saving, changing, rerunning and trying judges are for
-admins. `npm test` skips the one test that calls the real model unless `MODEL_TEST=1`.
+which uses it for a try on a few steps. The model is called four steps at a time, and a run stops
+before such a chunk would take it over its budget of input tokens (2,000,000 unless the request
+gives another), estimated from the text and from what calls have taken so far. A call that still
+fails after the SDK's retries gives an `unsure` verdict that says why; a key, permission or model
+that is wrong fails the run, and so does a chunk of calls none of which reached the model. A call
+ends within about three minutes (60 s an attempt, two retries), well within the ten quiet minutes
+after which another runner may take a run over; a judge has at most one open run, and only the
+runner that holds a run writes to it. For one step the model reads at most 40,000 characters, each
+block cut at 2,000, with the arguments of a call when they say more than its target. The record
+is marked as data, not instructions, and its text is escaped so that it cannot open or close the
+record's own tags. Saving, changing, rerunning and trying judges are for admins. `npm test` skips
+the one test that calls the real model unless `MODEL_TEST=1`.
 
 ### Agent trajectory API
 
@@ -334,7 +342,7 @@ query error answers 400.
 | `GET /api/agents/judges/<id>/steps/<session>/<seq>` | Every verdict the judge gave one step, newest version first, and what the model reads for it now |
 | `POST /api/agents/judges/preview` | For a draft `{pick, reads, criterion, model}`: how many steps and sessions it picks, five of them spread over the picked steps with what the model reads, and the estimated input tokens of a run; with `try: true` (admins) the model judges the five, and nothing is stored |
 | `POST /api/agents/judges` | Saves a judge `{name, pick, reads, criterion, model, runsOnNew, budget?}` as version 1 and queues a run (admins) |
-| `POST /api/agents/judges/<id>/versions`, `POST /api/agents/judges/<id>/reruns` | A new version `{criterion, model}`, which judges nothing; a rerun `{only: all\|violates, budget?}` of the out-of-date verdicts (admins) |
+| `POST /api/agents/judges/<id>/versions`, `POST /api/agents/judges/<id>/reruns` | A new version `{criterion, model}`, which judges nothing; a rerun `{only, budget?}` (admins): `all` or `violates` for the out-of-date verdicts, `unjudged` for the steps no run of the current version has judged, `failed` for those whose model call failed. A rerun while a run of the judge is open answers 409 |
 
 `agent_sessions`, `agent_events`, `agent_messages` and `agent_risks` are also sources of search, charts and alerts
 (`/api/search?source=agent_messages&q=role:assistant AND timeout`).

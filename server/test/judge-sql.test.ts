@@ -38,6 +38,8 @@ test('a run sends the picked steps without a verdict of its version, oldest firs
   assert.match(s, /LEFT JOIN \(SELECT DISTINCT session_id, seq FROM otel\.agent_judgments WHERE judge = 'edits-1a2b3c' AND judge_version = 3\) d ON d\.session_id = p\.session_id AND d\.seq = p\.seq\nWHERE d\.seq IS NULL\nORDER BY p\.ts, p\.session_id, p\.seq$/);
   // New sessions: the picked steps without any verdict of the judge.
   assert.match(subjectsSql('otel', V, 'new').sql, /WHERE judge = 'edits-1a2b3c'\) d ON/);
+  // Steps whose model call failed under this version, to be judged again.
+  assert.match(subjectsSql('otel', V, 'failed').sql, /JOIN \(SELECT DISTINCT session_id, seq FROM otel\.agent_judgments WHERE judge = 'edits-1a2b3c' AND judge_version = 3 AND verdict = 'unsure' AND input_tokens = 0\) f ON f\.session_id = p\.session_id AND f\.seq = p\.seq\nORDER BY/);
   // A rerun: the steps whose latest verdict an older version made; or only the violating ones.
   const stale = subjectsSql('otel', V, 'stale').sql;
   assert.ok(stale.includes(latestCte('otel', V.judge)));
@@ -58,12 +60,15 @@ test('the latest verdict of each step and the counts of a judge', () => {
     `WITH ${latestCte('otel', 'j1')},`,
     'spent AS (',
     "  SELECT round(avg(input_tokens)) AS per_step FROM otel.agent_judgments WHERE judge = 'j1' AND input_tokens > 0",
+    '),',
+    'broken AS (',
+    "  SELECT count(*) AS n FROM otel.agent_judgments WHERE judge = 'j1' AND judge_version = 2 AND verdict = 'unsure' AND input_tokens = 0",
     ')',
     "SELECT count(*) AS judged, sum(if(verdict = 'violates', 1, 0)) AS violations,",
     "       count(DISTINCT if(verdict = 'violates', session_id, NULL)) AS sessions,",
     "       sum(if(made_by < 2, 1, 0)) AS stale, sum(if(made_by < 2 AND verdict = 'violates', 1, 0)) AS stale_violating,",
-    '       max(spent.per_step) AS tokens_per_step',
-    'FROM latest, spent',
+    '       max(spent.per_step) AS tokens_per_step, max(broken.n) AS failed',
+    'FROM latest, spent, broken',
   ].join('\n'));
 });
 
@@ -72,7 +77,10 @@ test('what the model reads: the request of the turn and the steps near the judge
   const s = readsSql('otel', { kind: 'before', n: 3 }, steps).sql;
   assert.match(s, /WHERE j\.kind = 'llm_call' AND \(\(j\.session_id = 's-1' AND j\.seq = 21\) OR \(j\.session_id = 's-2' AND j\.seq = 7\)\)/);
   assert.match(s, /JOIN otel\.agent_events e ON e\.session_id = j\.session_id AND e\.turn = j\.turn\n {2}WHERE e\.kind = 'user_input' OR \(e\.kind IN \('llm_call', 'tool_call'\) AND e\.step BETWEEN j\.step - 3 AND j\.step\)/);
-  assert.match(s, /LEFT JOIN otel\.agent_messages m ON m\.session_id = r\.session_id AND m\.event_seq = r\.seq AND m\.kind IN \('text', 'tool_result'\)/);
+  // A repeated text is stored once, under the first event that said it: the event also names its blocks.
+  assert.match(s, /e\.msg_seq, e\.result_msg, CAST\(e\.args AS STRING\) AS args/);
+  assert.match(s, /LEFT JOIN otel\.agent_messages m ON m\.session_id = r\.session_id AND m\.kind IN \('text', 'tool_result'\)\n {2}AND \(m\.event_seq = r\.seq OR m\.msg_seq = r\.msg_seq OR m\.msg_seq = r\.result_msg\)/);
+  assert.match(s, /left\(r\.args, 2000\) AS args/);
   assert.match(s, /left\(m\.text, 2000\) AS text/);
   assert.match(s, /ORDER BY r\.session_id, r\.judged, r\.seq, m\.msg_seq$/);
   assert.match(readsSql('otel', { kind: 'step' }, steps).sql, /AND e\.step = j\.step\)/);

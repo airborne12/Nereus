@@ -25,7 +25,7 @@ function doris() {
     query: async (sql: string) => {
       seen.push(sql);
       if (sql.includes('AS last_judged')) return [{ judge: JUDGE.id, judged: 40, violations: 6, sessions: 3, stale: 40, last_judged: '2026-11-19 09:30:00' }];
-      if (sql.includes('AS tokens_per_step')) return [{ judged: 40, violations: 6, sessions: 3, stale: 40, stale_violating: 6, tokens_per_step: 950 }];
+      if (sql.includes('AS tokens_per_step')) return [{ judged: 40, violations: 6, sessions: 3, stale: 40, stale_violating: 6, tokens_per_step: 950, failed: 2 }];
       if (sql.includes('tools_of AS')) return [{ ts: '2026-11-18 10:00:00', session_id: 's-1', seq: 21, step: 10, title: 'Fix clock', calls: 'Edit tests/a_test.py', verdict: 'violates', made_by: 1, stale: 1, reason: 'fitted', violations: 2, was: null, was_version: null }];
       if (sql.startsWith('SELECT judge_version')) return [{ judge_version: 1, verdict: 'violates', reason: 'fitted', model: 'claude-haiku-5-5', input_seqs: '[20,21,22]', input_tokens: 900, output_tokens: 30, judged_at: '2026-11-18 11:00:00' }];
       if (sql.includes('AS steps, count(DISTINCT session_id) AS sessions')) return [{ steps: 120, sessions: 9 }];
@@ -77,7 +77,7 @@ test('a judge in a view: versions, runs, counts with the rerun estimate, and the
   await c.done;
   const b = c.answers[0]!.body;
   assert.deepEqual([b.view, b.versions.length, b.runs.length, b.counts, b.rows[0].calls, b.sql.map((s: any) => s.title)],
-    ['all', 2, 1, { judged: 40, violations: 6, sessions: 3, stale: 40, staleViolating: 6, tokensPerStep: 950 }, 'Edit tests/a_test.py', ['Verdicts', 'All verdicts']]);
+    ['all', 2, 1, { judged: 40, violations: 6, sessions: 3, stale: 40, staleViolating: 6, tokensPerStep: 950, failed: 2 }, 'Edit tests/a_test.py', ['Verdicts', 'All verdicts']]);
   assert.equal(b.readsText, "the user's request of the turn, and the 3 steps before the judged one");
   const missing = call({ d, s: store().s }, 'GET', '/api/agents/judges/no-such-judge', MEMBER);
   await missing.done;
@@ -126,9 +126,13 @@ test('admins save a judge, a version or a rerun; members may not', async () => {
   await call({ d, s }, 'POST', `/api/agents/judges/${JUDGE.id}/versions`, ADMIN, { criterion: 'Is it cut?', model: 'claude-sonnet-5-5' }).done;
   await call({ d, s }, 'POST', `/api/agents/judges/${JUDGE.id}/reruns`, ADMIN, { only: 'violates' }).done;
   await call({ d, s }, 'POST', `/api/agents/judges/${JUDGE.id}/reruns`, ADMIN, { only: 'all', budget: 9000 }).done;
-  await assert.rejects(call({ d, s }, 'POST', `/api/agents/judges/${JUDGE.id}/reruns`, ADMIN, { only: 'some' }).done, /'only' must be all or violates/);
+  // The steps a stopped or failed run left, and the steps whose model call failed, can be judged again.
+  await call({ d, s }, 'POST', `/api/agents/judges/${JUDGE.id}/reruns`, ADMIN, { only: 'unjudged' }).done;
+  await call({ d, s }, 'POST', `/api/agents/judges/${JUDGE.id}/reruns`, ADMIN, { only: 'failed' }).done;
+  await assert.rejects(call({ d, s }, 'POST', `/api/agents/judges/${JUDGE.id}/reruns`, ADMIN, { only: 'some' }).done, /'only' must be all, violates, unjudged or failed/);
   assert.deepEqual(calls.map((x) => x.replace(/\{.*\}/, '{…}')), [
     'create {…} ada@example.com 50000', `version ${JUDGE.id} {…} ada@example.com`, `enqueue ${JUDGE.id} stale-violating ada@example.com undefined`, `enqueue ${JUDGE.id} stale ada@example.com 9000`,
+    `enqueue ${JUDGE.id} picked ada@example.com undefined`, `enqueue ${JUDGE.id} failed ada@example.com undefined`,
   ]);
   assert.match(calls[0]!, /"criterion":"Does this step run a command that cannot be undone/);
 });
