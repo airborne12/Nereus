@@ -27,7 +27,7 @@ const EVIDENCE = new Set<string>(['supports', 'conflicts', 'none']);
 const STATES = new Set<string>(['holds', 'doubt', 'outdated']);
 const MAX_TOKENS = 4096;
 
-function updateOf(text: string): Pick<FoldAnswer, 'evidence' | 'state' | 'reason'> | null {
+export function updateOf(text: string): Pick<FoldAnswer, 'evidence' | 'state' | 'reason'> | null {
   try {
     const v = JSON.parse(text) as Record<string, unknown>;
     if (typeof v.evidence !== 'string' || typeof v.state !== 'string' || typeof v.reason !== 'string') return null;

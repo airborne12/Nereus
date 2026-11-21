@@ -143,3 +143,12 @@ test('a budget of 0 turns the pass off', async () => {
   const quiet = { query: async () => { throw new Error('nothing should be read'); } } as unknown as Doris;
   assert.deepEqual(await judgeMemories({ doris: quiet, db: 'otel', load: loader().load, model: model().m, leases: leases().store, budget: 0 }), { judged: 0, stopped: false, held: 0, failed: [], missed: null, unanswered: null });
 });
+
+test('with a model given, the fold asks it and records it on the judge and on each update', async () => {
+  const { load, loads } = loader();
+  const asked: string[] = [];
+  const watching: FoldModel = { fold: async (m, s, t) => { asked.push(m); return model().m.fold(m, s, t); } };
+  await judgeMemories({ doris: doris().d, db: 'otel', load, model: watching, leases: leases().store, now: NOW, judgeModel: 'gemini-3.5-flash' });
+  assert.deepEqual([...new Set(asked)], ['gemini-3.5-flash']);
+  assert.deepEqual([...new Set(loads.flatMap((l) => l.rows.map((r) => r.model)))], ['gemini-3.5-flash']);
+});

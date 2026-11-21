@@ -127,3 +127,12 @@ test('a budget of 0 skips the pass: no lease, no judge published, nothing read',
   assert.deepEqual(await judgeRisks({ doris: quiet, db: 'otel', load, model: breach, leases: store, budget: 0 }), NOTHING);
   assert.deepEqual([log, loads], [[], []]);
 });
+
+test('with a model given, every judge asks it and records it', async () => {
+  const asked: string[] = [];
+  const watching: JudgeModel = { judge: async (m, c, x, s) => { asked.push(m); return breach.judge(m, c, x, s); } };
+  const { load, loads } = loader();
+  await judgeRisks({ doris: doris(), db: 'otel', load, model: watching, leases: leases().store, judgeModel: 'gemini-3.5-flash' });
+  assert.deepEqual([...new Set(asked)], ['gemini-3.5-flash']);
+  assert.deepEqual([...new Set(loads.flatMap((l) => l.rows.map((r) => r.model)))], ['gemini-3.5-flash']);
+});

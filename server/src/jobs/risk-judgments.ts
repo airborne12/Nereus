@@ -22,6 +22,8 @@ export const RISK_BUDGET = 200_000;
 export interface RiskJudgeDeps {
   doris: Doris; db: string; load: Load; model: JudgeModel; leases: LeaseStore;
   budget?: number; batch?: number; concurrency?: number; now?: () => Date;
+  /** The model every rule's judge uses instead of the one it has in code. */
+  judgeModel?: string;
 }
 /** A judge whose judging failed, by its rule, and why. */
 export interface RiskFailed { rule: string; error: string }
@@ -97,7 +99,7 @@ async function openJudges(deps: RiskJudgeDeps): Promise<{ taken: RiskJudge[]; op
   let taken: RiskJudge[] = [];
   let open: Open[] = [];
   let report = EMPTY;
-  for (const j of RISK_JUDGES) {
+  for (const j of RISK_JUDGES.map((r) => (deps.judgeModel ? { ...r, model: deps.judgeModel } : r))) {
     if (!(await renew(deps, j))) {
       report = { ...report, held: report.held + 1 };
       continue;

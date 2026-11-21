@@ -24,7 +24,7 @@ const CALL_RETRIES = 2;
 export const claudeClient = (options: ConstructorParameters<typeof Anthropic>[0] = {}): Anthropic =>
   new Anthropic({ timeout: CALL_TIMEOUT_MS, maxRetries: CALL_RETRIES, ...options });
 
-function verdictOf(text: string): { verdict: Verdict; reason: string } | null {
+export function verdictOf(text: string): { verdict: Verdict; reason: string } | null {
   try {
     const v = JSON.parse(text) as Record<string, unknown>;
     return typeof v.verdict === 'string' && VERDICTS.has(v.verdict) && typeof v.reason === 'string' ? { verdict: v.verdict as Verdict, reason: v.reason } : null;

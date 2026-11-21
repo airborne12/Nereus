@@ -43,9 +43,9 @@ test('a pick and what the model reads, in words', () => {
   assert.equal(readsText({ kind: 'turn' }), "the user's request and the steps of the turn up to the judged one, at most 30 before it");
 });
 
-test('two templates, two models, and the subject of a step', () => {
+test('two templates, the models of both providers, and the subject of a step', () => {
   assert.deepEqual(Object.keys(TEMPLATES), ['test', 'confirm']);
   assert.ok(Object.values(TEMPLATES).every((t) => parseDraft(t).name === t.name));
-  assert.deepEqual([...MODELS], ['claude-haiku-5-5', 'claude-sonnet-5-5']);
+  assert.deepEqual([...MODELS], ['claude-haiku-5-5', 'claude-sonnet-5-5', 'gemini-3.5-flash']);
   assert.equal(subjectOf('s-1', 42), 's-1:42');
 });

@@ -503,7 +503,10 @@ follows new sessions.
 A model call that fails is retried with backoff; after the last attempt the step gets `unsure`
 with the error as reason. Every run records its token counts. The default model is
 `claude-haiku-5-5`. As built, the key is not kept in PostgreSQL: the Anthropic SDK reads it from
-the environment of the command and of the API service.
+the environment of the command and of the API service. A model named `gemini-*` (`gemini-3.5-flash`)
+is called on the Gemini API with `GEMINI_API_KEY` from the same environment, through the same
+JSON schemas and the same rules for retries and for a model that cannot be used; `JUDGE_MODEL`
+names the model of the judges kept in code (risk judges, validity fold).
 
 Memory adapters: Claude Code auto memory (`~/.claude/projects/*/memory/*.md`: frontmatter `name`,
 `description`, `metadata.type`, `originSessionId`, `modified`; `MEMORY.md` is the index and not a

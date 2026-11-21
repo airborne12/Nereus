@@ -152,7 +152,7 @@ test('the templates and models a new judge starts from', async () => {
   const c = call({ d: doris().d, s: store().s }, 'GET', '/api/agents/judges/templates', MEMBER);
   await c.done;
   const b = c.answers[0]!.body;
-  assert.deepEqual([Object.keys(b.templates), b.models, b.defaultModel, b.budget], [['test', 'confirm'], ['claude-haiku-5-5', 'claude-sonnet-5-5'], 'claude-haiku-5-5', 2_000_000]);
+  assert.deepEqual([Object.keys(b.templates), b.models, b.defaultModel, b.budget], [['test', 'confirm'], ['claude-haiku-5-5', 'claude-sonnet-5-5', 'gemini-3.5-flash'], 'claude-haiku-5-5', 2_000_000]);
   assert.equal(b.templates.confirm.pick.tool, 'Bash');
 });
 

@@ -13,7 +13,7 @@ export interface JudgeDraft { name: string; pick: Pick; reads: Reads; criterion:
 export interface JudgeVersion { judge: string; version: number; name: string; pick: Pick; reads: Reads; criterion: string; model: string; createdAt: string; createdBy: string }
 export type Verdict = 'violates' | 'ok' | 'unsure';
 
-export const MODELS = ['claude-haiku-5-5', 'claude-sonnet-5-5'] as const;
+export const MODELS = ['claude-haiku-5-5', 'claude-sonnet-5-5', 'gemini-3.5-flash'] as const;
 export const DEFAULT_MODEL = 'claude-haiku-5-5';
 /** The most steps a judge reads before the judged one. */
 export const MAX_BEFORE = 10;
