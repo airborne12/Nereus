@@ -503,7 +503,11 @@ follows new sessions.
 A model call that fails is retried with backoff; after the last attempt the step gets `unsure`
 with the error as reason. Every run records its token counts. The default model is
 `claude-haiku-5-5`. As built, the key is not kept in PostgreSQL: the Anthropic SDK reads it from
-the environment of the command and of the API service.
+the environment of the command and of the API service. A model named `gemini-*` (`gemini-3.5-flash`)
+is called on the Gemini API with `GEMINI_API_KEY` from the same environment, through the same
+JSON schemas and the same rules for retries and for a model that cannot be used; `JUDGE_MODEL`
+names the model of the judges kept in code (risk judges, validity fold) for the judgments made from
+then on; each judgment row records its model, and the judge's version row keeps the model in code.
 
 Memory adapters: Claude Code auto memory (`~/.claude/projects/*/memory/*.md`: frontmatter `name`,
 `description`, `metadata.type`, `originSessionId`, `modified`; `MEMORY.md` is the index and not a
@@ -917,7 +921,7 @@ web/src/
 Developed and tested on a Doris master build from commit
 `9fb3e3a2a13f972a62cb999d5599fc8e8f17f306` (2026-11-10). Tests take the Doris address from
 `DORIS_HOST`, `DORIS_PORT`, `DORIS_USER`, `DORIS_PASSWORD` and `DORIS_BE_HTTP_URL`, as today. Model
-calls in tests go to a stub; one opt-in suite calls the real model.
+calls in tests go to a stub; two opt-in suites call the real models (Claude and Gemini).
 
 Remaining for sub-project 0: a container image of the pinned commit, the Compose default switched
 to it, and the existing Nereus test suites run on it with the differences recorded.

@@ -5,8 +5,9 @@
 //
 //   node src/cli/run-judges.ts
 //
-// The model is reached through the Anthropic SDK, which takes its key from the environment
-// (ANTHROPIC_API_KEY). RISK_JUDGE_BUDGET and MEMORY_JUDGE_BUDGET cap the input tokens of the risk
+// A model named gemini-* is reached with GEMINI_API_KEY, any other through the Anthropic SDK
+// (ANTHROPIC_API_KEY). JUDGE_MODEL names the model of the judges kept in code (the risk judges and
+// the validity fold). RISK_JUDGE_BUDGET and MEMORY_JUDGE_BUDGET cap the input tokens of the risk
 // pass and of the memory pass; 0 skips one. A run, a risk judge or a memory that fails is named and
 // the command exits with 1.
 
@@ -19,8 +20,8 @@ import { type RunReport, runJudges } from '../jobs/judges.ts';
 import { Leases } from '../jobs/leases.ts';
 import { judgeRisks, type Missed, RISK_BUDGET, type RiskReport } from '../jobs/risk-judgments.ts';
 import { judgeMemories, VALIDITY_BUDGET, type ValidityReport } from '../jobs/validity.ts';
-import { claudeFold } from '../semantics/judges/fold-model.ts';
-import { claudeClient, claudeJudge } from '../semantics/judges/model.ts';
+import { MODELS } from '../semantics/judges/judge.ts';
+import { modelsFromEnv } from '../semantics/judges/providers.ts';
 
 /** A budget of input tokens from the environment variable `name`, or `fallback` when it is not set. */
 function envBudget(env: Record<string, string | undefined>, name: string, fallback: number): number {
@@ -34,6 +35,14 @@ function envBudget(env: Record<string, string | undefined>, name: string, fallba
 export const riskBudget = (env: Record<string, string | undefined>): number => envBudget(env, 'RISK_JUDGE_BUDGET', RISK_BUDGET);
 /** The input tokens the memory pass may spend, from MEMORY_JUDGE_BUDGET. */
 export const memoryBudget = (env: Record<string, string | undefined>): number => envBudget(env, 'MEMORY_JUDGE_BUDGET', VALIDITY_BUDGET);
+
+/** The model of the judges kept in code, from JUDGE_MODEL; unset keeps the model each has in code. */
+export function judgeModelOf(env: Record<string, string | undefined>): string | undefined {
+  const raw = env.JUDGE_MODEL;
+  if (raw === undefined) return undefined;
+  if (!(MODELS as readonly string[]).includes(raw)) throw new Error(`JUDGE_MODEL must be one of ${MODELS.join(', ')}`);
+  return raw;
+}
 
 const missedLine = (what: string, m: Missed | null | undefined): string[] =>
   m ? [`${m.calls} ${what} call(s) did not reach the model and will be tried again on the next pass: ${m.reason}`] : [];
@@ -75,14 +84,14 @@ if (import.meta.main) {
     };
     const budget = riskBudget(process.env);
     const memBudget = memoryBudget(process.env);
+    const judgeModel = judgeModelOf(process.env);
     await migrate(pool);
     const cfg = streamLoadConfigFromEnv();
     const load = (t: string, l: string, r: readonly object[]) => streamLoad(cfg, db, t, l, r);
-    const client = claudeClient();
-    const model = claudeJudge(client);
-    const report = await runJudges({ doris, db, load, store: new JudgeStore(pool), model, runner: `${hostname()}-${process.pid}` });
-    const risks = await judgeRisks({ doris, db, load, model, leases: new Leases(pool), budget });
-    const memories = await judgeMemories({ doris, db, load, model: claudeFold(client), leases: new Leases(pool), budget: memBudget });
+    const models = modelsFromEnv(process.env);
+    const report = await runJudges({ doris, db, load, store: new JudgeStore(pool), model: models.judge, runner: `${hostname()}-${process.pid}` });
+    const risks = await judgeRisks({ doris, db, load, model: models.judge, leases: new Leases(pool), budget, judgeModel });
+    const memories = await judgeMemories({ doris, db, load, model: models.fold, leases: new Leases(pool), budget: memBudget, judgeModel });
     const [head, ...problems] = summary({ ...report, risks, memories }, budget, memBudget);
     console.log(head);
     for (const p of problems) console.error(p);

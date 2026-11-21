@@ -20,7 +20,8 @@ export const VALIDITY_BUDGET = 100_000;
 /** A session quiet this long is taken to have finished its last turn. */
 const QUIET_MS = 10 * 60_000;
 
-export interface ValidityDeps { doris: Doris; db: string; load: Load; model: FoldModel; leases: LeaseStore; budget?: number; now?: () => Date }
+/** `judgeModel` is the model the fold's calls use instead of the one it has in code; the judge's version keeps that one. */
+export interface ValidityDeps { doris: Doris; db: string; load: Load; model: FoldModel; leases: LeaseStore; budget?: number; now?: () => Date; judgeModel?: string }
 /** A memory whose judging failed, by its agent, scope and name, and why. */
 export interface ValidityFailed { memory: string; error: string }
 /** What a pass did; `missed` calls did not reach the model and are tried again, `unanswered` ones reached it, gave no judgment and are stored as such. */
@@ -32,6 +33,7 @@ interface Done { judged: number; spent: number; missed: Missed | null; unanswere
 const EMPTY: ValidityReport = { judged: 0, stopped: false, held: 0, failed: [], missed: null, unanswered: null };
 const addCalls = (a: Missed | null, b: Missed | null): Missed | null => (a && b ? { calls: a.calls + b.calls, reason: a.reason } : a ?? b);
 const readKey = (sessionId: unknown, seq: unknown): string => `${String(sessionId)}:${Number(seq)}`;
+const modelOf = (deps: ValidityDeps): string => deps.judgeModel ?? VALIDITY.model;
 
 function dueOf(rows: readonly Record<string, unknown>[]): Due[] {
   return rows.reduce<Due[]>((all, r) => {
@@ -66,7 +68,7 @@ async function store(deps: ValidityDeps, due: Due, read: ReadRef, x: { inputSeqs
   const row = {
     judge: VALIDITY.judge, subject: due.subject, judge_version: VALIDITY.version, version: version + 1, session_id: read.session_id, seq: read.seq,
     verdict: update.verdict, state: update.state, evidence: update.evidence, prev_version: version || null, reason: update.reason,
-    input_seqs: x.inputSeqs, input_hash: x.hash, model: VALIDITY.model, input_tokens: answer.inputTokens, output_tokens: answer.outputTokens,
+    input_seqs: x.inputSeqs, input_hash: x.hash, model: modelOf(deps), input_tokens: answer.inputTokens, output_tokens: answer.outputTokens,
     judged_at: dorisTime((deps.now ?? (() => new Date()))().toISOString()),
   };
   await deps.load('agent_judgments', labelFor('agent_judgments', due.subject, version + 1, [row], run), [row]);
@@ -88,7 +90,7 @@ async function judgeOne(deps: ValidityDeps, due: Due, left: number, run: string)
     if (!x) continue;
     const text = `${x.text}\n\n${VALIDITY.criterion}`;
     if (done.spent + Math.ceil((FOLD_SYSTEM.length + text.length) / 4) > left) return { ...done, stopped: true };
-    const answer = await deps.model.fold(VALIDITY.model, FOLD_SYSTEM, text);
+    const answer = await deps.model.fold(modelOf(deps), FOLD_SYSTEM, text);
     done = { ...done, spent: done.spent + answer.inputTokens };
     if ('missed' in answer && answer.inputTokens === 0) return { ...done, missed: { calls: 1, reason: answer.missed } };
     await store(deps, due, read, x, answer, version, run);
