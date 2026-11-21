@@ -22,7 +22,7 @@ export const RISK_BUDGET = 200_000;
 export interface RiskJudgeDeps {
   doris: Doris; db: string; load: Load; model: JudgeModel; leases: LeaseStore;
   budget?: number; batch?: number; concurrency?: number; now?: () => Date;
-  /** The model every rule's judge uses instead of the one it has in code. */
+  /** The model every rule's judge calls instead of the one it has in code; the judge's version keeps that one. */
   judgeModel?: string;
 }
 /** A judge whose judging failed, by its rule, and why. */
@@ -99,7 +99,7 @@ async function openJudges(deps: RiskJudgeDeps): Promise<{ taken: RiskJudge[]; op
   let taken: RiskJudge[] = [];
   let open: Open[] = [];
   let report = EMPTY;
-  for (const j of RISK_JUDGES.map((r) => (deps.judgeModel ? { ...r, model: deps.judgeModel } : r))) {
+  for (const j of RISK_JUDGES) {
     if (!(await renew(deps, j))) {
       report = { ...report, held: report.held + 1 };
       continue;
@@ -108,7 +108,7 @@ async function openJudges(deps: RiskJudgeDeps): Promise<{ taken: RiskJudge[]; op
     try {
       await publish(deps, j);
       const risks = await unjudged(deps, j);
-      if (risks.length) open = [...open, { judge: j, risks, batches: 0 }];
+      if (risks.length) open = [...open, { judge: deps.judgeModel ? { ...j, model: deps.judgeModel } : j, risks, batches: 0 }];
     } catch (e) {
       report = { ...report, failed: [...report.failed, { rule: j.rule, error: (e as Error).message }] };
     }

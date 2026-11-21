@@ -33,6 +33,17 @@ export class GeminiError extends Error {
 interface ClientOptions { apiKey: string | undefined; fetch?: typeof fetch; baseUrl?: string; wait?: (ms: number) => Promise<void> }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/** What a key can hold: visible ASCII, so it is never echoed back in the error of a header it breaks. */
+const KEY = /^[\x21-\x7e]+$/;
+
+/** Why fetch got no answer, when the connection failed or the call timed out; null for any other error. */
+function unreached(e: unknown): string | null {
+  if (!(e instanceof Error)) return null;
+  if (e.name === 'TimeoutError' || e.name === 'AbortError') return 'the call timed out';
+  if (!(e instanceof TypeError) || e.message !== 'fetch failed') return null;
+  const code = (e.cause as { code?: unknown } | undefined)?.code;
+  return typeof code === 'string' ? `fetch failed (${code})` : 'fetch failed';
+}
 const retryable = (e: GeminiError): boolean => e.status === 0 || e.status === 429 || e.status >= 500;
 
 function replyOf(d: Record<string, any>): GeminiReply {
@@ -59,6 +70,7 @@ export function geminiClient(o: ClientOptions): GeminiClient {
   return {
     async generate(model, system, text, schema) {
       if (!o.apiKey) throw new ModelAccessError('The model cannot be used: GEMINI_API_KEY is not set');
+      if (!KEY.test(o.apiKey)) throw new ModelAccessError('The model cannot be used: GEMINI_API_KEY holds characters a key cannot have');
       const body = JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: 'user', parts: [{ text }] }],
@@ -73,7 +85,9 @@ export function geminiClient(o: ClientOptions): GeminiClient {
           if (res.ok) return replyOf((await res.json()) as Record<string, any>);
           last = await errorOf(res);
         } catch (e) {
-          last = new GeminiError(0, 'UNREACHABLE', (e as Error).message);
+          const why = unreached(e);
+          if (why === null) throw e;
+          last = new GeminiError(0, 'UNREACHABLE', why);
         }
         if (!retryable(last)) break;
       }

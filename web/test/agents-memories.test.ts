@@ -68,6 +68,6 @@ test('what the validity fold found in words: the evidence of a session, and what
   assert.equal(stateNote('outdated', 'claude-code'), 'The validity judge found that a session that read it shows it no longer holds; the agent or a person should revise it.');
   assert.equal(judgedBy([]), null);
   assert.equal(judgedBy([{ judge_version: 1, model: 'claude-haiku-5-5', state: null }, { judge_version: 1, model: 'claude-haiku-5-5', state: 'holds' }]),
-    'Judged by the validity judge, version 1, with claude-haiku-5-5, in 2 updates.');
+    'Judged by the validity judge, version 1, in 2 updates; the last with claude-haiku-5-5.');
   assert.deepEqual(MEMORIES.columns.find((c) => c.name === 'still_valid')!.values, ['holds', 'doubt', 'outdated', 'unjudged', 'unused', 'unrecorded']);
 });

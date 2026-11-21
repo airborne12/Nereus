@@ -20,7 +20,7 @@ export const VALIDITY_BUDGET = 100_000;
 /** A session quiet this long is taken to have finished its last turn. */
 const QUIET_MS = 10 * 60_000;
 
-/** `judgeModel` is the model the fold uses instead of the one it has in code. */
+/** `judgeModel` is the model the fold's calls use instead of the one it has in code; the judge's version keeps that one. */
 export interface ValidityDeps { doris: Doris; db: string; load: Load; model: FoldModel; leases: LeaseStore; budget?: number; now?: () => Date; judgeModel?: string }
 /** A memory whose judging failed, by its agent, scope and name, and why. */
 export interface ValidityFailed { memory: string; error: string }
@@ -58,7 +58,7 @@ function soFar(rows: readonly Record<string, unknown>[]): { version: number; pri
 }
 
 async function publish(deps: ValidityDeps): Promise<void> {
-  const row = { judge: VALIDITY.judge, version: VALIDITY.version, name: VALIDITY.name, form: 'fold', pick: { subject: 'memory' }, reads: { kind: 'memory-read' }, criterion: VALIDITY.criterion, model: modelOf(deps), created_at: VALIDITY.createdAt, created_by: 'nereus' };
+  const row = { judge: VALIDITY.judge, version: VALIDITY.version, name: VALIDITY.name, form: 'fold', pick: { subject: 'memory' }, reads: { kind: 'memory-read' }, criterion: VALIDITY.criterion, model: VALIDITY.model, created_at: VALIDITY.createdAt, created_by: 'nereus' };
   await deps.load('agent_judges', labelFor('agent_judges', VALIDITY.judge, 0, [row]), [row]);
 }
 

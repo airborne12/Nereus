@@ -308,9 +308,13 @@ which uses it for a try on a few steps. A model named `gemini-*` (offered: `gemi
 called on the Gemini API with `GEMINI_API_KEY` instead, with the same JSON schemas, retries and
 rules: a key, permission, region or model that is wrong stops the run. `JUDGE_MODEL` names the
 model of the judges kept in code, the risk judges and the validity fold (each keeps
-`claude-haiku-5-5` unless set); every verdict and update records the model that gave it. Where the
-Gemini API is reached through a proxy, set it for the command or the service with
-`NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://<proxy>`, keeping local services in `NO_PROXY`. The model is called four steps at a time, and a run stops
+`claude-haiku-5-5` unless set). It applies to the verdicts and updates made from then on, each of
+which records the model that gave it; the judges' versions keep the model they have in code, and
+what was judged before is not judged again. Where the Gemini API is reached through a proxy, set it
+for the command or the service with `NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://<proxy>`, keeping
+local services (Doris, its BE and PostgreSQL) in `NO_PROXY`.
+
+The model is called four steps at a time, and a run stops
 before such a chunk would take it over its budget of input tokens (2,000,000 unless the request
 gives another), estimated from the text and from what calls have taken so far. A call that still
 fails after the SDK's retries gives an `unsure` verdict that says why; a key, permission or model
@@ -321,7 +325,8 @@ runner that holds a run writes to it. For one step the model reads at most 40,00
 block cut at 2,000, with the arguments of a call when they say more than its target. The record
 is marked as data, not instructions, and its text is escaped so that it cannot open or close the
 record's own tags. Saving, changing, rerunning and trying judges are for admins. `npm test` skips
-the one test that calls the real model unless `MODEL_TEST=1`.
+the tests that call a real model unless `MODEL_TEST=1` (`judge-model.real.test.ts` with
+`ANTHROPIC_API_KEY`, `gemini-model.real.test.ts` with `GEMINI_API_KEY`).
 
 The same command then judges the safety risks. Each rule has a judge, `risk-<rule>`, whose criterion
 is kept in code beside the rules (`server/src/semantics/judges/risk-judges.ts`); it judges each risk

@@ -144,11 +144,12 @@ test('a budget of 0 turns the pass off', async () => {
   assert.deepEqual(await judgeMemories({ doris: quiet, db: 'otel', load: loader().load, model: model().m, leases: leases().store, budget: 0 }), { judged: 0, stopped: false, held: 0, failed: [], missed: null, unanswered: null });
 });
 
-test('with a model given, the fold asks it and records it on the judge and on each update', async () => {
+test('with a model given, the fold asks it and each update records it; the judge version stays as it is', async () => {
   const { load, loads } = loader();
   const asked: string[] = [];
   const watching: FoldModel = { fold: async (m, s, t) => { asked.push(m); return model().m.fold(m, s, t); } };
   await judgeMemories({ doris: doris().d, db: 'otel', load, model: watching, leases: leases().store, now: NOW, judgeModel: 'gemini-3.5-flash' });
   assert.deepEqual([...new Set(asked)], ['gemini-3.5-flash']);
-  assert.deepEqual([...new Set(loads.flatMap((l) => l.rows.map((r) => r.model)))], ['gemini-3.5-flash']);
+  assert.deepEqual([...new Set(loads.filter((l) => l.table === 'agent_judges').flatMap((l) => l.rows.map((r) => r.model)))], ['claude-haiku-5-5'], 'the version keeps the model it has in code');
+  assert.deepEqual([...new Set(loads.filter((l) => l.table === 'agent_judgments').flatMap((l) => l.rows.map((r) => r.model)))], ['gemini-3.5-flash']);
 });

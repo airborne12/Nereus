@@ -33,11 +33,11 @@ const EVIDENCE: Record<string, string> = { supports: 'Supports', conflicts: 'Con
 /** What a session that read a memory was to it, in words; an update without evidence is a call that gave no judgment. */
 export const evidenceLabel = (e: unknown): string => EVIDENCE[text(e)] ?? 'No judgment';
 
-/** Which judge and model gave a memory's state, from its updates newest first; null before the first. */
+/** Which judge gave a memory's state and the model of its last update, from its updates newest first; null before the first. */
 export function judgedBy(history: readonly Row[]): string | null {
   const last = history.find((h) => h.state !== null && h.state !== undefined) ?? history[0];
   if (!last) return null;
-  return `Judged by the validity judge, version ${text(last.judge_version)}, with ${text(last.model)}, in ${plural(history.length, 'update')}.`;
+  return `Judged by the validity judge, version ${text(last.judge_version)}, in ${plural(history.length, 'update')}; the last with ${text(last.model)}.`;
 }
 
 /** What a state means for a memory of `agent`. */

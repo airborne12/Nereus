@@ -63,7 +63,7 @@ test('a call that fails for a while is tried three times, then did not reach the
   const busy = client([[503, error(503, 'UNAVAILABLE', 'overloaded')]]);
   const got = await geminiJudge(busy.c).judge('gemini-3.5-flash', 'c', 'x');
   assert.deepEqual([got.verdict, got.reason, got.inputTokens, busy.sent.length], ['unsure', 'The model could not be reached: overloaded', 0, 3]);
-  const later = client([[429, error(429, 'RESOURCE_EXHAUSTED', 'quota')], new Error('socket hang up'), [200, reply('{"verdict":"ok","reason":"Fine."}')]]);
+  const later = client([[429, error(429, 'RESOURCE_EXHAUSTED', 'quota')], new TypeError('fetch failed', { cause: { code: 'ECONNRESET' } }), [200, reply('{"verdict":"ok","reason":"Fine."}')]]);
   assert.equal((await geminiJudge(later.c).judge('gemini-3.5-flash', 'c', 'x')).verdict, 'ok');
   assert.equal(later.sent.length, 3);
   const refused = await geminiJudge(client([[400, error(400, 'INVALID_ARGUMENT', 'bad schema')]]).c).judge('gemini-3.5-flash', 'c', 'x');
@@ -80,6 +80,24 @@ test('a key, permission, region or model that is wrong stops the pass; so does a
     await assert.rejects(geminiJudge(client([[status, body]]).c).judge('gemini-3.5-flash', 'c', 'x'), ModelAccessError, `${status}`);
   }
   await assert.rejects(geminiJudge(geminiClient({ apiKey: undefined })).judge('gemini-3.5-flash', 'c', 'x'), /GEMINI_API_KEY is not set/);
+});
+
+test('a key with characters a key cannot have stops the pass without being sent or quoted', async () => {
+  const s = stubFetch([[200, reply('{"verdict":"ok","reason":"x"}')]]);
+  const judged = geminiJudge(geminiClient({ apiKey: 'k-1\nsecret-part', fetch: s.f })).judge('gemini-3.5-flash', 'c', 'x');
+  await assert.rejects(judged, (e: Error) => e instanceof ModelAccessError && /GEMINI_API_KEY/.test(e.message) && !e.message.includes('secret-part'));
+  assert.equal(s.sent.length, 0);
+});
+
+test('only a connection or a timeout counts as not reaching the model, with its cause; another error is thrown', async () => {
+  const refused = client([new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } })]);
+  const got = await geminiJudge(refused.c).judge('gemini-3.5-flash', 'c', 'x');
+  assert.deepEqual([got.reason, refused.sent.length], ['The model could not be reached: fetch failed (ECONNREFUSED)', 3]);
+  const slow = await geminiJudge(client([Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })]).c).judge('gemini-3.5-flash', 'c', 'x');
+  assert.equal(slow.reason, 'The model could not be reached: the call timed out');
+  const odd = client([new RangeError('something else')]);
+  await assert.rejects(geminiJudge(odd.c).judge('gemini-3.5-flash', 'c', 'x'), RangeError);
+  assert.equal(odd.sent.length, 1);
 });
 
 test('one update of the fold: its schema, the update, a missed call and what stops the pass', async () => {
